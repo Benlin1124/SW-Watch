@@ -1,8 +1,9 @@
 """測站:合併 O-A0001-001(自動站)、O-A0003-001(局屬站)、O-A0002-001(雨量站)
 → data/stations/{stamp}.json(所有變數一個檔,前端切換變數不用重抓)
+過去 1/2/3/6 小時最大最小 → data/stations/agg_{N}h/{stamp}.json(station_agg)
 並用同一批雨量做 IDW → data/rain/idw/{acc}/{stamp}.bin.gz。"""
 from .common import check_update, fetch_cwa, log, save_points, twd67_to_wgs84, utc_stamp
-from . import config, idw, station_series
+from . import config, idw, station_agg, station_series
 
 LAYER = "stations"
 
@@ -92,6 +93,7 @@ def run():
                 fields=FIELDS, source="CWA O-A0001-001 / O-A0003-001 / O-A0002-001")
     log.info("stations %s 完成(%d 站)", stamp, len(rows))
     station_series.append(snapshot)
+    station_agg.run(stamp)
     idw.run(stamp, recs)
     return status, stamp, prev
 

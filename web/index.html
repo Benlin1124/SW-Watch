@@ -34,6 +34,28 @@
         </div>
       </div>
 
+      <div class="layer" data-layer="stations">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-stations" checked>
+          <span class="layer-name">測站觀測</span>
+          <span class="layer-time" id="time-stations">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>變數 <select id="st-var"></select></label>
+          <label>顯示
+            <select id="st-stat">
+              <option value="now">當下值</option>
+              <option value="max">過去最大</option>
+              <option value="min">過去最小</option>
+            </select>
+            <select id="st-hours" disabled>
+              <option value="1">1 小時</option><option value="2">2 小時</option>
+              <option value="3">3 小時</option><option value="6">6 小時</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
       <div class="layer" data-layer="typhoon">
         <label class="layer-head">
           <input type="checkbox" id="chk-typhoon" checked>

@@ -3,6 +3,7 @@ import { REFRESH_SEC, STEP_MIN, TIMELINE_DAYS } from './config.js';
 import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
 import { RadarLayer } from './layers/radar.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
+import { STATION_VARS, StationLayer } from './layers/stations.js';
 import { EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
 import { getJSON } from './data.js';
 
@@ -83,10 +84,12 @@ function setTheme(name) {
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
 
+window.swMap = map;     // 除錯 / 之後截圖功能用
 const radar = new RadarLayer(map);
 const typhoon = new TyphoonLayer(map);
 const ens = new EnsembleLayer(map);
-const LAYERS = [radar, typhoon, ens];
+const stations = new StationLayer(map);
+const LAYERS = [radar, stations, typhoon, ens];
 
 // ── 狀態 ──
 const state = {
@@ -142,6 +145,12 @@ function updateLayerTime(l, stamp, sync) {
     updateEnsValidLabel();
     return;
   }
+  const custom = l.timeLabel?.(stamp);
+  if (custom) {
+    el.textContent = custom.text;
+    if (custom.stale) el.classList.add('stale');
+    return;
+  }
   const age = Math.round(diffMin(nowStamp(), stamp));
   el.textContent = fmtTW(stamp);
   if (!sync && age > 20) { el.textContent += `（${age} 分前）`; el.classList.add('stale'); }
@@ -194,7 +203,7 @@ function drawCoverage() {
   ctx.clearRect(0, 0, w, h);
   const n = state.slots.length;
   if (!n) return;
-  const rows = [[radar, '#4fc3f7'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
+  const rows = [[radar, '#4fc3f7'], [stations, '#81c784'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
   const rh = h / rows.length;
   const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
   rows.forEach(([l, color], r) => {
@@ -253,9 +262,10 @@ async function play() {
   state.wasSync = state.sync;
   state.playing = true;
   $('btn-play').textContent = '⏸';
-  if (radar.visible) {
-    await radar.prefetch(frames.filter((t) => radar.times.includes(t)),
-      (d, n) => toast(`載入雷達 ${d}/${n}`, d === n ? 600 : 0));
+  for (const l of enabled().filter((x) => x.prefetch)) {
+    if (!state.playing) break;
+    await l.prefetch(frames.filter((t) => l.times.includes(t)),
+      (d, n) => toast(`載入${l.name} ${d}/${n}`, d === n ? 600 : 0));
   }
   if (!state.playing) return;
   state.frames = frames;
@@ -454,6 +464,36 @@ function bindEnsUI() {
   }
 }
 
+// ── 測站面板 ──
+function updateLegend() {
+  const parts = [radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  $('legend').innerHTML = parts.join('');
+  $('legend').style.display = parts.length ? '' : 'none';
+}
+
+function bindStationUI() {
+  const vSel = $('st-var');
+  vSel.innerHTML = Object.entries(STATION_VARS).map(([k, v]) => `<option value="${k}">${v.name}${v.agg ? '' : '（僅當下）'}</option>`).join('');
+  vSel.value = stations.variable;
+  const apply = async () => {
+    const v = STATION_VARS[vSel.value];
+    if (!v.agg) $('st-stat').value = 'now';
+    $('st-stat').disabled = !v.agg;
+    $('st-hours').disabled = !v.agg || $('st-stat').value === 'now';
+    const changed = await stations.configure({ variable: vSel.value, stat: $('st-stat').value, hours: +$('st-hours').value });
+    if (changed) {           // 最大 / 最小有自己的時間列表(缺漏不同)
+      buildSlots();
+      refreshSlider();
+    }
+    updateLegend();
+    render();
+  };
+  vSel.onchange = apply;
+  $('st-stat').onchange = apply;
+  $('st-hours').onchange = apply;
+  $('chk-stations').onchange = (e) => { stations.setVisible(e.target.checked); updateLegend(); };
+}
+
 // ── 綁定 UI ──
 function bindUI() {
   $('btn-sync').onclick = () => {
@@ -475,7 +515,8 @@ function bindUI() {
     if (e.key === ' ') { e.preventDefault(); play(); }
   });
 
-  $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); $('legend').style.display = e.target.checked ? '' : 'none'; };
+  $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); };
+  bindStationUI();
   $('op-radar').oninput = (e) => radar.setOpacity(e.target.value / 100);
   $('chk-typhoon').onchange = (e) => typhoon.setVisible(e.target.checked);
   $('ty-issue').onchange = (e) => { typhoon.fixedIssue = e.target.value; render(); };
@@ -509,8 +550,9 @@ map.on('load', async () => {
   typhoon.addTo();
   ens.addTo('ty-cone-fill');
   addOverlays('ens-members');
+  stations.addTo('ens-members');
   setTheme('light');
-  $('legend').innerHTML = radar.legend();
+  updateLegend();
   await render();
 
   setInterval(async () => {
