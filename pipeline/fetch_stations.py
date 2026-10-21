@@ -2,7 +2,7 @@
 → data/stations/{stamp}.json(所有變數一個檔,前端切換變數不用重抓)
 並用同一批雨量做 IDW → data/rain/idw/{acc}/{stamp}.bin.gz。"""
 from .common import fetch_cwa, log, save_points, utc_stamp
-from . import config, idw
+from . import config, idw, station_series
 
 LAYER = "stations"
 
@@ -85,9 +85,11 @@ def collect():
 def run():
     stamp, recs = collect()
     rows = [[r.get(f) for f in FIELDS] for r in recs]
-    save_points(LAYER, stamp, {"time": stamp, "fields": FIELDS, "rows": rows},
+    snapshot = {"time": stamp, "fields": FIELDS, "rows": rows}
+    save_points(LAYER, stamp, snapshot,
                 fields=FIELDS, source="CWA O-A0001-001 / O-A0003-001 / O-A0002-001")
     log.info("stations %s 完成(%d 站)", stamp, len(rows))
+    station_series.append(snapshot)
     idw.run(stamp, recs)
     return stamp
 

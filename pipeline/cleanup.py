@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import config
 from .common import log, save_json
+from .station_series import compress_old_months
 
 SKIP = ("typhoon",)
 
@@ -24,6 +25,7 @@ def run():
         idx["times"] = [t for t in idx["times"] if t not in set(drop)]
         save_json(idx_path, idx)
         log.info("cleanup %s:刪除 %d 筆", rel, len(drop))
+    compress_old_months()
 
 
 if __name__ == "__main__":
