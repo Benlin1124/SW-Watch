@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -14,6 +16,9 @@ import requests
 from . import config
 
 log = logging.getLogger("pipeline")
+
+# 排程的工作在不同執行緒同時跑,共用檔案(status.json、usage.json、history、index)的讀改寫要上鎖
+_io_lock = threading.RLock()
 
 
 # ── 時間 ─────────────────────────────────────────────
@@ -41,15 +46,66 @@ def twd67_to_wgs84(lon, lat):
 
 
 # ── 下載 ─────────────────────────────────────────────
-def fetch_cwa(code, timeout=90):
-    """抓 CWA fileapi JSON,回傳 cwaopendata 底下的 dict。
-    只請求一次;失敗由排程在 RETRY_DELAY_SEC 後重試(CWA API 有請求次數上限)。"""
+# CWA fileapi 會 302 轉址到 S3(cwaopendata.s3...),S3 支援 ETag 條件式請求:
+# 沒更新 → 304、0 byte。所以只在解析轉址時呼叫 fileapi(計入會員每日 2 萬次),
+# 之後直接對 S3 做條件式 GET,每分鐘輪詢也幾乎不耗流量。
+_resolved = {}   # code → (S3 網址 或 None, 解析時間)
+_cache = {}      # code → (ETag, 解析後的 cwaopendata)
+
+
+def _count(**inc):
+    """每日用量(台灣日期):api_requests = fileapi 次數、s3_requests、bytes = 實際下載量。"""
+    path = config.LOG_DIR / "usage.json"
+    day = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d")
+    with _io_lock:
+        usage = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        d = usage.setdefault(day, {"api_requests": 0, "s3_requests": 0, "not_modified": 0, "bytes": 0})
+        for k, v in inc.items():
+            d[k] = d.get(k, 0) + v
+        for old in sorted(usage)[:-30]:      # 只留 30 天
+            del usage[old]
+        save_json(path, usage)
+
+
+def _resolve(code):
+    """呼叫 fileapi 取得 S3 轉址(不跟隨);沒有轉址就回 None,改走 fileapi 直接下載。"""
     if not config.CWA_KEY:
         raise RuntimeError("未設定 CWA_KEY(請在專案根目錄 .env 加上 CWA_KEY=...)")
-    url = config.CWA_FILEAPI.format(code=code, key=config.CWA_KEY)
-    r = requests.get(url, timeout=timeout, allow_redirects=True)
+    r = requests.get(config.CWA_FILEAPI.format(code=code, key=config.CWA_KEY),
+                     timeout=30, allow_redirects=False)
+    _count(api_requests=1)
+    if r.status_code in (301, 302, 303, 307, 308):
+        return r.headers["Location"]
     r.raise_for_status()
-    return r.json()["cwaopendata"]
+    return None
+
+
+def fetch_cwa(code, timeout=90):
+    """抓 CWA 資料,回傳 cwaopendata 底下的 dict。
+    來源沒更新時(304)直接回傳上次的內容,由各工作的資料時間判斷是否為新資料。
+    只請求一次,不在內部重試;失敗由排程下一分鐘再試。"""
+    url, at = _resolved.get(code, (None, 0))
+    if code not in _resolved or time.time() - at > config.CWA_RESOLVE_TTL_SEC:
+        url = _resolve(code)
+        _resolved[code] = (url, time.time())
+    if url is None:
+        r = requests.get(config.CWA_FILEAPI.format(code=code, key=config.CWA_KEY), timeout=timeout)
+        _count(api_requests=1, bytes=len(r.content))
+        r.raise_for_status()
+        return r.json()["cwaopendata"]
+
+    headers = {"If-None-Match": _cache[code][0]} if code in _cache else {}
+    r = requests.get(url, headers=headers, timeout=timeout)
+    if r.status_code == 304:
+        _count(s3_requests=1, not_modified=1)
+        return _cache[code][1]
+    _count(s3_requests=1, bytes=len(r.content))
+    if r.status_code in (403, 404):
+        _resolved.pop(code, None)        # 轉址失效,下次重新向 fileapi 解析
+    r.raise_for_status()
+    data = r.json()["cwaopendata"]
+    _cache[code] = (r.headers.get("ETag"), data)
+    return data
 
 
 def parse_grid(text, nx, ny, invalid=()):
@@ -96,7 +152,7 @@ def quantize(arr, spec):
 # ── 存檔 ─────────────────────────────────────────────
 def _atomic_write(path, data: bytes):
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
     tmp.write_bytes(data)
     os.replace(tmp, path)
 
@@ -122,20 +178,21 @@ def read_index(layer):
 def update_index(layer, stamp, **meta):
     """把 stamp 加進 data/{layer}/index.json 的 times(排序去重),並更新 meta 欄位。
     fetched[stamp] = 這筆資料實際抓到的時間(UTC 到秒),可算出上架延遲。"""
-    idx = read_index(layer)
-    idx.update(meta)
-    idx["layer"] = layer
-    idx["times"] = sorted(set(idx["times"]) | {stamp})
-    idx["latest"] = idx["times"][-1]
-    idx.setdefault("fetched", {})[stamp] = now_stamp(seconds=True)
-    idx["updated"] = now_stamp(seconds=True)
-    save_json(layer_dir(layer) / "index.json", idx)
+    with _io_lock:
+        idx = read_index(layer)
+        idx.update(meta)
+        idx["layer"] = layer
+        idx["times"] = sorted(set(idx["times"]) | {stamp})
+        idx["latest"] = idx["times"][-1]
+        idx.setdefault("fetched", {})[stamp] = now_stamp(seconds=True)
+        idx["updated"] = now_stamp(seconds=True)
+        save_json(layer_dir(layer) / "index.json", idx)
 
 
 # ── 更新檢查與狀態紀錄 ─────────────────────────────────
 def check_update(layer, stamp, ext=".bin.gz"):
     """和上一筆比較:回傳 (狀態, 上一筆時間)。
-    new = 比上一筆新;same = 和上一筆相同(來源尚未更新,排程再依時間判斷是否為 late 逾時);
+    new = 比上一筆新;same = 和上一筆相同(來源尚未更新;到了擷取期限仍是 same,排程記為 missed);
     older = 比上一筆舊(來源異常);
     exists = 不是最新但檔案已存在(例如補抓)。"""
     prev = read_index(layer).get("latest")
@@ -150,6 +207,12 @@ def check_update(layer, stamp, ext=".bin.gz"):
 
 STATUS_PATH = config.DATA_DIR / "status.json"
 HISTORY_PATH = config.LOG_DIR / "fetch_history.csv"
+
+
+def read_status(job):
+    with _io_lock:
+        st = json.loads(STATUS_PATH.read_text(encoding="utf-8")) if STATUS_PATH.exists() else {}
+    return st.get(job, {})
 HISTORY_FIELDS = ["check_time", "job", "attempt", "status", "data_time", "prev_time",
                   "delay_min", "error"]
 
@@ -163,29 +226,30 @@ def record_status(job, status, data_time=None, prev_time=None, attempt=0, error=
     if data_time:
         delay = round((stamp_dt(now) - stamp_dt(data_time)).total_seconds() / 60, 1)
 
-    st = json.loads(STATUS_PATH.read_text(encoding="utf-8")) if STATUS_PATH.exists() else {}
-    s = st.setdefault(job, {})
-    s.update(last_check=now, status=status, attempt=attempt)
-    if data_time:
-        s["data_time"] = data_time
-    if status == "new":
-        s.update(prev_data_time=prev_time, last_new=now, delay_min=delay, stale_checks=0,
-                 fail_count=0)
-    elif status in ("same", "late"):
-        s["stale_checks"] = s.get("stale_checks", 0) + 1
-    if status == "error":
-        s["fail_count"] = s.get("fail_count", 0) + 1
-        s.update(last_error=error, last_error_time=now)
-    save_json(STATUS_PATH, st)
+    with _io_lock:
+        st = json.loads(STATUS_PATH.read_text(encoding="utf-8")) if STATUS_PATH.exists() else {}
+        s = st.setdefault(job, {})
+        s.update(last_check=now, status=status, attempt=attempt)
+        if data_time:
+            s["data_time"] = data_time
+        if status == "new":
+            s.update(prev_data_time=prev_time, last_new=now, delay_min=delay, stale_checks=0,
+                     fail_count=0)
+        elif status in ("same", "missed"):
+            s["stale_checks"] = s.get("stale_checks", 0) + 1
+        if status == "error":
+            s["fail_count"] = s.get("fail_count", 0) + 1
+            s.update(last_error=error, last_error_time=now)
+        save_json(STATUS_PATH, st)
 
-    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not HISTORY_PATH.exists()
-    with open(HISTORY_PATH, "a", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        if new_file:
-            w.writerow(HISTORY_FIELDS)
-        w.writerow([now, job, attempt, status, data_time or "", prev_time or "",
-                    "" if delay is None else delay, (error or "")[:200]])
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        new_file = not HISTORY_PATH.exists()
+        with open(HISTORY_PATH, "a", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            if new_file:
+                w.writerow(HISTORY_FIELDS)
+            w.writerow([now, job, attempt, status, data_time or "", prev_time or "",
+                        "" if delay is None else delay, (error or "")[:200]])
 
 
 def save_grid(layer, stamp, arr, spec, **meta):

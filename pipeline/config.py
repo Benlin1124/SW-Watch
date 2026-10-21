@@ -32,8 +32,9 @@ CWA_FILEAPI = ("https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/{code}"
 TWD67_PROJ = ("+proj=longlat +ellps=aust_SA "
               "+towgs84=-752,-358,-179,-0.0000011698,0.0000018398,0.0000009822,0.00002329 +no_defs")
 
-# ── 抓取重試 ──
-RETRY_DELAY_SEC = 60         # 失敗或資料尚未更新 → 1 分鐘後再試(CWA API 有請求次數上限,不要更密)
+# ── CWA 抓取 ──
+# 會員 API 上限:24 小時 2 萬次、每日 2 GB。fileapi 只用來解析 S3 轉址,TTL 內不重複呼叫。
+CWA_RESOLVE_TTL_SEC = 6 * 3600
 
 # ── 保留策略 ──
 KEEP_FULL_DAYS = 30          # 10 分鐘資料保留天數;更舊只留整點
