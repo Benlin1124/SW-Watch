@@ -390,3 +390,22 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 底圖：CARTO 已改為需要 API key，改用 Esri Canvas 深灰／淺灰與 World Imagery（免金鑰），地名層疊在雷達上方。
 - 測試：headless Chrome（CDP）截圖與操作驗證，無 JS 錯誤。
 - 待辦：颱風「指定發布時間」下拉選單之後要擴充成系集模式的初始時間選擇＋預報區間對齊；GitHub Pages 部署 workflow 等 R2 設好再加。
+
+### 系集路徑匯入與前端（2026-10-22）
+
+- 使用者提供 `202629CHAMPI-*.zip`：14 個初始時間（10/14 12Z ～ 10/21 00Z，每 12 小時），每個資料夾含 ECMWF、AIFS、GEFS、AIGEFS、WNV3、FNV3P1、FNV3P2 的 `*_tracks.csv`（全球所有風暴），早期資料夾另有 notebook 篩過的 `29W_*_full_tracks.csv`、根目錄有 `track_errors.csv`（各模式路徑誤差）。
+- `pipeline/ensemble.py`：
+  - `python -m pipeline.ensemble import <目錄或 zip>`；`reindex` = 用 `data/typhoon/ens_raw` 全部重新配對。
+  - **位置配對**：ECMWF／AIFS 對薔琵的代號是 36W，其他模式是 29W → 不靠代號。成員在 tau ≤ 24 h 內任一時刻距離氣象署定位（內插）≤ 300 km 就歸給該颱風；同一成員在 CSV 中有多個代號時只取最近的一條（第一次匯入成員數變 2 倍，已修正）。
+  - `*_full_tracks.csv` 不使用（改由上面的配對重算）；`track_errors.csv` 尚未使用（之後可做誤差圖）。
+  - 輸出 `data/typhoon/ens/{YYYYMMDDHH}.json`（每成員 tau／lat／lon／p 陣列，含 ftype、outlier），14 個初始時間共 3.5 MB；原始 CSV 存 `data/typhoon/ens_raw/`（34 MB）。
+  - 實測成員數：ECMWF 51、AIFS 52、GEFS 30、AIGEFS 30、WNV3 64、FNV3P1 50、FNV3P2 50。
+  - ftype：0／1 = 控制報（AIFS 有 0 和 1 各一），4 = 擾動成員。
+- 前端 `layers/ensemble.js`：
+  - 颱風選擇、共用初始時間（依時間軸／指定）、**各模式可個別指定初始時間**（沒有該時間就取 ≤ 它的最新一筆）。
+  - 預報區間兩種：**預報時距**（tau a～b 小時）／**有效時間對齊**（起點＋長度；起點「自動」= 所有使用中初始時間的最晚者，也就是大家都有預報的最早共同時刻）。
+  - 細線 = 擾動成員、粗實線 = 系集平均（每個 tau 至少 1/3 成員才畫）、虛線 = 控制報、圓點 = 起點；可排除離群成員。
+  - 實際路徑：氣象署最新一次發布的過去定位，有效時間模式下裁到同一時間窗。
+  - 點系集平均的點：模式、初始時間、tau、有效時間、位置、平均氣壓、成員數。
+- 測試：ECMWF 10/19 00Z、GEFS 10/19 12Z、WNV3 10/20 12Z → 自動起點 10/20 12Z，三條平均路徑與實際路徑從同一點出發。
+- 修正：雷達同一時間不重複 `updateImage`（連續呼叫會互相 abort，console 出現 AbortError）。

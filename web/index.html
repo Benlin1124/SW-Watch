@@ -52,6 +52,48 @@
           <div id="ty-storms"></div>
         </div>
       </div>
+
+      <div class="layer" data-layer="ens">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-ens" checked>
+          <span class="layer-name">系集路徑</span>
+          <span class="layer-time" id="time-ens">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>颱風 <select id="ens-tc"></select></label>
+          <label>初始時間 <select id="ens-init"></select></label>
+          <div id="ens-models"></div>
+          <div class="seg">
+            <label><input type="radio" name="ens-mode" value="tau" checked> 預報時距</label>
+            <label><input type="radio" name="ens-mode" value="valid"> 有效時間對齊</label>
+          </div>
+          <div id="ens-tau-box">
+            <label>
+              <input type="number" id="ens-tau-a" min="0" max="360" step="6" value="0"> ～
+              <input type="number" id="ens-tau-b" min="0" max="360" step="6" value="120"> 小時
+            </label>
+          </div>
+          <div id="ens-valid-box" hidden>
+            <label>起點 <select id="ens-valid-start"></select></label>
+            <label>長度
+              <select id="ens-valid-hours">
+                <option value="24">24 小時</option><option value="48">48 小時</option>
+                <option value="72">72 小時</option><option value="96">96 小時</option>
+                <option value="120" selected>120 小時</option><option value="168">168 小時</option>
+                <option value="240">240 小時</option>
+              </select>
+            </label>
+          </div>
+          <div class="ty-toggles">
+            <label><input type="checkbox" data-ens-opt="members" checked> 成員</label>
+            <label><input type="checkbox" data-ens-opt="mean" checked> 系集平均</label>
+            <label><input type="checkbox" data-ens-opt="control" checked> 控制報</label>
+            <label><input type="checkbox" data-ens-opt="dropOutlier" checked> 排除離群</label>
+            <label><input type="checkbox" data-ens-opt="best" checked> 實際路徑</label>
+            <label><input type="checkbox" data-ens-opt="start" checked> 起點</label>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section>

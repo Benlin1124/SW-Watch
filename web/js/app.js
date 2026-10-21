@@ -3,6 +3,8 @@ import { REFRESH_SEC, STEP_MIN, TIMELINE_DAYS } from './config.js';
 import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
 import { RadarLayer } from './layers/radar.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
+import { EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
+import { getJSON } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,7 +41,8 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
 
 const radar = new RadarLayer(map);
 const typhoon = new TyphoonLayer(map);
-const LAYERS = [radar, typhoon];
+const ens = new EnsembleLayer(map);
+const LAYERS = [radar, typhoon, ens];
 
 // ── 狀態 ──
 const state = {
@@ -86,6 +89,13 @@ function updateLayerTime(l, stamp, sync) {
   if (!stamp) { el.textContent = '無資料'; el.classList.add('nodata'); return; }
   if (l.key === 'typhoon') {
     el.textContent = `發布 ${fmtTW(stamp)}`;
+    return;
+  }
+  if (l.key === 'ens') {
+    const inits = [...new Set(Object.values(ens.resolved))];
+    el.textContent = inits.length === 1 ? `初始 ${fmtInit(inits[0])}` : inits.length ? '各模式不同' : '無資料';
+    if (!inits.length) el.classList.add('nodata');
+    updateEnsValidLabel();
     return;
   }
   const age = Math.round(diffMin(nowStamp(), stamp));
@@ -140,7 +150,7 @@ function drawCoverage() {
   ctx.clearRect(0, 0, w, h);
   const n = state.slots.length;
   if (!n) return;
-  const rows = [[radar, '#4fc3f7'], [typhoon, '#ffd54f']];
+  const rows = [[radar, '#4fc3f7'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
   const rh = h / rows.length;
   const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
   rows.forEach(([l, color], r) => {
@@ -240,6 +250,8 @@ async function reload() {
   buildSlots();
   refreshSlider();
   fillIssueSelect();
+  fillEnsPanel();
+  await loadBestTrack();
   if (!state.T || wasEnd || !state.slots.includes(state.T)) state.T = state.slots[state.slots.length - 1] ?? null;
 }
 
@@ -249,6 +261,86 @@ function fillIssueSelect() {
   sel.innerHTML = '<option value="">依時間軸</option>' +
     [...typhoon.times].reverse().map((t) => `<option value="${t}">${fmtTW(t, 'full')}</option>`).join('');
   sel.value = typhoon.times.includes(cur) ? cur : '';
+}
+
+// ── 系集面板 ──
+const optInit = (i) => `<option value="${i}">${fmtInit(i)}（台灣 ${fmtTW(`${i}00`)}）</option>`;
+
+function fillEnsPanel() {
+  if (!ens.index) return;
+  const tcSel = $('ens-tc');
+  tcSel.innerHTML = Object.entries(ens.index.tcs ?? {}).map(([id, t]) => `<option value="${id}">${t.name_zh ?? ''} ${t.name_en ?? id}</option>`).join('');
+  tcSel.value = ens.tc;
+
+  const allInits = [...new Set(Object.values(ens.index.models).flat())].sort().reverse();
+  const initSel = $('ens-init');
+  initSel.innerHTML = '<option value="">依時間軸（最新）</option>' + allInits.map(optInit).join('');
+  initSel.value = ens.baseInit;
+
+  const box = $('ens-models');
+  box.innerHTML = '';
+  for (const m of ens.models) {
+    const row = document.createElement('div');
+    row.className = 'model-row';
+    row.innerHTML = `<label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" ${ens.modelOn[m] ? 'checked' : ''}>
+      <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#ccc'}"></span>${m}</label>
+      <select><option value="">同上</option>${[...ens.index.models[m]].reverse().map((i) => `<option value="${i}">${fmtInit(i)}</option>`).join('')}</select>`;
+    const [chk, sel] = [row.querySelector('input'), row.querySelector('select')];
+    sel.value = ens.modelInit[m];
+    chk.onchange = () => { ens.modelOn[m] = chk.checked; render(); };
+    sel.onchange = () => { ens.modelInit[m] = sel.value; render(); };
+    box.appendChild(row);
+  }
+
+  const vs = $('ens-valid-start');
+  vs.innerHTML = '<option value="">自動</option>' + ens.validChoices().map((t) => `<option value="${t}">${fmtTW(t)}（${t.slice(6, 8)}日${t.slice(8, 10)}Z）</option>`).join('');
+  vs.value = ens.validStart;
+}
+
+/** 有效時間「自動」顯示目前算出來的起點 */
+function updateEnsValidLabel() {
+  const opt = $('ens-valid-start').options[0];
+  if (!opt) return;
+  const s = ens.validStart ? null : ens.windowStart();
+  opt.textContent = s ? `自動（${fmtTW(s)}）` : '自動';
+}
+
+/** 實際路徑:最新一次氣象署颱風資料裡的過去定位 */
+async function loadBestTrack() {
+  if (!typhoon.latest) return;
+  try {
+    const d = await getJSON(`typhoon/cwa_track/${typhoon.latest}.json`);
+    const s = d.storms.find((x) => x.id === ens.tc);
+    ens.setBestTrack(s ? s.past : null);
+  } catch (e) { console.warn('best track', e); }
+}
+
+function bindEnsUI() {
+  $('chk-ens').onchange = (e) => ens.setVisible(e.target.checked);
+  $('ens-tc').onchange = async (e) => { ens.tc = e.target.value; await loadBestTrack(); ens.draw(); };
+  $('ens-init').onchange = (e) => { ens.baseInit = e.target.value; render(); };
+  for (const r of document.querySelectorAll('input[name=ens-mode]')) {
+    r.onchange = () => {
+      ens.mode = r.value;
+      $('ens-tau-box').hidden = ens.mode !== 'tau';
+      $('ens-valid-box').hidden = ens.mode !== 'valid';
+      ens.draw();
+      updateEnsValidLabel();
+    };
+  }
+  const tauChange = () => {
+    let a = +$('ens-tau-a').value, b = +$('ens-tau-b').value;
+    if (a > b) [a, b] = [b, a];
+    ens.tauRange = [a, b];
+    ens.draw();
+  };
+  $('ens-tau-a').onchange = tauChange;
+  $('ens-tau-b').onchange = tauChange;
+  $('ens-valid-start').onchange = (e) => { ens.validStart = e.target.value; ens.draw(); updateEnsValidLabel(); };
+  $('ens-valid-hours').onchange = (e) => { ens.validHours = +e.target.value; ens.draw(); };
+  for (const c of document.querySelectorAll('[data-ens-opt]')) {
+    c.onchange = () => { ens.opts[c.dataset.ensOpt] = c.checked; ens.draw(); };
+  }
 }
 
 // ── 綁定 UI ──
@@ -297,12 +389,14 @@ function bindUI() {
 
 map.on('load', async () => {
   bindUI();
+  bindEnsUI();
   setSync(true);
   await reload();
   radar.addTo();
   typhoon.addTo();
+  ens.addTo('ty-cone-fill');
   for (const k of Object.keys(BASEMAPS)) {   // 地名、行政界線疊在雷達上面
-    map.addLayer({ id: `label-${k}`, type: 'raster', source: `label-${k}`, layout: { visibility: k === 'dark' ? 'visible' : 'none' } }, 'ty-cone-fill');
+    map.addLayer({ id: `label-${k}`, type: 'raster', source: `label-${k}`, layout: { visibility: k === 'dark' ? 'visible' : 'none' } }, 'ens-members');
   }
   $('legend').innerHTML = radar.legend();
   await render();

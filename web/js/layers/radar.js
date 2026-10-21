@@ -77,9 +77,11 @@ export class RadarLayer {
   }
 
   async show(stamp) {
+    if (stamp && this.current?.stamp === stamp) return;   // 同一張不重載(連續 updateImage 會互相中斷)
     this.wanted = stamp;
     const src = this.map.getSource('radar');
     if (!stamp) {
+      if (!this.current) return;
       src.updateImage({ url: EMPTY_PNG, coordinates: this.index.grid.corners });
       this.current = null;
       return;
