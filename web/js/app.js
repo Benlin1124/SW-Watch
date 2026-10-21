@@ -8,34 +8,78 @@ import { getJSON } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 
-// ── 底圖(免金鑰的點陣圖磚;CARTO 已改為需要金鑰,改用 Esri)──
-const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
-const BASEMAPS = {
-  dark: { tiles: [`${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`],
-    labels: `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, maxzoom: 16 },
-  light: { tiles: [`${ESRI}/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}`],
-    labels: `${ESRI}/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, maxzoom: 16 },
-  imagery: { tiles: [`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`],
-    labels: `${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, maxzoom: 18 },
+// ── 底圖:素色向量(Natural Earth 10m + NCDR 縣市界,仿 notebook 的 cartopy 底圖)──
+// 產生方式見 pipeline/build_basemap.py;另保留 Esri 衛星影像
+const BASE = new URL('../assets/basemap/', import.meta.url).href;
+const THEMES = {
+  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#555555', county: '#000000', grid: 'rgba(0,0,0,0.18)', imagery: false },
+  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#a9b1bd', border: '#7d8590', county: '#c9d1dc', grid: 'rgba(255,255,255,0.12)', imagery: false },
+  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#dddddd', county: '#ffffff', grid: 'rgba(255,255,255,0.25)', imagery: true },
 };
-const ATTRIBUTION = 'Basemap © Esri';
 
+/** 經緯網格:每 5° 一條(全部縮放),放大後加 1° 細線 */
+function graticule() {
+  const f = [];
+  for (let lon = 90; lon <= 180; lon += 1) {
+    f.push({ type: 'Feature', properties: { major: lon % 5 === 0 }, geometry: { type: 'LineString', coordinates: [[lon, -15], [lon, 60]] } });
+  }
+  for (let lat = -15; lat <= 60; lat += 1) {
+    f.push({ type: 'Feature', properties: { major: lat % 5 === 0 }, geometry: { type: 'LineString', coordinates: [[90, lat], [180, lat]] } });
+  }
+  return { type: 'FeatureCollection', features: f };
+}
+
+const th0 = THEMES.light;
 const map = new maplibregl.Map({
   container: 'map',
   style: {
     version: 8,
-    sources: Object.fromEntries(Object.entries(BASEMAPS).flatMap(([k, b]) => [
-      [`base-${k}`, { type: 'raster', tileSize: 256, tiles: b.tiles, maxzoom: b.maxzoom, attribution: ATTRIBUTION }],
-      [`label-${k}`, { type: 'raster', tileSize: 256, tiles: [b.labels], maxzoom: b.maxzoom }],
-    ])),
-    layers: Object.keys(BASEMAPS).map((k) => ({
-      id: `base-${k}`, type: 'raster', source: `base-${k}`, layout: { visibility: k === 'dark' ? 'visible' : 'none' },
-    })),
+    sources: {
+      land: { type: 'geojson', data: `${BASE}land.json`, attribution: 'Natural Earth' },
+      imagery: { type: 'raster', tileSize: 256, maxzoom: 18, attribution: 'Imagery © Esri',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'] },
+    },
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': th0.bg } },
+      { id: 'imagery', type: 'raster', source: 'imagery', layout: { visibility: 'none' } },
+      { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': th0.land } },
+    ],
   },
   center: [121, 23.7],
   zoom: 6.2,
-  attributionControl: { compact: true, customAttribution: '資料：中央氣象署' },
+  attributionControl: { compact: true, customAttribution: '資料：中央氣象署、NCDR' },
 });
+
+/** 海岸線、國界、縣市界、經緯網格疊在雷達上面(同 notebook:先畫資料再畫邊界) */
+function addOverlays(beforeId) {
+  const th = THEMES.light;
+  map.addSource('coast', { type: 'geojson', data: `${BASE}coast.json` });
+  map.addSource('borders', { type: 'geojson', data: `${BASE}borders.json` });
+  map.addSource('county', { type: 'geojson', data: `${BASE}taiwan.json` });
+  map.addSource('grid', { type: 'geojson', data: graticule() });
+  map.addLayer({ id: 'grid-minor', type: 'line', source: 'grid', minzoom: 5.5, filter: ['!', ['get', 'major']],
+    paint: { 'line-color': th.grid, 'line-width': 0.5 } }, beforeId);
+  map.addLayer({ id: 'grid-major', type: 'line', source: 'grid', filter: ['get', 'major'],
+    paint: { 'line-color': th.grid, 'line-width': 0.8 } }, beforeId);
+  map.addLayer({ id: 'coast', type: 'line', source: 'coast', paint: { 'line-color': th.coast, 'line-width': 0.8 } }, beforeId);
+  map.addLayer({ id: 'borders', type: 'line', source: 'borders', paint: { 'line-color': th.border, 'line-width': 0.7 } }, beforeId);
+  map.addLayer({ id: 'county', type: 'line', source: 'county', paint: { 'line-color': th.county, 'line-width': 0.8 } }, beforeId);
+}
+
+function setTheme(name) {
+  const th = THEMES[name];
+  map.setPaintProperty('bg', 'background-color', th.bg);
+  map.setPaintProperty('land', 'fill-color', th.land);
+  map.setLayoutProperty('land', 'visibility', th.imagery ? 'none' : 'visible');
+  map.setLayoutProperty('imagery', 'visibility', th.imagery ? 'visible' : 'none');
+  map.setPaintProperty('coast', 'line-color', th.coast);
+  map.setPaintProperty('borders', 'line-color', th.border);
+  map.setPaintProperty('county', 'line-color', th.county);
+  map.setPaintProperty('grid-major', 'line-color', th.grid);
+  map.setPaintProperty('grid-minor', 'line-color', th.grid);
+  typhoon.setTheme(name === 'light' ? 'light' : 'dark');
+}
+
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
 
@@ -277,24 +321,99 @@ function fillEnsPanel() {
   initSel.innerHTML = '<option value="">依時間軸（最新）</option>' + allInits.map(optInit).join('');
   initSel.value = ens.baseInit;
 
-  const box = $('ens-models');
-  box.innerHTML = '';
-  for (const m of ens.models) {
-    const row = document.createElement('div');
-    row.className = 'model-row';
-    row.innerHTML = `<label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" ${ens.modelOn[m] ? 'checked' : ''}>
-      <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#ccc'}"></span>${m}</label>
-      <select><option value="">同上</option>${[...ens.index.models[m]].reverse().map((i) => `<option value="${i}">${fmtInit(i)}</option>`).join('')}</select>`;
-    const [chk, sel] = [row.querySelector('input'), row.querySelector('select')];
-    sel.value = ens.modelInit[m];
-    chk.onchange = () => { ens.modelOn[m] = chk.checked; render(); };
-    sel.onchange = () => { ens.modelInit[m] = sel.value; render(); };
-    box.appendChild(row);
-  }
+  buildModelRows();
 
   const vs = $('ens-valid-start');
   vs.innerHTML = '<option value="">自動</option>' + ens.validChoices().map((t) => `<option value="${t}">${fmtTW(t)}（${t.slice(6, 8)}日${t.slice(8, 10)}Z）</option>`).join('');
   vs.value = ens.validStart;
+}
+
+/** 每個模式一列(可展開):開關、初始時間、成員 / 平均 / 控制報、tau 範圍、透明度;最上面「全部模式」一次套用 */
+function buildModelRows() {
+  const box = $('ens-models');
+  box.innerHTML = '';
+  const tauMode = ens.mode === 'tau';
+  const body = (c) => `
+    <div class="row">
+      <label><input type="checkbox" data-k="members" ${c.members ? 'checked' : ''}> 成員</label>
+      <label><input type="checkbox" data-k="mean" ${c.mean ? 'checked' : ''}> 平均</label>
+      <label><input type="checkbox" data-k="control" ${c.control ? 'checked' : ''}> 控制報</label>
+    </div>
+    <div class="row" ${tauMode ? '' : 'hidden'}>tau
+      <input type="number" data-k="tau0" min="0" max="360" step="6" value="${c.tau[0]}"> ～
+      <input type="number" data-k="tau1" min="0" max="360" step="6" value="${c.tau[1]}"> 小時
+    </div>
+    <div class="row">透明度 <input type="range" data-k="opacity" min="0" max="100" value="${Math.round(c.opacity * 100)}"></div>`;
+
+  const bindBody = (el, targets, isAll) => {
+    for (const inp of el.querySelectorAll('[data-k]')) {
+      const k = inp.dataset.k;
+      inp.addEventListener(k === 'opacity' ? 'input' : 'change', () => {
+        for (const m of targets) {
+          const c = ens.cfg[m];
+          if (k === 'opacity') c.opacity = inp.value / 100;
+          else if (k === 'tau0' || k === 'tau1') {
+            const row = inp.closest('.row');
+            let a = +row.querySelector('[data-k=tau0]').value, b = +row.querySelector('[data-k=tau1]').value;
+            if (a > b) [a, b] = [b, a];
+            c.tau = [a, b];
+          } else c[k] = inp.checked;
+        }
+        ens.draw();
+        if (isAll) syncRowsFromCfg();          // 全部套用後,各模式列同步顯示
+      });
+    }
+  };
+
+  // 全部模式
+  const all = document.createElement('div');
+  all.className = 'model all';
+  const first = ens.cfg[ens.models[0]] ?? { members: true, mean: true, control: true, tau: [0, 120], opacity: 0.8 };
+  all.innerHTML = `<div class="model-head"><label><b>全部模式</b></label><button class="expand">▸</button></div>
+    <div class="model-body" hidden>${body(first)}</div>`;
+  box.appendChild(all);
+  bindBody(all, ens.models, true);
+
+  for (const m of ens.models) {
+    const c = ens.cfg[m];
+    const row = document.createElement('div');
+    row.className = 'model';
+    row.dataset.model = m;
+    row.innerHTML = `<div class="model-head">
+        <label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" data-on ${c.on ? 'checked' : ''}>
+          <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#888'}"></span>${m}</label>
+        <select><option value="">同上</option>${[...ens.index.models[m]].reverse().map((i) => `<option value="${i}">${fmtInit(i)}</option>`).join('')}</select>
+        <button class="expand">▸</button>
+      </div>
+      <div class="model-body" hidden>${body(c)}</div>`;
+    const sel = row.querySelector('select');
+    sel.value = c.init;
+    row.querySelector('[data-on]').onchange = (e) => { c.on = e.target.checked; render(); };
+    sel.onchange = () => { c.init = sel.value; render(); };
+    bindBody(row, [m], false);
+    box.appendChild(row);
+  }
+  for (const btn of box.querySelectorAll('.expand')) {
+    btn.onclick = () => {
+      const b = btn.closest('.model').querySelector('.model-body');
+      b.hidden = !b.hidden;
+      btn.textContent = b.hidden ? '▸' : '▾';
+    };
+  }
+}
+
+/** 「全部模式」改了設定後,把各模式列的勾選、tau、透明度更新成目前值 */
+function syncRowsFromCfg() {
+  for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
+    const c = ens.cfg[row.dataset.model];
+    for (const inp of row.querySelectorAll('[data-k]')) {
+      const k = inp.dataset.k;
+      if (k === 'opacity') inp.value = Math.round(c.opacity * 100);
+      else if (k === 'tau0') inp.value = c.tau[0];
+      else if (k === 'tau1') inp.value = c.tau[1];
+      else inp.checked = c[k];
+    }
+  }
 }
 
 /** 有效時間「自動」顯示目前算出來的起點 */
@@ -322,20 +441,12 @@ function bindEnsUI() {
   for (const r of document.querySelectorAll('input[name=ens-mode]')) {
     r.onchange = () => {
       ens.mode = r.value;
-      $('ens-tau-box').hidden = ens.mode !== 'tau';
       $('ens-valid-box').hidden = ens.mode !== 'valid';
+      for (const r of document.querySelectorAll('#ens-models [data-k=tau0]')) r.closest('.row').hidden = ens.mode !== 'tau';
       ens.draw();
       updateEnsValidLabel();
     };
   }
-  const tauChange = () => {
-    let a = +$('ens-tau-a').value, b = +$('ens-tau-b').value;
-    if (a > b) [a, b] = [b, a];
-    ens.tauRange = [a, b];
-    ens.draw();
-  };
-  $('ens-tau-a').onchange = tauChange;
-  $('ens-tau-b').onchange = tauChange;
   $('ens-valid-start').onchange = (e) => { ens.validStart = e.target.value; ens.draw(); updateEnsValidLabel(); };
   $('ens-valid-hours').onchange = (e) => { ens.validHours = +e.target.value; ens.draw(); };
   for (const c of document.querySelectorAll('[data-ens-opt]')) {
@@ -369,13 +480,15 @@ function bindUI() {
   $('chk-typhoon').onchange = (e) => typhoon.setVisible(e.target.checked);
   $('ty-issue').onchange = (e) => { typhoon.fixedIssue = e.target.value; render(); };
   $('ty-cone').onchange = (e) => { typhoon.show_cone = e.target.checked; typhoon.draw(); };
-  $('ty-circle').onchange = (e) => { typhoon.show_circle = e.target.checked; typhoon.draw(); };
+  for (const c of document.querySelectorAll('[data-ty-circle]')) {
+    c.onchange = () => { typhoon.circles[c.dataset.tyCircle] = c.checked; typhoon.draw(); };
+  }
   $('ty-labels').onchange = (e) => { typhoon.show_labels = e.target.checked; typhoon.draw(); };
-  $('basemap').onchange = (e) => {
-    for (const k of Object.keys(BASEMAPS)) {
-      for (const p of ['base', 'label']) map.setLayoutProperty(`${p}-${k}`, 'visibility', k === e.target.value ? 'visible' : 'none');
-    }
+  $('basemap').onchange = (e) => setTheme(e.target.value);
+  $('chk-grid').onchange = (e) => {
+    for (const id of ['grid-major', 'grid-minor']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };
+  $('chk-county').onchange = (e) => map.setLayoutProperty('county', 'visibility', e.target.checked ? 'visible' : 'none');
 
   map.on('mousemove', (e) => {
     const v = radar.valueAt(e.lngLat.lng, e.lngLat.lat);
@@ -395,9 +508,8 @@ map.on('load', async () => {
   radar.addTo();
   typhoon.addTo();
   ens.addTo('ty-cone-fill');
-  for (const k of Object.keys(BASEMAPS)) {   // 地名、行政界線疊在雷達上面
-    map.addLayer({ id: `label-${k}`, type: 'raster', source: `label-${k}`, layout: { visibility: k === 'dark' ? 'visible' : 'none' } }, 'ens-members');
-  }
+  addOverlays('ens-members');
+  setTheme('light');
   $('legend').innerHTML = radar.legend();
   await render();
 

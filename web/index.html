@@ -46,8 +46,13 @@
           </label>
           <div class="ty-toggles">
             <label><input type="checkbox" id="ty-cone" checked> 70% 潛勢區</label>
-            <label><input type="checkbox" id="ty-circle" checked> 暴風圈</label>
             <label><input type="checkbox" id="ty-labels" checked> 時間標示</label>
+          </div>
+          <div class="ty-toggles">
+            <span>暴風圈</span>
+            <label><input type="checkbox" data-ty-circle="now" checked> 目前</label>
+            <label><input type="checkbox" data-ty-circle="fcst" checked> 預報</label>
+            <label><input type="checkbox" data-ty-circle="past"> 過去</label>
           </div>
           <div id="ty-storms"></div>
         </div>
@@ -62,16 +67,9 @@
         <div class="layer-opts">
           <label>颱風 <select id="ens-tc"></select></label>
           <label>初始時間 <select id="ens-init"></select></label>
-          <div id="ens-models"></div>
           <div class="seg">
-            <label><input type="radio" name="ens-mode" value="tau" checked> 預報時距</label>
+            <label><input type="radio" name="ens-mode" value="tau" checked> 預報時距（各模式）</label>
             <label><input type="radio" name="ens-mode" value="valid"> 有效時間對齊</label>
-          </div>
-          <div id="ens-tau-box">
-            <label>
-              <input type="number" id="ens-tau-a" min="0" max="360" step="6" value="0"> ～
-              <input type="number" id="ens-tau-b" min="0" max="360" step="6" value="120"> 小時
-            </label>
           </div>
           <div id="ens-valid-box" hidden>
             <label>起點 <select id="ens-valid-start"></select></label>
@@ -84,10 +82,8 @@
               </select>
             </label>
           </div>
+          <div id="ens-models"></div>
           <div class="ty-toggles">
-            <label><input type="checkbox" data-ens-opt="members" checked> 成員</label>
-            <label><input type="checkbox" data-ens-opt="mean" checked> 系集平均</label>
-            <label><input type="checkbox" data-ens-opt="control" checked> 控制報</label>
             <label><input type="checkbox" data-ens-opt="dropOutlier" checked> 排除離群</label>
             <label><input type="checkbox" data-ens-opt="best" checked> 實際路徑</label>
             <label><input type="checkbox" data-ens-opt="start" checked> 起點</label>
@@ -99,10 +95,14 @@
     <section>
       <h3>底圖</h3>
       <select id="basemap">
-        <option value="dark">深色</option>
-        <option value="light">淺色</option>
+        <option value="light">素色（淺）</option>
+        <option value="dark">素色（深）</option>
         <option value="imagery">衛星影像</option>
       </select>
+      <div class="ty-toggles" style="margin-top:6px;color:var(--muted)">
+        <label><input type="checkbox" id="chk-grid" checked> 經緯網格</label>
+        <label><input type="checkbox" id="chk-county" checked> 縣市界</label>
+      </div>
     </section>
   </aside>
 
