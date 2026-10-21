@@ -253,6 +253,7 @@ def candidate_inits(now):
 
 
 _missed = set()
+_attempted = set()       # 這次程序啟動後試過的 (模式, 初始時間);沒試過就過窗口的不算 missed(例如排程剛啟動)
 
 
 def run(models=None):
@@ -266,10 +267,11 @@ def run(models=None):
                 continue
             job = f"ens_{model}"
             if now - t > timedelta(hours=WINDOW_H):
-                if (model, init) not in _missed:                 # 每個初始時間只記一次 missed
+                if (model, init) in _attempted and (model, init) not in _missed:   # 每個初始時間只記一次
                     _missed.add((model, init))
                     record_status(job, "missed", init + "00")
                 continue
+            _attempted.add((model, init))
             try:
                 res = fetch_one(model, init)
             except Exception as e:
