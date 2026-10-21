@@ -7,5 +7,8 @@ apscheduler>=3.10,<4
 # satpy
 # pyresample
 # s3fs
-# pdbufr
-# ecmwf-opendata
+pdbufr
+ecmwf-opendata
+eccodes
+pandas
+pyproj
