@@ -1,0 +1,11 @@
+numpy
+scipy
+requests
+shapely>=2.0
+apscheduler>=3.10,<4
+# Phase 3 衛星 / Phase 4 系集
+# satpy
+# pyresample
+# s3fs
+# pdbufr
+# ecmwf-opendata

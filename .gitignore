@@ -1,0 +1,9 @@
+.env
+data/
+logs/
+pipeline/.cache/
+__pycache__/
+*.pyc
+# notebook 內含寫死的金鑰,清掉之前不納入版控
+*.ipynb
+.ipynb_checkpoints/
