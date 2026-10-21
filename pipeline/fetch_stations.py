@@ -1,7 +1,7 @@
 """測站:合併 O-A0001-001(自動站)、O-A0003-001(局屬站)、O-A0002-001(雨量站)
 → data/stations/{stamp}.json(所有變數一個檔,前端切換變數不用重抓)
 並用同一批雨量做 IDW → data/rain/idw/{acc}/{stamp}.bin.gz。"""
-from .common import fetch_cwa, log, save_points, utc_stamp
+from .common import check_update, fetch_cwa, log, save_points, twd67_to_wgs84, utc_stamp
 from . import config, idw, station_series
 
 LAYER = "stations"
@@ -36,9 +36,8 @@ def _wgs84(st):
     for c in st["GeoInfo"]["Coordinates"]:
         if c["CoordinateName"] == "WGS84":
             return float(c["StationLongitude"]), float(c["StationLatitude"])
-    c = st["GeoInfo"]["Coordinates"][0]
-    return (float(c["StationLongitude"]) + config.TWD67_DLON,
-            float(c["StationLatitude"]) + config.TWD67_DLAT)
+    c = st["GeoInfo"]["Coordinates"][0]          # 沒有 WGS84 才自己轉
+    return twd67_to_wgs84(float(c["StationLongitude"]), float(c["StationLatitude"]))
 
 
 def _base(st):
@@ -84,6 +83,9 @@ def collect():
 
 def run():
     stamp, recs = collect()
+    status, prev = check_update(LAYER, stamp, ".json")
+    if status != "new":
+        return status, stamp, prev
     rows = [[r.get(f) for f in FIELDS] for r in recs]
     snapshot = {"time": stamp, "fields": FIELDS, "rows": rows}
     save_points(LAYER, stamp, snapshot,
@@ -91,8 +93,8 @@ def run():
     log.info("stations %s 完成(%d 站)", stamp, len(rows))
     station_series.append(snapshot)
     idw.run(stamp, recs)
-    return stamp
+    return status, stamp, prev
 
 
 if __name__ == "__main__":
-    run()
+    print(run())

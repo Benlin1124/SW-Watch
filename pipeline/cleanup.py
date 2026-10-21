@@ -23,6 +23,7 @@ def run():
             for f in idx_path.parent.glob(f"{t}.*"):
                 f.unlink()
         idx["times"] = [t for t in idx["times"] if t not in set(drop)]
+        idx["fetched"] = {t: v for t, v in idx.get("fetched", {}).items() if t not in set(drop)}
         save_json(idx_path, idx)
         log.info("cleanup %s:刪除 %d 筆", rel, len(drop))
     compress_old_months()

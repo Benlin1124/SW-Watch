@@ -26,9 +26,14 @@ CWA_KEY = os.environ.get("CWA_KEY", "")
 CWA_FILEAPI = ("https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/{code}"
                "?Authorization={key}&downloadType=WEB&format=JSON")
 
-# TWD67 → WGS84 平均位移(由 O-A0002-001 每站雙座標實測平均,台灣本島誤差 < 0.001°)
-TWD67_DLON = 0.0081
-TWD67_DLAT = -0.0018
+# TWD67 大地基準(GRS67 橢球 = aust_SA)+ 七參數 Helmert 轉 WGS84(同 EPSG:3828 的 towgs84 定義)。
+# 以 O-A0002-001 各站官方 TWD67/WGS84 雙座標驗證:差距中位數 2 m。
+# 註:pyproj 內建 EPSG:3821→4326 只有 ballpark 轉換(等於不轉,誤差約 850 m),不能用。
+TWD67_PROJ = ("+proj=longlat +ellps=aust_SA "
+              "+towgs84=-752,-358,-179,-0.0000011698,0.0000018398,0.0000009822,0.00002329 +no_defs")
+
+# ── 抓取重試 ──
+RETRY_DELAY_SEC = 60         # 失敗或資料尚未更新 → 1 分鐘後再試(CWA API 有請求次數上限,不要更密)
 
 # ── 保留策略 ──
 KEEP_FULL_DAYS = 30          # 10 分鐘資料保留天數;更舊只留整點
