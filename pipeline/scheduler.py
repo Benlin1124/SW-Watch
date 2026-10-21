@@ -30,12 +30,22 @@ JOBS = [
     ("stations", fetch_stations.run, dict(minute=window(10, 1, 9)), 10, 9),
     ("qpe1h", fetch_rain_grid.run_qpe1h, dict(minute=window(10, 1, 9)), 10, 9),
     ("rain_today", fetch_rain_grid.run_daily, dict(minute=window(30, 1, 15)), 30, 15),
-    # 颱風消息:台灣 02/08/14/20 時發布、延後 1–2 小時上架 → UTC 19–20、01–02、07–08、13–14 時每 5 分檢查;
-    # 其他時段每小時檢查一次(警報期間可能加發)
-    ("typhoon_cwa", fetch_typhoon.run, dict(minute="*/5", hour="1,2,7,8,13,14,19,20"), None, None),
-    ("typhoon_cwa_hourly", fetch_typhoon.run,
-     dict(minute="30", hour="0,3,4,5,6,9,10,11,12,15,16,17,18,21,22,23"), None, None),
+    # 颱風消息:每分鐘觸發,由 typhoon_due() 決定這一分鐘要不要真的去抓(見下方說明)
+    ("typhoon_cwa", fetch_typhoon.run, dict(minute="*"), None, None),
 ]
+
+
+def typhoon_due(now):
+    """颱風消息的檢查時段(UTC;條件式請求沒更新不耗流量):
+    1. 警報期間:台灣 02:30、05:30、08:30、11:30、14:30、17:30、20:30、23:30(海上警報只有 02/08/14/20:30)
+       前約 10 分、後約 20 分有新預測 → UTC 每 3 小時的 :20–:50,每分鐘檢查
+    2. 平時:台灣 02/08/14/20 時發布、延後 1–2 小時上架 → UTC 19–20、01–02、07–08、13–14 時,每 5 分檢查
+    3. 其他時間:每小時 :05 檢查一次"""
+    if now.hour % 3 == 0 and 20 <= now.minute <= 50:
+        return True
+    if now.hour in (1, 2, 7, 8, 13, 14, 19, 20) and now.minute % 5 == 0:
+        return True
+    return now.minute == 5
 
 
 def setup_logging():
@@ -53,10 +63,12 @@ def setup_logging():
 
 
 def make_job(name, fn, cycle, last):
-    status_name = name.replace("_hourly", "")
+    status_name = name
 
     def job(force=False):
         now = datetime.now(timezone.utc)
+        if name == "typhoon_cwa" and not force and not typhoon_due(now):
+            return
         attempt = 0
         if cycle:
             cycle_start = now.replace(minute=now.minute - now.minute % cycle, second=0, microsecond=0)
@@ -100,8 +112,7 @@ def main():
             for name, fn, cron, cycle, last in JOBS]
     if args.once:
         for name, job, _ in jobs:
-            if not name.endswith("_hourly"):
-                job(force=True)
+            job(force=True)
         return
 
     sched = BlockingScheduler(timezone="UTC")
@@ -110,9 +121,8 @@ def main():
                       misfire_grace_time=50, **cron)
     sched.add_job(safe_cleanup, "cron", hour=19, minute=30, id="cleanup")  # 台灣 03:30
     for name, job, _ in jobs:          # 啟動時先跑一輪
-        if not name.endswith("_hourly"):
-            sched.add_job(job, "date", run_date=datetime.now(timezone.utc),
-                          kwargs={"force": True}, id=f"{name}_start")
+        sched.add_job(job, "date", run_date=datetime.now(timezone.utc),
+                      kwargs={"force": True}, id=f"{name}_start")
     log.info("排程啟動")
     sched.start()
 

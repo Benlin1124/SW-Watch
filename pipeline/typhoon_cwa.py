@@ -113,23 +113,35 @@ def convert_tc(tc):
 
 
 def convert(od):
+    """檔名時間 = 預報初始時間(多個颱風取最晚者);沒有預報(例如已無颱風)才用發布時間。"""
     tcs = ((od.get("Dataset") or {}).get("TropicalCyclones") or {}).get("TropicalCyclone") or []
     tcs = tcs if isinstance(tcs, list) else [tcs]
-    return {"issued": utc_stamp(od["Sent"]), "source": "CWA W-C0034-005",
-            "storms": [convert_tc(tc) for tc in tcs]}
+    storms = [convert_tc(tc) for tc in tcs]
+    issued = utc_stamp(od["Sent"])
+    inits = [s["fcst_init"] for s in storms if s["fcst_init"]]
+    return {"init": max(inits) if inits else issued, "issued": issued,
+            "source": "CWA W-C0034-005", "storms": storms}
 
 
 def save(od):
+    """同一個初始時間若重複發布(例如更正),以較晚發布的為準。"""
     out = convert(od)
-    save_json(config.DATA_DIR / LAYER / f'{out["issued"]}.json', out)
-    update_index(LAYER, out["issued"], source="CWA W-C0034-005", name="氣象署颱風路徑")
+    path = config.DATA_DIR / LAYER / f'{out["init"]}.json'
+    if path.exists() and json.loads(path.read_text(encoding="utf-8")).get("issued", "") > out["issued"]:
+        return out
+    save_json(path, out)
+    update_index(LAYER, out["init"], source="CWA W-C0034-005", name="氣象署颱風路徑",
+                 time_meaning="預報初始時間")
     return out
 
 
 def rebuild():
+    """清空後從原始歸檔全部重轉。"""
+    for old in (config.DATA_DIR / LAYER).glob("*.json"):
+        old.unlink()
     for p in sorted((config.DATA_DIR / "typhoon" / "cwa").glob("*.json.gz")):
         out = save(json.load(gzip.open(p)))
-        log.info("typhoon %s:%s", out["issued"], [s["name_zh"] for s in out["storms"]])
+        log.info("typhoon 初始 %s(發布 %s):%s", out["init"], out["issued"], [s["name_zh"] for s in out["storms"]])
 
 
 if __name__ == "__main__":

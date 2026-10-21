@@ -60,13 +60,13 @@ export class TyphoonLayer {
   key = 'typhoon';
   name = '颱風路徑';
   path = 'typhoon/cwa_track';
-  cadence = null;          // 不定期發布:同步模式取「≤ T 的最近一次發布」
+  cadence = null;          // 不定期:同步模式取「≤ T 的最近一次預報初始時間」
   visible = true;
   show_cone = true;
   circles = { now: true, fcst: true, past: false };   // 暴風圈:目前 / 各預報點 / 過去各定位
   theme = 'light';
   show_labels = true;
-  fixedIssue = '';         // 使用者指定的發布時間;空字串 = 依時間軸
+  fixedIssue = "";         // 使用者指定的預報初始時間;空字串 = 依時間軸
   index = null;
   data = null;
   markers = [];
@@ -114,7 +114,7 @@ export class TyphoonLayer {
     }
   }
 
-  /** 指定發布時間優先;同步取 ≤ T 的最近一次;不同步取最新 */
+  /** 指定初始時間優先;同步取 ≤ T 的最近一次;不同步取最新 */
   pick(T, sync) {
     if (this.fixedIssue) return this.fixedIssue;
     return sync ? latestLE(this.times, T) : this.latest;

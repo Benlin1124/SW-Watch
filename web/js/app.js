@@ -132,7 +132,7 @@ function updateLayerTime(l, stamp, sync) {
   el.classList.remove('nodata', 'stale');
   if (!stamp) { el.textContent = '無資料'; el.classList.add('nodata'); return; }
   if (l.key === 'typhoon') {
-    el.textContent = `發布 ${fmtTW(stamp)}`;
+    el.textContent = `初始 ${fmtTW(stamp)}`;
     return;
   }
   if (l.key === 'ens') {
@@ -303,7 +303,7 @@ function fillIssueSelect() {
   const sel = $('ty-issue');
   const cur = sel.value;
   sel.innerHTML = '<option value="">依時間軸</option>' +
-    [...typhoon.times].reverse().map((t) => `<option value="${t}">${fmtTW(t, 'full')}</option>`).join('');
+    [...typhoon.times].reverse().map((t) => `<option value="${t}">${fmtTW(t)}（${t.slice(8, 10)}Z）</option>`).join('');
   sel.value = typhoon.times.includes(cur) ? cur : '';
 }
 
