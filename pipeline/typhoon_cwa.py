@@ -1,0 +1,141 @@
+"""CWA 颱風消息原始 JSON → 前端用的精簡格式(含 70% 潛勢區、暴風圈多邊形)。
+  data/typhoon/cwa_track/{發布時間}.json
+重建全部:python -m pipeline.typhoon_cwa --rebuild"""
+import argparse
+import gzip
+import json
+
+import numpy as np
+import shapely
+from pyproj import Geod
+from shapely.geometry import Polygon, mapping
+
+from . import config
+from .common import log, save_json, update_index, utc_stamp
+
+LAYER = "typhoon/cwa_track"
+GEOD = Geod(ellps="WGS84")
+QUADS = ("NE", "SE", "SW", "NW")      # 方位角 0–90、90–180、180–270、270–360
+
+
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if x < 0 else x
+
+
+def _radii(circle):
+    """Circle15ms / Circle25ms → (平均半徑, [NE, SE, SW, NW] 或 None),單位 km。"""
+    if not circle:
+        return None, None
+    r = _num(circle.get("Radius"))
+    q = (circle.get("QuadrantRadii") or {}).get("Radius")
+    quad = None
+    if q:
+        q = q if isinstance(q, list) else [q]
+        d = {x.get("@dir"): _num(x.get("#text")) for x in q}
+        if all(d.get(k) is not None for k in QUADS):
+            quad = [d[k] for k in QUADS]
+    return r, quad
+
+
+def geo_circle(lon, lat, radius_km, n=72):
+    """大地測量圓;radius_km 可為純量或四象限 [NE, SE, SW, NW]。"""
+    az = np.linspace(0, 360, n, endpoint=False)
+    if isinstance(radius_km, (list, tuple)):
+        r = np.array([radius_km[min(int(a // 90), 3)] for a in az], dtype=float)
+    else:
+        r = np.full(n, float(radius_km))
+    lons, lats, _ = GEOD.fwd(np.full(n, lon), np.full(n, lat), az, r * 1000)
+    return Polygon(zip(lons, lats))
+
+
+def potential_cone(center, fcst):
+    """70% 機率潛勢區:現在位置(半徑 0)+ 各預報點 70% 半徑,相鄰兩圓取凸包後聯集。"""
+    circles = [shapely.Point(center).buffer(1e-4)]
+    for p in fcst:
+        if p["r70"]:
+            circles.append(geo_circle(p["lon"], p["lat"], p["r70"]))
+    if len(circles) < 2:
+        return None
+    hulls = [shapely.union(a, b).convex_hull for a, b in zip(circles[:-1], circles[1:])]
+    return shapely.union_all(hulls).simplify(0.005)
+
+
+def _round_geom(g):
+    if g is None or g.is_empty:
+        return None
+    return mapping(shapely.set_precision(g, 0.0001))
+
+
+def convert_tc(tc):
+    past = []
+    for f in (tc.get("AnalysisData") or {}).get("Fix") or []:
+        r15, q15 = _radii(f.get("Circle15ms"))
+        r25, q25 = _radii(f.get("Circle25ms"))
+        past.append(dict(
+            t=utc_stamp(f["DateTime"]), lon=float(f["CoordinateLongitude"]),
+            lat=float(f["CoordinateLatitude"]), wind=_num(f.get("MaxWindSpeed")),
+            gust=_num(f.get("MaxGustSpeed")), pres=_num(f.get("Pressure")),
+            mv_spd=_num(f.get("MovingSpeed")), mv_dir=f.get("MovingDirection"),
+            r15=r15, r25=r25, r15q=q15, r25q=q25))
+    past.sort(key=lambda p: p["t"])
+
+    fcst, init = [], None
+    for f in (tc.get("ForecastData") or {}).get("Fix") or []:
+        init = utc_stamp(f["InitialTime"])
+        r15, _ = _radii(f.get("Circle15ms"))
+        r25, _ = _radii(f.get("Circle25ms"))
+        fcst.append(dict(
+            tau=int(f["ForecastHour"]), lon=float(f["CoordinateLongitude"]),
+            lat=float(f["CoordinateLatitude"]), wind=_num(f.get("MaxWindSpeed")),
+            gust=_num(f.get("MaxGustSpeed")), pres=_num(f.get("Pressure")),
+            r15=r15, r25=r25, r70=_num(f.get("Radius70PercentProbability"))))
+    fcst.sort(key=lambda p: p["tau"])
+
+    now = past[-1] if past else None
+    geo = {}
+    if now:
+        for key in ("15", "25"):
+            r = now[f"r{key}q"] or now[f"r{key}"]
+            if r:
+                geo[f"circle{key}"] = _round_geom(geo_circle(now["lon"], now["lat"], r))
+        if fcst:
+            geo["cone70"] = _round_geom(potential_cone((now["lon"], now["lat"]), fcst))
+
+    ty_no, td_no = tc.get("CwaTyNo"), tc.get("CwaTdNo")
+    return dict(
+        id=f'{tc.get("Year")}_{"TY" + ty_no if ty_no else "TD" + str(td_no)}',
+        year=tc.get("Year"), name_zh=tc.get("CwaTyphoonName"), name_en=tc.get("TyphoonName"),
+        ty_no=ty_no, td_no=td_no, past=past, fcst_init=init, fcst=fcst, geo=geo)
+
+
+def convert(od):
+    tcs = ((od.get("Dataset") or {}).get("TropicalCyclones") or {}).get("TropicalCyclone") or []
+    tcs = tcs if isinstance(tcs, list) else [tcs]
+    return {"issued": utc_stamp(od["Sent"]), "source": "CWA W-C0034-005",
+            "storms": [convert_tc(tc) for tc in tcs]}
+
+
+def save(od):
+    out = convert(od)
+    save_json(config.DATA_DIR / LAYER / f'{out["issued"]}.json', out)
+    update_index(LAYER, out["issued"], source="CWA W-C0034-005", name="氣象署颱風路徑")
+    return out
+
+
+def rebuild():
+    for p in sorted((config.DATA_DIR / "typhoon" / "cwa").glob("*.json.gz")):
+        out = save(json.load(gzip.open(p)))
+        log.info("typhoon %s:%s", out["issued"], [s["name_zh"] for s in out["storms"]])
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rebuild", action="store_true")
+    if ap.parse_args().rebuild:
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        rebuild()

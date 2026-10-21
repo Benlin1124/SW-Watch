@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SW-Watch 劇烈天氣監控</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <header id="topbar">
+    <div class="brand">SW-Watch <span>劇烈天氣監控</span></div>
+    <div id="clock">
+      <div id="clock-main">--</div>
+      <div id="clock-sub"></div>
+    </div>
+  </header>
+
+  <aside id="panel">
+    <section>
+      <h3>圖層</h3>
+
+      <div class="layer" data-layer="radar">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-radar" checked>
+          <span class="layer-name">雷達回波</span>
+          <span class="layer-time" id="time-radar">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>透明度 <input type="range" id="op-radar" min="0" max="100" value="85"></label>
+        </div>
+      </div>
+
+      <div class="layer" data-layer="typhoon">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-typhoon" checked>
+          <span class="layer-name">颱風路徑（氣象署）</span>
+          <span class="layer-time" id="time-typhoon">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>發布時間
+            <select id="ty-issue"><option value="">依時間軸</option></select>
+          </label>
+          <div class="ty-toggles">
+            <label><input type="checkbox" id="ty-cone" checked> 70% 潛勢區</label>
+            <label><input type="checkbox" id="ty-circle" checked> 暴風圈</label>
+            <label><input type="checkbox" id="ty-labels" checked> 時間標示</label>
+          </div>
+          <div id="ty-storms"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3>底圖</h3>
+      <select id="basemap">
+        <option value="dark">深色</option>
+        <option value="light">淺色</option>
+        <option value="imagery">衛星影像</option>
+      </select>
+    </section>
+  </aside>
+
+  <div id="readout"></div>
+  <div id="legend"></div>
+
+  <footer id="timeline">
+    <button id="btn-sync" class="toggle" title="同步：所有圖層對齊同一時間；不同步：各自顯示最新">🔗 同步</button>
+    <button id="btn-prev" title="上一格（←）">◀</button>
+    <button id="btn-play" title="播放／暫停（空白鍵）">▶</button>
+    <button id="btn-next" title="下一格（→）">▶|</button>
+    <div id="slider-wrap">
+      <canvas id="coverage"></canvas>
+      <input type="range" id="slider" min="0" max="0" value="0">
+      <div id="slider-ticks"></div>
+    </div>
+    <button id="btn-latest" title="跳到最新">最新</button>
+    <label class="tl-opt">播放
+      <select id="play-range">
+        <option value="1">1 小時</option>
+        <option value="3" selected>3 小時</option>
+        <option value="6">6 小時</option>
+        <option value="12">12 小時</option>
+        <option value="24">24 小時</option>
+      </select>
+    </label>
+    <label class="tl-opt">速度
+      <select id="play-speed">
+        <option value="1000">慢</option>
+        <option value="500" selected>中</option>
+        <option value="250">快</option>
+      </select>
+    </label>
+  </footer>
+
+  <div id="toast"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

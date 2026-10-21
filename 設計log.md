@@ -369,3 +369,24 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 17:30 這一輪：測站、QPE 在第 6 分抓到，雷達第 7 分、今日累積第 8 分，全部在第 9 分前完成。
 - 沒更新的檢查都回 304（23 次請求中 17 次），不耗流量。
 - 發現並修正：多個工作在同一分鐘、不同執行緒同時寫 `status.json`／`usage.json`，Windows 檔案鎖造成 PermissionError，而且 `usage.json` 讀到寫一半的檔案時被歸零。→ 共用檔的讀改寫加上 `threading.RLock`，暫存檔名加上執行緒 id；6 執行緒 × 30 次壓力測試全部正確。
+
+### 資料發布方式比較：powerInfoV2 的作法（2026-10-22）
+
+- `apan1121/powerInfoV2`：GitHub Actions 每 10 分鐘 commit 一次到 `gh-pages`，repo 已約 518 MB。可行是因為它存的是**小的文字 log**，git 對文字只存差異。
+- 我們是 gzip 過的格點二進位檔，git 無法做差異壓縮，每一版都完整保留：雷達＋雨量＋測站每天約 35–50 MB → 約 3 週就超過 GitHub 建議的 1 GB；加衛星一天就破 1 GB。
+- 結論：格點與衛星維持放 **R2**；小的文字資料（颱風路徑 JSON、status.json）之後可以考慮直接放 Pages。
+
+### 前端 v0.1（2026-10-22）
+
+- `web/`：純 JS（ES modules）+ MapLibre GL JS 4.7.1（unpkg）。
+  - `config.js`：`DATA_BASE_URL`（本機讀 `../data/`；github.io 且設定 R2 網址時讀 R2）。
+  - `time.js`：UTC stamp ↔ 台灣時間顯示。
+  - `data.js`：讀 `index.json`、`.bin.gz`（自動判斷是否需要自己 gunzip）。
+  - `colormaps.js`：雷達色階沿用 notebook 的 `DBZ_LEVELS`／`DBZ_COLORS`，dBZ < 0 不畫。
+  - `layers/radar.js`：uint8 格點查色表 → canvas → PNG → image source（用 `grid.corners` 定位）；快取 200 張；游標讀值（dBZ／無回波／範圍外）。
+  - `layers/typhoon.js`：過去路徑（依強度上色）、預報路徑（虛線）、70% 潛勢區、7 級／10 級暴風圈（四象限）、預報時間標示（HTML marker，中文不需字型檔）、點擊彈出詳細資料、「定位」按鈕。
+  - `app.js`：圖層面板、時間軸（10 分一格、最多 7 天）、資料覆蓋色帶（缺漏留空）、同步／不同步、對齊播放（1／3／6／12／24 小時、慢中快）、方向鍵與空白鍵、每 60 秒重讀 index。
+- pipeline 新增 `typhoon_cwa.py`：原始颱風 JSON → `data/typhoon/cwa_track/{發布時間}.json`（含潛勢區、暴風圈多邊形，由 shapely + pyproj Geod 算），`fetch_typhoon` 抓到新資料時自動轉換。
+- 底圖：CARTO 已改為需要 API key，改用 Esri Canvas 深灰／淺灰與 World Imagery（免金鑰），地名層疊在雷達上方。
+- 測試：headless Chrome（CDP）截圖與操作驗證，無 JS 錯誤。
+- 待辦：颱風「指定發布時間」下拉選單之後要擴充成系集模式的初始時間選擇＋預報區間對齊；GitHub Pages 部署 workflow 等 R2 設好再加。
