@@ -12,7 +12,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import cleanup, config, fetch_radar, fetch_rain_grid, fetch_stations, fetch_typhoon
+from . import cleanup, config, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_stations, fetch_typhoon
 from .common import read_status, record_status, stamp_dt
 
 log = logging.getLogger("pipeline")
@@ -95,6 +95,16 @@ def make_job(name, fn, cycle, last):
     return job
 
 
+def safe_ensemble():
+    """系集路徑:每 15 分檢查 00/06/12/18Z 初始時間後 1–12 小時內還沒抓到的模式(狀態由 fetch_ensemble 自己記)。"""
+    try:
+        got = fetch_ensemble.run()
+        if got:
+            log.info("系集新資料:%s", "、".join(got))
+    except Exception:
+        log.exception("ensemble 失敗")
+
+
 def safe_cleanup():
     try:
         cleanup.run()
@@ -119,6 +129,7 @@ def main():
     for name, job, cron in jobs:
         sched.add_job(job, "cron", id=name, max_instances=1, coalesce=True,
                       misfire_grace_time=50, **cron)
+    sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
     sched.add_job(safe_cleanup, "cron", hour=19, minute=30, id="cleanup")  # 台灣 03:30
     for name, job, _ in jobs:          # 啟動時先跑一輪
         sched.add_job(job, "date", run_date=datetime.now(timezone.utc),

@@ -47,7 +47,7 @@ const map = new maplibregl.Map({
   },
   center: [121, 23.7],
   zoom: 6.2,
-  attributionControl: { compact: true, customAttribution: '資料：中央氣象署、NCDR' },
+  attributionControl: { compact: true, customAttribution: '資料：中央氣象署、NCDR、ECMWF (CC BY 4.0)、NOAA NCEP、Google DeepMind WeatherLab' },
 });
 
 /** 海岸線、國界、縣市界、經緯網格疊在雷達上面(同 notebook:先畫資料再畫邊界) */

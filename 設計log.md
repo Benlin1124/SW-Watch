@@ -434,3 +434,23 @@ Phase 0 + Phase 1 完成，已實際跑通：
   2. 平時：台灣 02／08／14／20 時發布、延後 1–2 小時 → UTC 19–20、01–02、07–08、13–14 時每 5 分。
   3. 其他時間每小時 :05。
   - 合計每天約 360 次 S3 條件式請求（沒更新回 304，不耗流量、不計 API 次數）。
+
+### 系集路徑自動抓取（2026-10-22）
+
+- `pipeline/fetch_ensemble.py`（移植 TY_ENS_3.ipynb）：
+  - ECMWF ENS／AIFS ENS：`ecmwf-opendata` 下載 tf BUFR → `pdbufr` 解碼（ENS 06／18Z 只到 144h，step 用 144；其他 360）。安裝 `ecmwf-opendata`、`pdbufr`、`eccodes`（2.50，pip 版內建 Windows 函式庫）。
+  - GEFS／AIGEFS：NOMADS ens_tracker，每成員一個 ATCF-unix 檔；先 HEAD 最後一個成員確認整組已上架。
+  - WNV3／FNV3P1／FNV3P2：WeatherLab paired CSV；404 = 尚未上架。
+  - 離群判定同 notebook `flag_outliers`（k = 1.5）。
+  - 存 `data/typhoon/ens_raw/{init}/{同 notebook 檔名}`，再呼叫 `ensemble.import_init` 位置配對並重建 index。
+  - 驗證：自抓 10/21 00Z 的 ECMWF、AIFS 與使用者 CSV **完全相同**（ECMWF 18894 列／51 成員、AIFS 16178 列／52 成員），各約 12 秒。
+- 排程：每小時 :07／:22／:37／:52 執行；初始時間 00／06／12／18Z 後 **1～12 小時**內還沒抓到的模式就試一次，抓到就停；超過 12 小時記 `missed`（狀態 `data/status.json` 的 `ens_{模式}`）。
+  - 10/21 12Z 測試時（約 +6.8h）：GEFS、AIGEFS、FNV3P1、FNV3P2 已有；ECMWF、AIFS、WNV3 仍 404 → 排程會繼續重試。之後依 history 看各模式實際上架時間再調窗口。
+- 授權：ECMWF Open Data 為 CC BY 4.0，前端 attribution 已加上 ECMWF、NOAA NCEP、Google DeepMind WeatherLab。
+- 限制：配對靠氣象署颱風路徑，氣象署還沒發布的系統（例如遠洋的熱帶性低氣壓）不會出現在網頁；原始 CSV 都有保留，之後可 `python -m pipeline.ensemble reindex` 重配。
+- 排程程序：`logs/scheduler.pid` 記錄目前的 PID；停止時只停這個 PID。
+
+### 測站顯示需求（2026-10-22 使用者補充，尚未實作）
+
+- 測站圖層每個變數可選：**當下數值**，或**過去 1／2／3／6 小時的最大值／最小值**。
+- 規劃：pipeline 每次抓到測站資料時，用最近 6 小時（36 筆）快照算各站各變數的滾動最大／最小（溫度、濕度、氣壓、風速、陣風），另存 `data/stations/agg/{stamp}.json`，前端切換時只讀一個檔，不必下載 36 筆快照。
