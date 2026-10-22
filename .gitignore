@@ -10,3 +10,8 @@ __pycache__/
 
 # 使用者提供的原始資料壓縮檔(已匯入 data/typhoon/ens_raw)
 *.zip
+
+# 金鑰檔(R2 等),一律不納入版控
+*金鑰*
+*.key
+*secret*
