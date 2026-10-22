@@ -1,4 +1,4 @@
-// 測站圖層:可切換變數;當前值,或過去 1/2/3/6 小時最大 / 最小(pipeline/station_agg.py 預先算好)
+// 測站圖層:可切換變數;當前值,或過去 1–72 小時最大 / 最小(pipeline/station_agg.py 預先算好)
 // 圓點依色階上色;風速、陣風改畫箭頭(指向風吹去的方向);放大後在點旁標數值(HTML marker,不需字型檔)
 import { getIndex, getJSON } from '../data.js';
 import { beaufort, beaufortLegendHTML, legendHTML, SCALES, stepExpr } from '../colormaps.js';
@@ -156,7 +156,7 @@ export class StationLayer {
     const v = this.v;
     let agg = null, val;
     if (this.aggMode) {
-      agg = await this.fetch(`${this.aggPath}/${stamp}.json`);
+      agg = await this.fetch(`${this.aggPath}/${stamp}.json.gz`);
       const j = agg.vars.indexOf(this.variable);
       const rows = agg[this.stat];
       const byId = new Map(agg.ids.map((id, i) => [id, rows[i][j]]));
@@ -204,7 +204,7 @@ export class StationLayer {
         const s = queue.shift();
         try {
           await this.fetch(`${this.path}/${s}.json`);
-          if (this.aggMode) await this.fetch(`${this.aggPath}/${s}.json`);
+          if (this.aggMode) await this.fetch(`${this.aggPath}/${s}.json.gz`);
         } catch { /* 缺檔:播放時顯示無資料 */ }
         onProgress?.(++done, stamps.length);
       }
@@ -237,7 +237,7 @@ export class StationLayer {
   popupHTML(p) {
     const v = this.v, agg = this.current?.agg;
     const what = agg ? `過去 ${agg.hours} 小時${this.stat === 'max' ? '最大' : '最小'}${v.name}` : v.name;
-    const when = agg ? `${fmtTW(agg.start, 'hm')}–${fmtTW(agg.time, 'hm')}` : `觀測 ${fmtTW(p.obs)}`;
+    const when = agg ? `${fmtTW(agg.start, agg.hours >= 24 ? 'md' : 'hm')}–${fmtTW(agg.time, 'hm')}` : `觀測 ${fmtTW(p.obs)}`;
     const alt = p.alt != null && p.alt !== 'null' ? `　${p.alt} m` : '';
     return `<div class="popup-title">${p.name}（${p.id}）</div>
       <div>${p.county}${p.town}${alt}</div>
@@ -250,7 +250,7 @@ export class StationLayer {
     const agg = this.current?.agg;
     if (!this.aggMode || !agg || agg.time !== stamp) return null;
     const miss = agg.expected - agg.found;
-    return { text: `${fmtTW(agg.start, 'hm')}–${fmtTW(stamp)}${miss ? `（缺 ${miss} 筆）` : ''}`, stale: miss > 0 };
+    return { text: `${fmtTW(agg.start, agg.hours >= 24 ? 'md' : 'hm')}–${fmtTW(stamp)}${miss ? `（缺 ${miss} 筆）` : ''}`, stale: miss > 0 };
   }
 
   /** 圓點、箭頭、數值標示一起調 */

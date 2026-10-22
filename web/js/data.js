@@ -10,10 +10,11 @@ export async function getIndex(layer) {
   return r.json();
 }
 
+/** JSON;.json.gz(gzip 壓縮)也可以,自己解 */
 export async function getJSON(path) {
   const r = await fetch(url(path));
   if (!r.ok) throw new Error(`${path} ${r.status}`);
-  return r.json();
+  return JSON.parse(new TextDecoder().decode(await gunzip(await r.arrayBuffer())));
 }
 
 /** 伺服器若已幫忙解壓(Content-Encoding: gzip)就直接用,否則自己解 */
