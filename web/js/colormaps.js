@@ -29,10 +29,16 @@ export function binLUT(spec, levels, colors, { minVisible = -Infinity } = {}) {
 /** notebook 的作法是 dBZ < 0 不畫(含 raw 0 = 範圍內無回波) */
 export const radarLUT = (spec) => binLUT(spec, DBZ_LEVELS, DBZ_COLORS, { minVisible: 0 });
 
+/** 分級圖例:數字標在色格交界(該色下界);數字太長放不下時,格子放寬,還是太擠就隔幾個標一個 */
 export function legendHTML(title, levels, colors, from = 1, w = 22) {
-  const bar = colors.slice(from).map((c) => `<span style="background:${c};width:${w}px"></span>`).join('');
-  const labels = levels.slice(from, -1).map((v) => `<span style="width:${w}px">${v}</span>`).join('');
-  return `<div class="legend-title">${title}</div><div class="legend-bar">${bar}</div><div class="legend-labels">${labels}</div>`;
+  const cols = colors.slice(from), labs = levels.slice(from, colors.length);
+  const need = Math.max(...labs.map((v) => String(v).length)) * 6.5 + 6;     // 11px 字一個標籤要的寬度
+  w = Math.max(w, Math.min(need, Math.floor(460 / cols.length)));
+  const every = Math.ceil(need / w);
+  const bar = cols.map((c) => `<span style="background:${c};width:${w}px"></span>`).join('');
+  const labels = labs.map((v, i) => (i % every ? '' : `<span style="left:${i * w}px">${v}</span>`)).join('');
+  return `<div class="legend-title">${title}</div><div class="legend-bar">${bar}</div>
+    <div class="legend-labels abs" style="width:${cols.length * w}px">${labels}</div>`;
 }
 
 // ── 測站色階:levels[i] = 第 i 色的下界,最後一個是上界(只給圖例用)──
@@ -76,7 +82,9 @@ export const SCALES = {
       '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'] },
   temp: { levels: [-4, ...range(0, 38, 2), 40], colors: ramp(['#2c1b8f', '#2f6bd9', '#6ec6f0', '#9be27a', '#f7e65a', '#f39a2d', '#d7301f', '#7a0177'], 21) },
   rh: { levels: range(0, 100, 10), colors: ramp(['#8c510a', '#d8b365', '#f6e8c3', '#c7eae5', '#5ab4ac', '#01665e', '#08306b'], 10) },
-  pres: { levels: range(980, 1032, 4), colors: ramp(['#7a0177', '#d7301f', '#f39a2d', '#f7e65a', '#9be27a', '#6ec6f0', '#2f6bd9'], 13) },
+  // 氣壓:颱風中心可到 920 hPa 以下;低壓段 10 hPa 一級、980 以上 5、1000 以上 4
+  pres: { levels: [920, 930, 940, 950, 960, 970, 980, 985, 990, 995, 1000, 1004, 1008, 1012, 1016, 1020, 1024, 1028, 1032],
+    colors: ramp(['#2d0a3e', '#7a0177', '#c51b8a', '#d7301f', '#f39a2d', '#f7e65a', '#9be27a', '#6ec6f0', '#2f6bd9'], 18) },
   // 蒲福風級(氣象署 0–17 級):levels[k] = 第 k 級的下界(m/s),一級一色
   // 分組:0–4 藍、5–6 綠、7–9 黃、10–11 紅、12–13 紫、14–15 深紫、16 以上更深
   wind: { levels: BEAUFORT,
