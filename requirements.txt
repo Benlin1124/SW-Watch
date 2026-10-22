@@ -1,4 +1,5 @@
-# 執行排程:python -m pipeline.scheduler(Python 3.11,64 位元)
+# Scheduler: python -m pipeline.scheduler (Python 3.11, 64-bit)
+# Keep this file ASCII-only: pip on Chinese Windows reads it as cp950.
 numpy
 scipy
 pandas
@@ -6,15 +7,15 @@ requests
 shapely>=2.0
 pyproj
 apscheduler>=3.10,<4
-# 系集路徑
+# ensemble tracks
 pdbufr
 ecmwf-opendata
 eccodes
-# 衛星(Himawari-9,AWS)
+# satellite (Himawari-9 on AWS)
 satpy
 pyresample
 pykdtree
 s3fs
-# 上傳 Cloudflare R2;boto3 / botocore 要配合 s3fs 用的 aiobotocore 版本
+# Cloudflare R2 upload; boto3/botocore must match the aiobotocore used by s3fs
 boto3>=1.41,<1.42.20
 botocore<1.42.20
