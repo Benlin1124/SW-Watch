@@ -26,6 +26,7 @@ COLUMNS = ["storm", "name", "member", "ftype", "tau", "lat", "lon", "mslp"]
 BASIN_LETTER = {"AL": "L", "EP": "E", "CP": "C", "WP": "W", "SH": "S", "IO": "B", "SL": "Q"}
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 WINDOW_H = 12          # 初始時間後幾小時內持續嘗試
+CATCHUP_H = 72         # 排程重啟後,往回補抓這段時間內過了窗口、還沒抓到的初始時間(各來源都還留著)
 OUTLIER_K = 1.5
 
 
@@ -253,6 +254,7 @@ def candidate_inits(now):
 
 
 _missed = set()
+_catchup = None          # 程序啟動後第一次 run 建立 [(模式, 初始時間)],每個只補試一次
 _attempted = set()       # 這次程序啟動後試過的 (模式, 初始時間);沒試過就過窗口的不算 missed(例如排程剛啟動)
 
 
@@ -281,6 +283,41 @@ def run(models=None):
             if res == "new":
                 record_status(job, "new", init + "00", read_status(job).get("data_time"))
                 got.append(f"{model}@{init}")
+    got += catch_up(now, models)
+    return got
+
+
+def catch_up(now, models=None):
+    """重啟後補抓:CATCHUP_H 內、已過正常窗口但沒有原始檔的 (模式, 初始時間),各試一次。"""
+    global _catchup
+    if _catchup is None:
+        _catchup = []
+        t = now.replace(minute=0, second=0, microsecond=0)
+        t -= timedelta(hours=t.hour % 6)
+        while now - t <= timedelta(hours=CATCHUP_H):
+            if now - t > timedelta(hours=WINDOW_H):
+                init = t.strftime("%Y%m%d%H")
+                _catchup += [(m, init) for m in SOURCES if not raw_path(m, init).exists()]
+            t -= timedelta(hours=6)
+        if _catchup:
+            log.info("ens 補抓 %d 項:%s", len(_catchup), sorted({i for _, i in _catchup}))
+    got = []
+    while _catchup:
+        model, init = _catchup.pop(0)
+        if (models and model not in models) or raw_path(model, init).exists():
+            continue
+        job = f"ens_{model}"
+        try:
+            res = fetch_one(model, init)
+        except Exception as e:
+            log.warning("ens 補抓 %s %s 失敗:%s", model, init, e)
+            record_status(job, "error", init + "00", error=f"{type(e).__name__}: {e}")
+            continue
+        if res == "new":
+            record_status(job, "new", init + "00", read_status(job).get("data_time"))
+            got.append(f"{model}@{init}")
+        else:
+            record_status(job, "missed", init + "00")
     return got
 
 

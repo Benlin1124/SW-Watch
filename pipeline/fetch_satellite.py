@@ -23,6 +23,8 @@ LAYER = "satellite"
 N_SEG = 10
 _fs = None
 _attempted = set()           # (stamp, band):這次執行期間試過但還沒上架的,過窗口才記 missed
+_given_up = set()            # 過了窗口、試過仍沒有的 (stamp, band),不再檢查
+_since = None                # 補抓起點:程序啟動時 = 各頻道最後一筆(最多回溯 SAT_KEEP_DAYS),補完後跟著往前
 
 
 def fs():
@@ -163,30 +165,42 @@ def process(stamp, band, keys):
 def wanted(stamp, band, have):
     if band == "B03" and (int(stamp[10:12]) % config.SAT_B03_EVERY_MIN or not is_day(stamp)):
         return False
-    return stamp not in have[band]
+    return stamp not in have[band] and (stamp, band) not in _given_up
 
 
 def run(now=None):
     """最近 SAT_WAIT_MIN 分鐘內的時次,還沒有的頻道上架了就處理。回傳處理的 [(stamp, band)]。
     每輪只處理一個時次就結束(B03 一筆要 1–2 分鐘),下一分鐘重新從最新的找起,
     新上架的時次才不會被舊時次卡住。順序:B13/B08 由新到舊 → 都齊了才做 B03。"""
+    global _since
     now = now or datetime.now(timezone.utc)
     have = {b: set(read_index(f"{LAYER}/{b}")["times"]) for b in config.SAT_BANDS}
     t = now.replace(minute=now.minute - now.minute % 10, second=0, microsecond=0)
-    slots = []                                              # 窗口內、還缺頻道的時次(新的先)
-    for k in range(0, config.SAT_WAIT_MIN // 10 + 2):
-        slot = t - timedelta(minutes=10 * k)
+    wait = timedelta(minutes=config.SAT_WAIT_MIN)
+    if _since is None:                                      # 重啟:從各頻道最後一筆之後補到最新
+        lasts = [stamp_dt(max(v)) for v in have.values() if v]
+        floor = t - timedelta(days=config.SAT_KEEP_DAYS)
+        _since = max(min(lasts), floor) if lasts else t - wait
+        if _since < t - wait:
+            log.info("satellite 補抓 %s 之後的時次", _since.strftime("%Y%m%d%H%M"))
+    slots = []                                              # 還缺頻道的時次(新的先)
+    old_pending = False
+    slot = t
+    while slot >= _since:
         stamp = slot.strftime("%Y%m%d%H%M")
         need = [b for b in config.SAT_BANDS if wanted(stamp, b, have)]
-        if not need:
-            continue
-        if (now - slot).total_seconds() / 60 > config.SAT_WAIT_MIN:
-            for b in need:                                   # 過了窗口:試過才記 missed
-                if (stamp, b) in _attempted:
-                    record_status(f"sat_{b}", "missed", stamp, max(have[b], default=None), 0, None)
-                    _attempted.discard((stamp, b))
-            continue
-        slots.append((stamp, need))
+        if need and now - slot > wait:
+            for b in [b for b in need if (stamp, b) in _attempted]:   # 過了窗口、試過仍沒有 → missed,不再檢查
+                record_status(f"sat_{b}", "missed", stamp, max(have[b], default=None), 0, None)
+                _attempted.discard((stamp, b))
+                _given_up.add((stamp, b))
+            need = [b for b in need if (stamp, b) not in _given_up]
+            old_pending |= bool(need)
+        if need:
+            slots.append((stamp, need))
+        slot -= timedelta(minutes=10)
+    if not old_pending:
+        _since = max(_since, t - wait)                      # 補完了,之後只看窗口內
 
     avail_cache = {}
     for slow in (False, True):                               # 先 B13/B08,再 B03
