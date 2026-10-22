@@ -639,8 +639,39 @@ function bindStationTools() {
   for (const id of ['st-rank-on', 'st-rank-order', 'st-rank-n']) $(id).onchange = refreshStationUI;
 }
 
+/** 左側面板整個收合,與各圖層選項收合(狀態記在瀏覽器) */
+function bindCollapse() {
+  const panel = $('panel'), btn = document.createElement('button');
+  btn.id = 'panel-toggle';
+  panel.prepend(btn);
+  const setPanel = (hide) => {
+    panel.classList.toggle('collapsed', hide);
+    btn.textContent = hide ? '☰ 圖層' : '«';
+    btn.title = hide ? '展開選單' : '收合選單';
+  };
+  setPanel(!!prefs.get('panelHidden'));
+  btn.onclick = () => { const hide = !panel.classList.contains('collapsed'); setPanel(hide); prefs.set('panelHidden', hide); };
+
+  const folded = prefs.get('folded') ?? {};
+  for (const layer of document.querySelectorAll('#panel .layer')) {
+    const key = layer.dataset.layer, b = document.createElement('button');
+    b.className = 'fold';
+    const set = (f) => { layer.classList.toggle('folded', f); b.textContent = f ? '▸' : '▾'; b.title = f ? '展開選項' : '收合選項'; };
+    set(!!folded[key]);
+    b.onclick = (e) => {
+      e.preventDefault();            // 在 label 裡:不要順便切換圖層開關
+      const f = !layer.classList.contains('folded');
+      set(f);
+      folded[key] = f;
+      prefs.set('folded', folded);
+    };
+    layer.querySelector('.layer-head').prepend(b);
+  }
+}
+
 // ── 綁定 UI ──
 function bindUI() {
+  bindCollapse();
   $('btn-sync').onclick = () => {
     if (state.playing) return;
     setSync(!state.sync);

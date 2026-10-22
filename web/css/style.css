@@ -170,3 +170,13 @@ body[data-map-theme=dark] .st-label { color: #fff; text-shadow: 0 0 3px #000, 0 
 
 .reset-prefs { margin-top: 8px; font-size: 12px; }
 .sc-tabs select { flex: 0 0 auto; padding: 2px 4px; }
+
+/* 收合:整個面板、各圖層選項 */
+#panel-toggle { float: right; padding: 0 8px; margin: 2px -4px 0 0; }
+#panel.collapsed { width: auto; padding: 6px; overflow: hidden; }
+#panel.collapsed > section { display: none; }
+#panel.collapsed #panel-toggle { float: none; margin: 0; }
+.fold { border: none; background: none; padding: 0 2px; width: 16px; color: var(--muted); }
+.fold:hover { background: none; color: var(--fg); }
+.layer.folded .layer-opts { display: none; }
+.layer-opts { padding-left: 28px; }
