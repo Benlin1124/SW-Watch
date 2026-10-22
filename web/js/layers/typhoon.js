@@ -64,7 +64,7 @@ export class TyphoonLayer {
   visible = true;
   show_cone = true;
   circles = { now: true, fcst: true, past: false };   // 暴風圈:目前 / 各預報點 / 過去各定位
-  circleStyle = { nowWidth: 1.8, otherWidth: 1, fill: 20 };   // 線寬(px):目前 / 預報與過去;填色濃度 %(預報與過去為 1/5)
+  circleStyle = { nowWidth: 1.8, fcstWidth: 1, nowFill: 20, fcstFill: 4 };   // 線寬(px)、填色濃度(%):目前 / 預報(過去各點同預報)
   theme = 'light';
   show_labels = true;
   fixedIssue = "";         // 使用者指定的預報初始時間;空字串 = 依時間軸
@@ -75,8 +75,8 @@ export class TyphoonLayer {
 
   constructor(map) { this.map = map; }
 
-  widthExpr() { return ['match', ['get', 'kind'], 'now', this.circleStyle.nowWidth, this.circleStyle.otherWidth]; }
-  fillExpr() { const f = this.circleStyle.fill / 100; return ['match', ['get', 'kind'], 'now', f, f / 5]; }
+  widthExpr() { const c = this.circleStyle; return ['match', ['get', 'kind'], 'now', c.nowWidth, c.fcstWidth]; }
+  fillExpr() { const c = this.circleStyle; return ['match', ['get', 'kind'], 'now', c.nowFill / 100, c.fcstFill / 100]; }
 
   /** 暴風圈線寬 / 填色濃度 */
   setCircleStyle(style) {

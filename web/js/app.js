@@ -621,10 +621,12 @@ function bindUI() {
   for (const c of document.querySelectorAll('[data-ty-circle]')) {
     c.onchange = () => { typhoon.circles[c.dataset.tyCircle] = c.checked; typhoon.draw(); };
   }
-  const tyWidth = () => typhoon.setCircleStyle({ nowWidth: +$('ty-w-now').value || 0, otherWidth: +$('ty-w-other').value || 0 });
-  $('ty-w-now').oninput = tyWidth;
-  $('ty-w-other').oninput = tyWidth;
-  $('ty-fill').oninput = (e) => typhoon.setCircleStyle({ fill: +e.target.value });
+  // 暴風圈:線寬、填色濃度,目前 / 預報分開設(過去各點同預報)
+  const tyStyle = () => typhoon.setCircleStyle({
+    nowWidth: +$('ty-w-now').value || 0, fcstWidth: +$('ty-w-fcst').value || 0,
+    nowFill: +$('ty-fill-now').value, fcstFill: +$('ty-fill-fcst').value,
+  });
+  for (const id of ['ty-w-now', 'ty-w-fcst', 'ty-fill-now', 'ty-fill-fcst']) $(id).oninput = tyStyle;
   $('ty-labels').onchange = (e) => { typhoon.show_labels = e.target.checked; typhoon.draw(); };
   $('basemap').onchange = (e) => setTheme(e.target.value);
   $('chk-grid').onchange = (e) => {
