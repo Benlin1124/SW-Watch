@@ -23,7 +23,12 @@ export const STATION_VARS = {
   rain_today: { name: '今日累積雨量', unit: 'mm', scale: 'rain', rain: true },
 };
 
-const AGG_HOURS = [1, 2, 3, 6];
+const AGG_HOURS = [1, 2, 3, 6, 12, 24, 48, 72];
+export const STATION_TYPES = { manned: '局屬站', auto: '自動站', rain: '雨量站' };
+
+/** 站種;舊快照沒有 type 欄位時用站號 / 有無氣象要素推估 */
+const stationType = (r, f) => (f.type != null && r[f.type]) || (String(r[f.id]).startsWith('46') ? 'manned'
+  : r[f.temp] == null && r[f.rh] == null && r[f.ws] == null ? 'rain' : 'auto');
 const CACHE_MAX = 60;
 const LABEL_ZOOM = 9;          // 放大到這個等級才標數值
 const LABEL_MAX = 500;
@@ -57,8 +62,31 @@ export class StationLayer {
   current = null;          // { stamp, features, agg }
   cache = new Map();       // path → Promise<JSON>
   markers = [];
+  filter = { county: '', types: new Set(Object.keys(STATION_TYPES)) };   // 縣市('' = 全部)、站種
+  all = new Map();         // 站號 → 基本資料(不受篩選、不管有沒有值;搜尋用)
+  snap = null;             // 目前時間的快照(資訊卡顯示各變數當前值)
+  selected = null;         // 點選中的站號
+  onSelect = null;         // 點測站時呼叫(站號)
 
   constructor(map) { this.map = map; }
+
+  get filterKey() { return `${this.filter.county}|${[...this.filter.types].sort().join(',')}`; }
+
+  passes(p) { return (!this.filter.county || p.county === this.filter.county) && this.filter.types.has(p.type); }
+
+  setFilter(f) { Object.assign(this.filter, f); this.current = null; }
+
+  /** 目前畫面(含篩選)的站依數值排序;order 'desc' 大到小 */
+  ranking(n = 10, order = 'desc') {
+    const list = [...(this.current?.features ?? [])].map((ft) => ft.properties);
+    list.sort((a, b) => (order === 'desc' ? b.v - a.v : a.v - b.v));
+    return list.slice(0, n);
+  }
+
+  select(id) {
+    this.selected = id;
+    if (this.map.getLayer('st-sel')) this.map.setFilter('st-sel', ['==', ['get', 'id'], id ?? '']);
+  }
 
   get v() { return STATION_VARS[this.variable]; }
   get aggMode() { return this.stat !== 'now' && this.v.agg; }
@@ -89,6 +117,9 @@ export class StationLayer {
       layout: { 'icon-image': 'st-arrow', 'icon-rotate': ['get', 'dir'], 'icon-rotation-alignment': 'map',
         'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 6, 0.28, 9, 0.5, 12, 0.8] },
       paint: { 'icon-color': '#888', 'icon-halo-color': '#333', 'icon-halo-width': 0.6 } }, beforeId);
+    m.addLayer({ id: 'st-sel', type: 'circle', source: 'stations', filter: ['==', ['get', 'id'], ''],
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 9, 10, 15], 'circle-color': 'rgba(0,0,0,0)',
+        'circle-stroke-color': '#00e5ff', 'circle-stroke-width': 3 } }, beforeId);
     this.applyStyle();
 
     this.popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
@@ -98,6 +129,7 @@ export class StationLayer {
         this.popup.setLngLat(e.features[0].geometry.coordinates).setHTML(this.popupHTML(e.features[0].properties)).addTo(m);
       });
       m.on('mouseleave', id, () => { m.getCanvas().style.cursor = ''; this.popup.remove(); });
+      m.on('click', id, (e) => this.onSelect?.(e.features[0].properties.id));
     }
     m.on('moveend', () => this.drawLabels());
   }
@@ -165,11 +197,15 @@ export class StationLayer {
       val = (r) => r[f[this.variable]];
     }
     const out = [];
+    this.snap = { time: snap.time, f, rows: new Map(snap.rows.map((r) => [r[f.id], r])) };
     for (const r of snap.rows) {
+      const base = { id: r[f.id], name: r[f.name], county: r[f.county] ?? '', town: r[f.town] ?? '',
+        alt: r[f.alt], type: stationType(r, f), lon: r[f.lon], lat: r[f.lat] };
+      this.all.set(base.id, base);
       const x = val(r);
-      if (x == null) continue;
-      const props = { id: r[f.id], name: r[f.name], county: r[f.county] ?? '', town: r[f.town] ?? '',
-        alt: r[f.alt], obs: v.rain ? snap.time : r[f.obs], v: x };
+      if (x == null || !this.passes(base)) continue;
+      const { lon, lat, ...rest } = base;
+      const props = { ...rest, obs: v.rain ? snap.time : r[f.obs], v: x };
       // 風向 = 風吹來的方向,箭頭畫成吹去的方向;最大 / 最小沒有對應風向,只畫圓點
       if (v.dir && !agg && r[f[v.dir]] != null && x > 0) props.dir = (r[f[v.dir]] + 180) % 360;
       if (v.scale === 'wind') props.bf = beaufort(x);
@@ -179,7 +215,7 @@ export class StationLayer {
   }
 
   async show(stamp) {
-    const key = `${stamp}|${this.variable}|${this.stat}|${this.hours}`;
+    const key = `${stamp}|${this.variable}|${this.stat}|${this.hours}|${this.filterKey}`;
     if (stamp && this.current?.key === key) return;
     this.wanted = key;
     const src = this.map.getSource('stations');
@@ -266,7 +302,7 @@ export class StationLayer {
 
   setVisible(v) {
     this.visible = v;
-    for (const id of ['st-pt', 'st-arrow', 'st-zero']) this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
+    for (const id of ['st-pt', 'st-arrow', 'st-zero', 'st-sel']) this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
     if (!v) this.popup?.remove();
     this.drawLabels();
   }
@@ -279,4 +315,4 @@ export class StationLayer {
   }
 }
 
-export { AGG_HOURS };
+

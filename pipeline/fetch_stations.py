@@ -3,12 +3,12 @@
 過去 1/2/3/6 小時最大最小 → data/stations/agg_{N}h/{stamp}.json(station_agg)
 並用同一批雨量做 IDW → data/rain/idw/{acc}/{stamp}.bin.gz。"""
 from .common import check_update, fetch_cwa, log, save_points, twd67_to_wgs84, utc_stamp
-from . import config, idw, station_agg, station_series
+from . import config, idw, station_agg, station_recent, station_series
 
 LAYER = "stations"
 
 # 輸出欄位(順序即 rows 每列的順序)
-META_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "obs"]
+META_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "obs", "type"]   # type:manned 局屬 / auto 自動 / rain 雨量
 WX_FIELDS = ["temp", "rh", "pres", "ws", "wd", "gust", "gust_dir", "tmax", "tmin"]
 RAIN_FIELDS = [f"rain_{k}" for k in config.RAIN_ACC]
 FIELDS = META_FIELDS + WX_FIELDS + RAIN_FIELDS
@@ -56,6 +56,7 @@ def collect():
         for st in fetch_cwa(code)["dataset"]["Station"]:
             w = st["WeatherElement"]
             rec = sta.setdefault(st["StationId"], _base(st))
+            rec["type"] = "manned" if code == "O-A0003-001" else rec.get("type", "auto")
             rec.update(
                 temp=_num(w.get("AirTemperature"), True),
                 rh=_num(w.get("RelativeHumidity")),
@@ -73,6 +74,7 @@ def collect():
     rain_times = []
     for st in fetch_cwa("O-A0002-001")["dataset"]["Station"]:
         rec = sta.setdefault(st["StationId"], _base(st))
+        rec.setdefault("type", "rain")
         rain_times.append(st["ObsTime"]["DateTime"])
         for acc, key in config.RAIN_ACC.items():
             rec[f"rain_{acc}"] = _num(_get(st, "RainfallElement", key, "Precipitation"))
@@ -94,6 +96,7 @@ def run():
     log.info("stations %s 完成(%d 站)", stamp, len(rows))
     station_series.append(snapshot)
     station_agg.run(stamp)
+    station_recent.run(snapshot)
     idw.run(stamp, recs)
     return status, stamp, prev
 

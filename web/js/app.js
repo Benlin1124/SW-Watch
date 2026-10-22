@@ -4,7 +4,8 @@ import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
 import { RadarLayer } from './layers/radar.js';
 import { SatelliteLayer } from './layers/satellite.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
-import { STATION_VARS, StationLayer } from './layers/stations.js';
+import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js';
+import { StationCard } from './station_card.js';
 import { EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
 import { getJSON } from './data.js';
 
@@ -91,6 +92,8 @@ const satellite = new SatelliteLayer(map);
 const typhoon = new TyphoonLayer(map);
 const ens = new EnsembleLayer(map);
 const stations = new StationLayer(map);
+const card = new StationCard(stations);
+stations.onSelect = (id) => openStation(id, false);
 const LAYERS = [satellite, radar, stations, typhoon, ens];
 
 // ── 狀態 ──
@@ -150,7 +153,8 @@ async function render() {
     try { await l.show(stamp); } catch (e) { console.warn(l.key, stamp, e); await l.show(null); }
     if (seq === state.renderSeq) updateLayerTime(l, stamp, sync);   // 較慢的舊畫面不覆蓋新的時間標示
   }));
-  if (!state.playing) renderStorms();
+  if (!state.playing) { renderStorms(); refreshStationUI(); }
+  card.update(state.T);
 }
 
 function updateLayerTime(l, stamp, sync) {
@@ -543,6 +547,7 @@ function bindStationUI() {
   const apply = async () => {
     const v = STATION_VARS[vSel.value];
     if (!v.agg) $('st-stat').value = 'now';
+    $('st-rank-order').value = $('st-stat').value === 'min' ? 'asc' : 'desc';   // 最小值排行預設低到高
     $('st-stat').disabled = !v.agg;
     $('st-hours').disabled = !v.agg || $('st-stat').value === 'now';
     const changed = await stations.configure({ variable: vSel.value, stat: $('st-stat').value, hours: +$('st-hours').value });
@@ -583,6 +588,55 @@ function bindSatUI() {
   $('op-satellite').oninput = (e) => satellite.setOpacity(e.target.value / 100);
 }
 
+// ── 測站:搜尋、篩選、排行榜、資訊卡 ──
+function openStation(id, fly = true) {
+  const info = stations.all.get(id);
+  if (!info) return;
+  if (fly) map.flyTo({ center: [info.lon, info.lat], zoom: Math.max(map.getZoom(), 9) });
+  card.open(id, state.T);
+}
+
+let stListSize = 0;
+/** 搜尋清單、縣市選單(測站清單變動時才重建)與排行榜 */
+function refreshStationUI() {
+  if (stations.all.size !== stListSize) {
+    stListSize = stations.all.size;
+    const all = [...stations.all.values()];
+    $('st-list').innerHTML = all.map((s) => `<option value="${s.name}（${s.id}）">${s.county}${s.town}　${STATION_TYPES[s.type] ?? ''}</option>`).join('');
+    const sel = $('st-county'), cur = sel.value;
+    const counties = [...new Set(all.map((s) => s.county).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    sel.innerHTML = '<option value="">全部</option>' + counties.map((c) => `<option>${c}</option>`).join('');
+    sel.value = cur;
+  }
+  const box = $('st-rank');
+  box.hidden = !$('st-rank-on').checked;
+  if (box.hidden) return;
+  const v = stations.v, list = stations.ranking(+$('st-rank-n').value, $('st-rank-order').value);
+  box.innerHTML = list.length ? list.map((p) => `<li data-id="${p.id}">${p.name} <small>${p.county}${p.town}</small>
+      <b>${stations.fmt(p.v)}${v.scale === 'wind' ? `（${p.bf}級）` : ` ${v.unit}`}</b></li>`).join('')
+    : '<small>目前沒有資料</small>';
+  for (const li of box.querySelectorAll('li')) li.onclick = () => openStation(li.dataset.id);
+}
+
+function bindStationTools() {
+  $('st-search').onchange = (e) => {
+    const q = e.target.value.trim();
+    const m = q.match(/（([^）]+)）$/);
+    const id = m ? m[1] : [...stations.all.values()].find((s) => s.id === q || s.name === q)?.id;
+    if (id) { openStation(id); e.target.value = ''; }
+    else if (q) toast(`找不到測站「${q}」`, 2000);
+  };
+  $('st-county').onchange = (e) => { stations.setFilter({ county: e.target.value }); render(); };
+  for (const c of document.querySelectorAll('#st-types input')) {
+    c.onchange = () => {
+      const types = new Set([...document.querySelectorAll('#st-types input:checked')].map((x) => x.value));
+      stations.setFilter({ types });
+      render();
+    };
+  }
+  for (const id of ['st-rank-on', 'st-rank-order', 'st-rank-n']) $(id).onchange = refreshStationUI;
+}
+
 // ── 綁定 UI ──
 function bindUI() {
   $('btn-sync').onclick = () => {
@@ -606,6 +660,7 @@ function bindUI() {
 
   $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   bindStationUI();
+  bindStationTools();
   bindSatUI();
   pairNumbers();
   $('play-range').onchange = () => {

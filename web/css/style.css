@@ -136,3 +136,33 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 .seg { display: flex; gap: 12px; flex-wrap: wrap; }
 body[data-map-theme=light] .ty-name, body[data-map-theme=light] .ty-label { color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; }
 body[data-map-theme=dark] .st-label { color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
+
+/* 測站:搜尋、篩選、排行榜 */
+#st-search { flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--fg); padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 3px; }
+.st-rank-head { display: flex; align-items: center; gap: 6px; }
+.st-rank-head label { flex: 1; white-space: nowrap; }
+#st-rank { margin: 0; padding: 0 0 0 22px; max-height: 260px; overflow-y: auto; color: var(--fg); }
+#st-rank li { padding: 2px 4px; cursor: pointer; border-radius: 3px; }
+#st-rank li:hover { background: rgba(255, 255, 255, 0.08); }
+#st-rank li b { float: right; font-variant-numeric: tabular-nums; }
+#st-rank li small { color: var(--muted); }
+
+/* 測站資訊卡 */
+#st-card { position: absolute; top: 64px; right: 56px; z-index: 6; width: 440px; max-width: calc(100vw - 80px);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; color: var(--fg); }
+.sc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+#sc-title { font-size: 15px; font-weight: 700; }
+#sc-sub { font-size: 12px; color: var(--muted); }
+#sc-close { padding: 2px 8px; }
+#sc-now { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; margin: 8px 0; font-size: 12px; }
+#sc-now div { display: flex; justify-content: space-between; gap: 6px; }
+#sc-now span { color: var(--muted); }
+#sc-now b { font-variant-numeric: tabular-nums; }
+#sc-now .sc-obs, .sc-nodata { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.sc-tabs { display: flex; gap: 4px; margin-bottom: 4px; }
+.sc-tabs button { flex: 1; padding: 3px 0; }
+.sc-tabs button.on { background: var(--accent); color: #000; }
+#sc-chart { min-height: 40px; }
+#sc-chart .u-legend { font-size: 11px; color: var(--fg); }
+#sc-note { font-size: 11px; color: var(--muted); margin-top: 2px; }

@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="css/style.css">
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css">
+  <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
 </head>
 <body>
   <div id="map"></div>
@@ -78,6 +80,21 @@
             </select>
           </label>
           <label>透明度 <input type="range" id="op-stations" min="0" max="100" value="100"></label>
+          <label>搜尋 <input type="search" id="st-search" list="st-list" placeholder="站名或站號，例如 臺北、466920"></label>
+          <datalist id="st-list"></datalist>
+          <label>縣市 <select id="st-county"><option value="">全部</option></select></label>
+          <div class="ty-toggles" id="st-types">
+            <span>站種</span>
+            <label><input type="checkbox" value="manned" checked> 局屬站</label>
+            <label><input type="checkbox" value="auto" checked> 自動站</label>
+            <label><input type="checkbox" value="rain" checked> 雨量站</label>
+          </div>
+          <div class="st-rank-head">
+            <label><input type="checkbox" id="st-rank-on"> 排行榜</label>
+            <select id="st-rank-order"><option value="desc">高 → 低</option><option value="asc">低 → 高</option></select>
+            <select id="st-rank-n"><option>10</option><option>20</option><option>50</option></select>
+          </div>
+          <ol id="st-rank" hidden></ol>
         </div>
       </div>
 
@@ -160,6 +177,20 @@
         <label><input type="checkbox" id="chk-county" checked> 縣市界</label>
       </div>
     </section>
+  </aside>
+
+  <aside id="st-card" hidden>
+    <div class="sc-head">
+      <div><div id="sc-title"></div><div id="sc-sub"></div></div>
+      <button id="sc-close" title="關閉">✕</button>
+    </div>
+    <div id="sc-now"></div>
+    <div class="sc-tabs">
+      <button data-tab="temp">溫度</button><button data-tab="rh">濕度</button><button data-tab="pres">氣壓</button>
+      <button data-tab="wind">風</button><button data-tab="rain">雨量</button>
+    </div>
+    <div id="sc-chart"></div>
+    <div id="sc-note"></div>
   </aside>
 
   <div id="readout"></div>

@@ -14,7 +14,7 @@ from .common import log
 
 SERIES_DIR = config.DATA_DIR / "stations" / "series"
 LAST_PATH = SERIES_DIR / "_last.json"          # 各站最後寫入時間,避免每次去讀 1000 多個檔尾
-INFO_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town"]
+INFO_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "type"]
 SKIP = set(INFO_FIELDS)                        # 其餘欄位都進 CSV;obs 改名 wx_obs(氣象要素的觀測時間)
 
 
@@ -35,7 +35,7 @@ def _update_info(fields, rows):
             info = {r["id"]: r for r in csv.DictReader(f)}
     for row in rows:
         rec = dict(zip(fields, row))
-        info[rec["id"]] = {k: _fmt(rec[k]) for k in INFO_FIELDS}
+        info[rec["id"]] = {k: _fmt(rec.get(k)) for k in INFO_FIELDS}
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8-sig", newline="") as f:   # utf-8-sig:Excel 開中文不亂碼
         w = csv.DictWriter(f, INFO_FIELDS)
