@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from . import config
-from .common import log, save_json
+from .common import log, remove, save_json
 from .fetch_satellite import cleanup as cleanup_satellite
 from .station_series import compress_old_months
 
@@ -22,7 +22,7 @@ def run():
             continue
         for t in drop:
             for f in idx_path.parent.glob(f"{t}.*"):
-                f.unlink()
+                remove(f)
         idx["times"] = [t for t in idx["times"] if t not in set(drop)]
         idx["fetched"] = {t: v for t, v in idx.get("fetched", {}).items() if t not in set(drop)}
         save_json(idx_path, idx)

@@ -248,8 +248,8 @@ def backfill(start, end, bands):
 
 def cleanup():
     """本機只留 SAT_KEEP_DAYS 天。"""
-    from .common import save_json
     import json
+    from .common import remove, save_json
     cutoff = (datetime.now(timezone.utc) - timedelta(days=config.SAT_KEEP_DAYS)).strftime("%Y%m%d%H%M")
     for band in config.SAT_BANDS:
         d = config.DATA_DIR / LAYER / band
@@ -261,7 +261,7 @@ def cleanup():
         if not drop:
             continue
         for t in drop:
-            (d / f"{t}.bin.gz").unlink(missing_ok=True)
+            remove(d / f"{t}.bin.gz")
         idx["times"] = [t for t in idx["times"] if t not in drop]
         idx["fetched"] = {t: v for t, v in idx.get("fetched", {}).items() if t not in drop}
         save_json(idx_path, idx)

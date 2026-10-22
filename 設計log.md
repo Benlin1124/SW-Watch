@@ -511,3 +511,15 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 衛星：程序啟動時，從各頻道最後一筆之後（最多回溯 `SAT_KEEP_DAYS`）一路補到最新；仍是每輪一個時次、新的先、B13／B08 先於 B03。AWS 上真的沒有的時次試過一次就記 `missed`、不再重試。補完後只看 60 分鐘窗口。（模擬「停 3 小時後重啟」驗證過。）
 - 系集：啟動後第一次執行時，列出 72 小時內（`CATCHUP_H`）已過正常窗口、但沒有原始檔的（模式, 初始時間），每個補試一次；抓不到記 `missed`。
 - 氣象署雷達／雨量／測站／颱風沒有歷史 API：重啟只能抓到當下最新一筆，中間停掉的時段補不回來，時間軸上留空。
+
+### 排程換到另一台電腦＋R2 上傳＋Pages 部署（2026-10-22）
+
+- 使用者要在另一台電腦跑 `python -m pipeline.scheduler`，Cloudflare 用使用者自己的帳號（後台操作由使用者自己做，步驟見 `部署說明.md`）。
+- `pipeline/r2.py`：`common._atomic_write`／`common.remove` 把寫入／刪除排進待辦，排程每 30 秒 `flush()`（資料檔先傳、index.json 最後傳）；啟動時 `reconcile()` 列出 R2 補傳缺的或不同的檔，**只補不刪**（新電腦沒有舊資料時不會刪掉 R2 歷史）。沒設定 R2_* 就只存本機。
+  - 不上傳：`stations/series/`（每站月 CSV）、`typhoon/cwa/`（原始歸檔）、`typhoon/ens_raw/`。
+  - Cache-Control：index.json／status.json `no-cache`；其他 JSON 60 秒；格點 1 天。格點不設 Content-Encoding，前端自己 gunzip。
+  - boto3／botocore 要釘在 < 1.42.20，否則和 s3fs（aiobotocore）衝突、衛星會壞。
+- `.github/workflows/pages.yml`：推送 `web/` 時自動部署到 GitHub Pages（Source 要設成 GitHub Actions）。
+- `web/js/config.js`：`R2_URL` 填 r2.dev 網址後，github.io 讀 R2；本機網頁加 `?data=r2` 也能讀 R2（排程搬走後本機沒有新資料）。
+- 遷移建議：舊電腦 `data\` 整個複製到新電腦，保留歷史、各站 CSV 與 index；同一時間只能一台跑排程。
+- `SAT_KEEP_DAYS` 可在 `.env` 調整（新電腦磁碟夠就調大）。

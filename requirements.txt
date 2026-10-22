@@ -1,14 +1,20 @@
+# 執行排程:python -m pipeline.scheduler(Python 3.11,64 位元)
 numpy
 scipy
+pandas
 requests
 shapely>=2.0
+pyproj
 apscheduler>=3.10,<4
-# Phase 3 衛星 / Phase 4 系集
-# satpy
-# pyresample
-# s3fs
+# 系集路徑
 pdbufr
 ecmwf-opendata
 eccodes
-pandas
-pyproj
+# 衛星(Himawari-9,AWS)
+satpy
+pyresample
+pykdtree
+s3fs
+# 上傳 Cloudflare R2;boto3 / botocore 要配合 s3fs 用的 aiobotocore 版本
+boto3>=1.41,<1.42.20
+botocore<1.42.20

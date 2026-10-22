@@ -3,14 +3,15 @@
 整合雷達回波、衛星雲圖（可見光／水氣／紅外線）、測站觀測、雨量圖與颱風（官方＋系集）預測路徑的網頁監控平台，所有圖層都可以選擇歷史時間。
 
 - 資料處理：`pipeline/`（Python，本機或樹莓派排程執行，輸出靜態檔到 `data/`）
-- 前端：`web/`（JS + MapLibre GL JS；目前有雷達回波、氣象署颱風路徑、時間軸、同步切換）
+- 前端：`web/`（JS + MapLibre GL JS；衛星雲圖、雷達回波、測站、氣象署颱風路徑、系集路徑、時間軸、同步切換）
+- 部署（排程電腦 + Cloudflare R2 + GitHub Pages）：[部署說明.md](部署說明.md)
 - 設計與進度：[設計log.md](設計log.md)
 
 ## 執行
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env          # 填入氣象資料開放平臺授權碼 CWA_KEY
+cp .env.example .env          # 填入氣象資料開放平臺授權碼 CWA_KEY（與 R2 金鑰，見部署說明）
 python -m pipeline.scheduler --once   # 各資料抓一次
 python -m pipeline.scheduler          # 常駐排程
 ```

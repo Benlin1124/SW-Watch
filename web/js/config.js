@@ -1,8 +1,9 @@
-// 資料來源:本機開發讀專案的 data/;部署到 github.io 時改讀 Cloudflare R2(建好 bucket 後填入網址)
+// 資料來源:github.io 讀 Cloudflare R2;本機開發讀專案的 data/,網址加 ?data=r2 也可以改讀 R2
+// R2_URL = R2 bucket 的公開網址(r2.dev 子網域或自訂網域),見 部署說明.md
 const R2_URL = '';
 
-export const DATA_BASE_URL =
-  location.hostname.endsWith('github.io') && R2_URL ? R2_URL : new URL('../data/', location.href).href;
+const useR2 = R2_URL && (location.hostname.endsWith('github.io') || new URLSearchParams(location.search).get('data') === 'r2');
+export const DATA_BASE_URL = useR2 ? R2_URL.replace(/\/?$/, '/') : new URL('../data/', location.href).href;
 
 export const STEP_MIN = 10;          // 時間軸一格 = 10 分鐘
 export const TIMELINE_DAYS = 7;      // 時間軸最多往回幾天

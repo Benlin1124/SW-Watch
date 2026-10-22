@@ -13,7 +13,7 @@ import numpy as np
 import pyproj
 import requests
 
-from . import config
+from . import config, r2
 
 log = logging.getLogger("pipeline")
 
@@ -155,6 +155,13 @@ def _atomic_write(path, data: bytes):
     tmp = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
     tmp.write_bytes(data)
     os.replace(tmp, path)
+    r2.mark_put(path)
+
+
+def remove(path):
+    """刪除本機檔,並排進 R2 刪除待辦。"""
+    path.unlink(missing_ok=True)
+    r2.mark_del(path)
 
 
 def save_json(path, obj, gz=False):

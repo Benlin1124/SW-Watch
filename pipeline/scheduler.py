@@ -7,13 +7,14 @@
 每次檢查都和上一筆比較,寫進 data/status.json 與 logs/fetch_history.csv。"""
 import argparse
 import logging
+import os
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from . import (cleanup, config, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_satellite, fetch_stations,
-               fetch_typhoon)
+               fetch_typhoon, r2)
 from .common import read_status, record_status, stamp_dt
 
 log = logging.getLogger("pipeline")
@@ -117,6 +118,22 @@ def safe_satellite():
         log.exception("satellite 失敗")
 
 
+def safe_r2_flush():
+    try:
+        n, d = r2.flush()
+        if n or d:
+            log.debug("R2 上傳 %d、刪除 %d", n, d)
+    except Exception:
+        log.exception("R2 上傳失敗")
+
+
+def safe_r2_reconcile():
+    try:
+        r2.reconcile()
+    except Exception:
+        log.exception("R2 比對失敗")
+
+
 def safe_cleanup():
     try:
         cleanup.run()
@@ -144,6 +161,12 @@ def main():
     sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
     sched.add_job(safe_satellite, "cron", minute="*", id="satellite", max_instances=1, coalesce=True,
                   misfire_grace_time=50)
+    if r2.enabled():
+        sched.add_job(safe_r2_flush, "interval", seconds=30, id="r2_flush", max_instances=1, coalesce=True)
+        sched.add_job(safe_r2_reconcile, "date", run_date=datetime.now(timezone.utc), id="r2_reconcile")
+        log.info("R2 上傳已啟用:bucket %s", os.environ["R2_BUCKET"])
+    else:
+        log.info("R2 未設定(.env 沒有 R2_*),只存本機")
     sched.add_job(safe_cleanup, "cron", hour=19, minute=30, id="cleanup")  # 台灣 03:30
     for name, job, _ in jobs:          # 啟動時先跑一輪
         sched.add_job(job, "date", run_date=datetime.now(timezone.utc),
