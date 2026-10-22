@@ -176,6 +176,7 @@
         <label><input type="checkbox" id="chk-grid" checked> 經緯網格</label>
         <label><input type="checkbox" id="chk-county" checked> 縣市界</label>
       </div>
+      <button id="btn-reset-prefs" class="reset-prefs" title="設定會自動存在這個瀏覽器，重新整理後還原">還原預設設定</button>
     </section>
   </aside>
 
@@ -188,6 +189,7 @@
     <div class="sc-tabs">
       <button data-tab="temp">溫度</button><button data-tab="rh">濕度</button><button data-tab="pres">氣壓</button>
       <button data-tab="wind">風</button><button data-tab="rain">雨量</button>
+      <select id="sc-hours" title="圖表時段"></select>
     </div>
     <div id="sc-chart"></div>
     <div id="sc-note"></div>

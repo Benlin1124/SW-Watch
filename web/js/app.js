@@ -6,8 +6,9 @@ import { SatelliteLayer } from './layers/satellite.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
 import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js';
 import { StationCard } from './station_card.js';
-import { EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
+import { defaultCfg, EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
 import { getJSON } from './data.js';
+import * as prefs from './prefs.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -48,8 +49,8 @@ const map = new maplibregl.Map({
       { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': th0.land } },
     ],
   },
-  center: [121, 23.7],
-  zoom: 6.2,
+  center: prefs.get('view')?.center ?? [121, 23.7],
+  zoom: prefs.get('view')?.zoom ?? 6.2,
   attributionControl: { compact: true, customAttribution: '資料：中央氣象署、NCDR、ECMWF (CC BY 4.0)、NOAA NCEP、Google DeepMind WeatherLab' },
 });
 
@@ -91,6 +92,8 @@ const radar = new RadarLayer(map);
 const satellite = new SatelliteLayer(map);
 const typhoon = new TyphoonLayer(map);
 const ens = new EnsembleLayer(map);
+// 系集各模式的設定(初始時間不存:下次打開已過時)
+for (const [m, c] of Object.entries(prefs.get('ensCfg') ?? {})) ens.cfg[m] = { ...defaultCfg(), ...c, init: '' };
 const stations = new StationLayer(map);
 const card = new StationCard(stations);
 stations.onSelect = (id) => openStation(id, false);
@@ -596,7 +599,7 @@ function openStation(id, fly = true) {
   card.open(id, state.T);
 }
 
-let stListSize = 0;
+let stListSize = 0, stCountyRestored = false;
 /** 搜尋清單、縣市選單(測站清單變動時才重建)與排行榜 */
 function refreshStationUI() {
   if (stations.all.size !== stListSize) {
@@ -606,7 +609,14 @@ function refreshStationUI() {
     const sel = $('st-county'), cur = sel.value;
     const counties = [...new Set(all.map((s) => s.county).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     sel.innerHTML = '<option value="">全部</option>' + counties.map((c) => `<option>${c}</option>`).join('');
-    sel.value = cur;
+    const want = cur || (!stCountyRestored ? prefs.get('controls')?.['st-county'] ?? '' : '');
+    stCountyRestored = true;
+    sel.value = counties.includes(want) ? want : '';
+    if (sel.value !== cur) {           // 上次選的縣市(縣市清單要等測站資料到了才有)
+      stations.setFilter({ county: sel.value });
+      setTimeout(render);
+      return;
+    }
   }
   const box = $('st-rank');
   box.hidden = !$('st-rank-on').checked;
@@ -689,6 +699,17 @@ function bindUI() {
     for (const id of ['grid-major', 'grid-minor']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };
   $('chk-county').onchange = (e) => map.setLayoutProperty('county', 'visibility', e.target.checked ? 'visible' : 'none');
+  $('btn-reset-prefs').onclick = () => { prefs.reset(); location.reload(); };
+  map.on('moveend', () => {
+    const c = map.getCenter();
+    prefs.set('view', { center: [+c.lng.toFixed(4), +c.lat.toFixed(4)], zoom: +map.getZoom().toFixed(2) });
+  });
+  const saveEns = (e) => {
+    if (!e.target.closest?.('#ens-models')) return;
+    prefs.set('ensCfg', Object.fromEntries(Object.entries(ens.cfg).map(([m, c]) => [m, { ...c, init: undefined }])));
+  };
+  document.addEventListener('change', saveEns);
+  document.addEventListener('input', saveEns);
 
   map.on('mousemove', (e) => {
     const v = [radar, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
@@ -712,6 +733,8 @@ map.on('load', async () => {
   addOverlays('ens-members');
   stations.addTo('ens-members');
   setTheme('light');
+  prefs.restoreControls();     // 上次的設定(重新整理後還原)
+  prefs.watchControls();
   updateLegend();
   await render();
 

@@ -4,8 +4,10 @@ import { getJSON } from './data.js';
 import { beaufort } from './colormaps.js';
 import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
+import * as prefs from './prefs.js';
 
 const REFETCH_MS = 5 * 60e3;
+const HOURS = [1, 3, 6, 12, 24, 48, 72];
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
 const countyKey = (c) => [...new TextEncoder().encode(c || '其他')].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fmt = (x, d = 1) => (x == null ? '—' : (+x).toFixed(d));
@@ -32,11 +34,17 @@ export class StationCard {
   T = null;
   cache = new Map();         // 縣市 → { at, promise }
   plot = null;
+  hours = HOURS.includes(prefs.get('cardHours')) ? prefs.get('cardHours') : 72;   // 圖表時段
+  range = null;              // 圖上的時間範圍 [起, 迄](UTC 秒)
 
   constructor(layer, { onClose } = {}) {
     this.layer = layer;
     this.onClose = onClose;
     this.el.querySelector('#sc-close').onclick = () => this.close();
+    const hSel = this.el.querySelector('#sc-hours');
+    hSel.innerHTML = HOURS.map((h) => `<option value="${h}">${h} 小時</option>`).join('');
+    hSel.value = this.hours;
+    hSel.onchange = () => { this.hours = +hSel.value; prefs.set('cardHours', this.hours); this.drawChart(); };
     for (const b of this.el.querySelectorAll('[data-tab]')) {
       b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
     }
@@ -99,7 +107,10 @@ export class StationCard {
       now.innerHTML = items.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')
         + `<div class="sc-obs">${obs}</div>`;
     }
-    this.plot?.redraw(false);
+    // 時間軸移到圖的範圍外(看過去的事件)→ 圖跟著移
+    const t = T && toSec(T);
+    if (this.plot && this.range && t && (t < this.range[0] || t > this.range[1])) this.drawChart();
+    else this.plot?.redraw(false);
   }
 
   async drawChart() {
@@ -124,24 +135,37 @@ export class StationCard {
       return;
     }
     const ax = tab.x === 'h' ? d.th : d.t10, t0 = toSec(ax.start);
-    const xs = Array.from({ length: ax.n }, (_, i) => t0 + i * ax.step * 60);
-    const miss = [...d.have].filter((c) => c === '0').length;
-    note.textContent = `近 ${d.hours} 小時（至 ${fmtTW(d.time)}）`
+    const xsAll = Array.from({ length: ax.n }, (_, i) => t0 + i * ax.step * 60);
+    // 時段:結尾 = 最新資料;時間軸在這段之前時,改成讓時間軸落在中間
+    const H = this.hours * 3600, latest = toSec(d.time), T = this.T && toSec(this.T);
+    const end = T && T <= latest - H ? Math.min(latest, T + H / 2) : latest;
+    this.range = [end - H, end];
+    const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
+    const xs = keep.map((i) => xsAll[i]);
+    const t10 = toSec(d.t10.start);
+    const miss = [...d.have].filter((c, i) => c === '0' && t10 + i * 600 > end - H && t10 + i * 600 <= end).length;
+    const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end), 'hm')}`;
+    note.textContent = `${this.hours} 小時（${endTxt}）`
       + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (tab.x === 'h' ? '；氣象要素為整點觀測' : '');
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };
     // 刻度:台灣時間 0 時標「22日」,其他標「12時」
-    const tick = (t) => { const s = fmtTW(stampOf(t), 'dh'); return s.endsWith('00時') ? s.replace('00時', '') : s.replace(/^\d+日/, ''); };
+    // 6 小時以內的時段標「14:30」
+    const tick = (t) => {
+      if (this.hours <= 6) return fmtTW(stampOf(t), 'hm');
+      const s = fmtTW(stampOf(t), 'dh');
+      return s.endsWith('00時') ? s.replace('00時', '') : s.replace(/^\d+日/, '');
+    };
     const axes = [{ ...axisStyle, space: 45, values: (u, ticks) => ticks.map(tick) }];
     for (const s of tab.series) {
       series.push({
         label: s.label, stroke: s.stroke, width: s.bars ? 0 : 1.6, fill: s.fill, scale: s.scale ?? 'y',
         paths: s.bars ? uPlot.paths.bars({ size: [0.9, 8] }) : undefined,
-        points: { show: tab.x === 'h', size: 4 },
+        points: { show: tab.x === 'h' || this.hours <= 6, size: 4 },
         value: (u, v) => (v == null ? '—' : s.wind ? `${v.toFixed(1)}（${beaufort(v)}級）` : `${v} ${s.unit}`),
       });
-      data.push(st[s.key]);
+      data.push(keep.map((i) => st[s.key][i]));
       if (!scales[s.scale ?? 'y']) scales[s.scale ?? 'y'] = { auto: true, range: s.bars || s.scale === 'r1h' ? (u, lo, hi) => [0, Math.max(hi, 1)] : undefined };
     }
     axes.push({ ...axisStyle, scale: 'y', label: `${tab.series[0].unit}`, size: 50 });
