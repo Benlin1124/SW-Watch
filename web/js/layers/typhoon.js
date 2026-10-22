@@ -64,6 +64,7 @@ export class TyphoonLayer {
   visible = true;
   show_cone = true;
   circles = { now: true, fcst: true, past: false };   // 暴風圈:目前 / 各預報點 / 過去各定位
+  circleStyle = { nowWidth: 1.8, otherWidth: 1, fill: 20 };   // 線寬(px):目前 / 預報與過去;填色濃度 %(預報與過去為 1/5)
   theme = 'light';
   show_labels = true;
   fixedIssue = "";         // 使用者指定的預報初始時間;空字串 = 依時間軸
@@ -73,6 +74,18 @@ export class TyphoonLayer {
   cache = new Map();
 
   constructor(map) { this.map = map; }
+
+  widthExpr() { return ['match', ['get', 'kind'], 'now', this.circleStyle.nowWidth, this.circleStyle.otherWidth]; }
+  fillExpr() { const f = this.circleStyle.fill / 100; return ['match', ['get', 'kind'], 'now', f, f / 5]; }
+
+  /** 暴風圈線寬 / 填色濃度 */
+  setCircleStyle(style) {
+    Object.assign(this.circleStyle, style);
+    for (const k of ['c15', 'c25']) {
+      this.map.setPaintProperty(`ty-${k}-line`, 'line-width', this.widthExpr());
+      this.map.setPaintProperty(`ty-${k}-fill`, 'fill-opacity', this.fillExpr());
+    }
+  }
 
   get times() { return this.index?.times ?? []; }
   get latest() { return this.index?.latest ?? null; }
@@ -84,8 +97,8 @@ export class TyphoonLayer {
     for (const id of ['ty-cone', 'ty-c15', 'ty-c25', 'ty-past', 'ty-fcst']) m.addSource(id, { type: 'geojson', data: EMPTY });
     const th = THEME[this.theme];
     // 暴風圈:目前位置實心填色;預報點、過去點只畫淡色填色 + 細框,避免整片糊在一起
-    const circleFill = (color) => ({ 'fill-color': color, 'fill-opacity': ['match', ['get', 'kind'], 'now', 0.2, 0.04] });
-    const circleLine = (color) => ({ 'line-color': color, 'line-width': ['match', ['get', 'kind'], 'now', 1.8, 1], 'line-opacity': ['match', ['get', 'kind'], 'now', 1, 0.75] });
+    const circleFill = (color) => ({ 'fill-color': color, 'fill-opacity': this.fillExpr() });
+    const circleLine = (color) => ({ 'line-color': color, 'line-width': this.widthExpr(), 'line-opacity': ['match', ['get', 'kind'], 'now', 1, 0.75] });
     m.addLayer({ id: 'ty-cone-fill', type: 'fill', source: 'ty-cone', paint: { 'fill-color': th.cone, 'fill-opacity': th.coneOp } });
     m.addLayer({ id: 'ty-cone-line', type: 'line', source: 'ty-cone', paint: { 'line-color': th.cone, 'line-width': 1.2, 'line-dasharray': [3, 2] } });
     m.addLayer({ id: 'ty-c15-fill', type: 'fill', source: 'ty-c15', paint: circleFill('#f9a825') });

@@ -530,3 +530,8 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - GitHub repo 改為公開（檢查過 21 個版本沒有金鑰）；Pages 用 GitHub Actions 部署 `web/`，網址 https://benlin1124.github.io/SW-Watch/ ，已確認從 R2 讀到所有圖層。
 - 排程改在另一台電腦跑（Windows 使用者名稱含中文；設 `PYTHONUTF8=1`）。舊電腦 `data/` 壓成 zip 搬過去後 `--reconcile` 上傳 786 個檔；10:47 啟動排程，雷達／測站／衛星都已更新到 R2。舊電腦排程已停，**不要兩台同時跑**。
 - 踩到的問題：`requirements.txt` 有中文註解 → 中文 Windows 的 pip 用 cp950 讀會失敗，改成全英文。
+
+### 透明度可輸入、暴風圈線寬／填色可調（2026-10-22 使用者要求）
+
+- 面板上所有拉桿（衛星、雷達、各系集模式透明度、暴風圈填色）旁邊加數字輸入框，兩邊同步（`app.js` 的 `pairNumbers`）。
+- 颱風：暴風圈「線寬」分目前／其他（預報點、過去點）兩個數字框，預設 1.8／1 px；「暴風圈填色」濃度 0–80 %，預報與過去點為目前的 1/5（`typhoon.setCircleStyle`）。

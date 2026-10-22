@@ -438,6 +438,7 @@ function buildModelRows() {
     bindBody(row, [m], false);
     box.appendChild(row);
   }
+  pairNumbers(box);
   for (const btn of box.querySelectorAll('.expand')) {
     btn.onclick = () => {
       const b = btn.closest('.model').querySelector('.model-body');
@@ -447,13 +448,32 @@ function buildModelRows() {
   }
 }
 
+/** 拉桿旁加一個數字輸入框,兩邊同步(輸入數字 = 拉到該位置) */
+function pairNumbers(root = document) {
+  for (const range of root.querySelectorAll('#panel input[type=range]')) {
+    if (range.nextElementSibling?.classList.contains('num')) continue;
+    const n = document.createElement('input');
+    Object.assign(n, { type: 'number', className: 'num', min: range.min, max: range.max, step: range.step || 1, value: range.value });
+    range.after(n);
+    range.addEventListener('input', () => { n.value = range.value; });
+    n.addEventListener('input', () => {
+      if (n.value === '') return;
+      range.value = Math.max(+range.min, Math.min(+range.max, +n.value));
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+}
+
 /** 「全部模式」改了設定後,把各模式列的勾選、tau、透明度更新成目前值 */
 function syncRowsFromCfg() {
   for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
     const c = ens.cfg[row.dataset.model];
     for (const inp of row.querySelectorAll('[data-k]')) {
       const k = inp.dataset.k;
-      if (k === 'opacity') inp.value = Math.round(c.opacity * 100);
+      if (k === 'opacity') {
+        inp.value = Math.round(c.opacity * 100);
+        if (inp.nextElementSibling?.classList.contains('num')) inp.nextElementSibling.value = inp.value;
+      }
       else if (k === 'tau0') inp.value = c.tau[0];
       else if (k === 'tau1') inp.value = c.tau[1];
       else inp.checked = c[k];
@@ -586,6 +606,7 @@ function bindUI() {
   $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   bindStationUI();
   bindSatUI();
+  pairNumbers();
   $('play-range').onchange = () => {
     if (state.playing) stop();
     buildSlots();
@@ -600,6 +621,10 @@ function bindUI() {
   for (const c of document.querySelectorAll('[data-ty-circle]')) {
     c.onchange = () => { typhoon.circles[c.dataset.tyCircle] = c.checked; typhoon.draw(); };
   }
+  const tyWidth = () => typhoon.setCircleStyle({ nowWidth: +$('ty-w-now').value || 0, otherWidth: +$('ty-w-other').value || 0 });
+  $('ty-w-now').oninput = tyWidth;
+  $('ty-w-other').oninput = tyWidth;
+  $('ty-fill').oninput = (e) => typhoon.setCircleStyle({ fill: +e.target.value });
   $('ty-labels').onchange = (e) => { typhoon.show_labels = e.target.checked; typhoon.draw(); };
   $('basemap').onchange = (e) => setTheme(e.target.value);
   $('chk-grid').onchange = (e) => {
