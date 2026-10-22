@@ -1,4 +1,4 @@
-// 測站圖層:可切換變數;當下值,或過去 1/2/3/6 小時最大 / 最小(pipeline/station_agg.py 預先算好)
+// 測站圖層:可切換變數;當前值,或過去 1/2/3/6 小時最大 / 最小(pipeline/station_agg.py 預先算好)
 // 圓點依色階上色;風速、陣風改畫箭頭(指向風吹去的方向);放大後在點旁標數值(HTML marker,不需字型檔)
 import { getIndex, getJSON } from '../data.js';
 import { beaufort, beaufortLegendHTML, legendHTML, SCALES, stepExpr } from '../colormaps.js';

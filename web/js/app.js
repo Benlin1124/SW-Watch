@@ -538,7 +538,7 @@ function updateLegend() {
 
 function bindStationUI() {
   const vSel = $('st-var');
-  vSel.innerHTML = Object.entries(STATION_VARS).map(([k, v]) => `<option value="${k}">${v.name}${v.agg ? '' : '（僅當下）'}</option>`).join('');
+  vSel.innerHTML = Object.entries(STATION_VARS).map(([k, v]) => `<option value="${k}">${v.name}${v.agg ? '' : '（僅當前值）'}</option>`).join('');
   vSel.value = stations.variable;
   const apply = async () => {
     const v = STATION_VARS[vSel.value];

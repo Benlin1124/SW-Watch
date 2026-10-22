@@ -64,7 +64,7 @@ export function beaufortLegendHTML(title, colors) {
   const cell = (c, k) => `<span style="background:${c};width:28px;height:20px;text-align:center;font-size:13px;font-weight:700;line-height:20px;color:${isDark(c) ? '#fff' : '#222'}">${k}</span>`;
   const ms = BEAUFORT.map((v) => `<span style="width:28px;font-size:11px;transform:translateX(-8px)">${v}</span>`).join('');
   return `<div class="legend-title">${title}</div><div class="legend-bar">${colors.map(cell).join('')}</div>
-    <div class="legend-labels">${ms}</div><div class="legend-title" style="margin:4px 0 0;font-size:11px;color:var(--muted)">上排：級數　下排：該級下限 (m/s)</div>`;
+    <div class="legend-labels">${ms}</div>`;
 }
 
 const range = (a, b, step) => Array.from({ length: Math.round((b - a) / step) + 1 }, (_, i) => +(a + i * step).toFixed(1));
