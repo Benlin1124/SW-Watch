@@ -556,6 +556,7 @@ function bindStationUI() {
   vSel.onchange = apply;
   $('st-stat').onchange = apply;
   $('st-hours').onchange = apply;
+  $('op-stations').oninput = (e) => stations.setOpacity(e.target.value / 100);
   $('chk-stations').onchange = (e) => { stations.setVisible(e.target.checked); updateLegend(); };
 }
 

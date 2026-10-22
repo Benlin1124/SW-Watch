@@ -48,6 +48,7 @@ export class StationLayer {
   path = 'stations';
   cadence = 10;
   visible = true;
+  opacity = 1;
   variable = 'temp';
   stat = 'now';            // now | max | min
   hours = 1;
@@ -229,7 +230,7 @@ export class StationLayer {
       const el = document.createElement('div');
       el.className = 'st-label';
       el.textContent = this.fmt(ft.properties.v) + (this.v.scale === 'wind' ? `｜${beaufort(ft.properties.v)}級` : '');
-      this.markers.push(new maplibregl.Marker({ element: el, anchor: 'left', offset: [7, 0] }).setLngLat([lon, lat]).addTo(this.map));
+      this.markers.push(new maplibregl.Marker({ element: el, anchor: 'left', offset: [7, 0], opacity: String(this.opacity) }).setLngLat([lon, lat]).addTo(this.map));
     }
   }
 
@@ -250,6 +251,17 @@ export class StationLayer {
     if (!this.aggMode || !agg || agg.time !== stamp) return null;
     const miss = agg.expected - agg.found;
     return { text: `${fmtTW(agg.start, 'hm')}–${fmtTW(stamp)}${miss ? `（缺 ${miss} 筆）` : ''}`, stale: miss > 0 };
+  }
+
+  /** 圓點、箭頭、數值標示一起調 */
+  setOpacity(v) {
+    this.opacity = v;
+    const m = this.map;
+    m.setPaintProperty('st-pt', 'circle-opacity', v);
+    m.setPaintProperty('st-pt', 'circle-stroke-opacity', v);
+    m.setPaintProperty('st-zero', 'circle-opacity', 0.7 * v);
+    m.setPaintProperty('st-arrow', 'icon-opacity', v);
+    for (const mk of this.markers) mk.setOpacity(String(v));
   }
 
   setVisible(v) {
