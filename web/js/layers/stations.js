@@ -1,7 +1,7 @@
 // 測站圖層:可切換變數;當下值,或過去 1/2/3/6 小時最大 / 最小(pipeline/station_agg.py 預先算好)
 // 圓點依色階上色;風速、陣風改畫箭頭(指向風吹去的方向);放大後在點旁標數值(HTML marker,不需字型檔)
 import { getIndex, getJSON } from '../data.js';
-import { legendHTML, SCALES, stepExpr } from '../colormaps.js';
+import { beaufort, beaufortLegendHTML, legendHTML, SCALES, stepExpr } from '../colormaps.js';
 import { fmtTW, latestLE } from '../time.js';
 
 export const STATION_VARS = {
@@ -216,7 +216,7 @@ export class StationLayer {
       if (++n > LABEL_MAX) break;
       const el = document.createElement('div');
       el.className = 'st-label';
-      el.textContent = this.fmt(ft.properties.v);
+      el.textContent = this.fmt(ft.properties.v) + (this.v.scale === 'wind' ? `｜${beaufort(ft.properties.v)}級` : '');
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'left', offset: [7, 0] }).setLngLat([lon, lat]).addTo(this.map));
     }
   }
@@ -228,7 +228,7 @@ export class StationLayer {
     const alt = p.alt != null && p.alt !== 'null' ? `　${p.alt} m` : '';
     return `<div class="popup-title">${p.name}（${p.id}）</div>
       <div>${p.county}${p.town}${alt}</div>
-      <div>${what}：<b>${this.fmt(+p.v)}</b> ${v.unit}</div>
+      <div>${what}：<b>${this.fmt(+p.v)}</b> ${v.unit}${v.scale === 'wind' ? `（<b>${beaufort(+p.v)} 級</b>）` : ''}</div>
       <div style="color:var(--muted)">${when}</div>`;
   }
 
@@ -250,7 +250,8 @@ export class StationLayer {
   legend() {
     const s = SCALES[this.v.scale];
     const title = this.aggMode ? `${this.v.name} 過去 ${this.hours} 小時${this.stat === 'max' ? '最大' : '最小'}` : this.v.name;
-    return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0, this.v.scale === 'wind' ? 24 : 18);
+    if (this.v.scale === 'wind') return beaufortLegendHTML(`測站 ${title}（蒲福風級）`, s.colors);
+    return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0);
   }
 }
 
