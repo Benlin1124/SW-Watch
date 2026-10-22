@@ -133,7 +133,8 @@ function anchorColor(anchors, v) {
 function satColorFn(band, style) {
   if (band === 'B03') return (v) => gray(Math.pow(clamp01(v / 100), 0.6));
   if (band === 'B08') return (v) => packHex(anchorColor(WV_ANCHORS, v));
-  if (style === 'gray') return (v) => gray((40 - v) / 120);   // −80 °C 白 → +40 °C 黑
+  // −70 °C 以下白、+30 °C 以上黑;gamma 1.4 壓暗中間調(低雲/晴空偏黑,只有高雲頂接近白)
+  if (style === 'gray') return (v) => gray(Math.pow(clamp01((30 - v) / 100), 1.4));
   return (v) => {
     let i = 0;
     while (i + 1 < BD_LEVELS.length - 1 && v >= BD_LEVELS[i + 1]) i++;
