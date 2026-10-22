@@ -172,8 +172,7 @@ function updateLayerTime(l, stamp, sync) {
     const inits = [...new Set(Object.values(ens.resolved))];
     el.textContent = inits.length === 1 ? `初始 ${fmtInit(inits[0])}` : inits.length ? '各模式不同' : '無資料';
     if (!inits.length) el.classList.add('nodata');
-    updateEnsValidLabel();
-    updateModelAutoLabels();
+    syncEnsSelects();
     return;
   }
   const custom = l.timeLabel?.(stamp);
@@ -360,7 +359,9 @@ function fillIssueSelect() {
 }
 
 // ── 系集面板 ──
-const optInit = (i) => `<option value="${i}">${fmtInit(i)}（台灣 ${fmtTW(`${i}00`)}）</option>`;
+// 下拉選單只顯示時間(10/22 00Z);沒手動選時,選單停在實際用到的時間(依時間軸)
+const optInit = (i) => `<option value="${i}">${fmtInit(i)}</option>`;
+const optValid = (t) => `<option value="${t}">${t.slice(4, 6)}/${t.slice(6, 8)} ${t.slice(8, 10)}Z</option>`;
 
 function fillEnsPanel() {
   if (!ens.index) return;
@@ -370,14 +371,13 @@ function fillEnsPanel() {
 
   const allInits = [...new Set(Object.values(ens.index.models).flat())].sort().reverse();
   const initSel = $('ens-init');
-  initSel.innerHTML = '<option value="">依時間軸（最新）</option>' + allInits.map(optInit).join('');
-  initSel.value = ens.baseInit;
+  initSel.innerHTML = allInits.map(optInit).join('');
 
   buildModelRows();
 
   const vs = $('ens-valid-start');
-  vs.innerHTML = '<option value="">自動</option>' + ens.validChoices().map((t) => `<option value="${t}">${fmtTW(t)}（${t.slice(6, 8)}日${t.slice(8, 10)}Z）</option>`).join('');
-  vs.value = ens.validStart;
+  vs.innerHTML = ens.validChoices().map(optValid).join('');
+  syncEnsSelects();
 }
 
 /** 每個模式一列(可展開):開關、初始時間、成員 / 平均 / 控制報、tau 範圍、透明度;最上面「全部模式」一次套用 */
@@ -434,12 +434,11 @@ function buildModelRows() {
     row.innerHTML = `<div class="model-head">
         <label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" data-on ${c.on ? 'checked' : ''}>
           <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#888'}"></span>${m}</label>
-        <select><option value="">自動</option>${[...ens.index.models[m]].reverse().map((i) => `<option value="${i}">${fmtInit(i)}</option>`).join('')}</select>
+        <select>${[...ens.index.models[m]].reverse().map(optInit).join('')}</select>
         <button class="expand">▸</button>
       </div>
       <div class="model-body" hidden>${body(c)}</div>`;
     const sel = row.querySelector('select');
-    sel.value = c.init;
     row.querySelector('[data-on]').onchange = (e) => { c.on = e.target.checked; render(); };
     sel.onchange = () => { c.init = sel.value; render(); };
     bindBody(row, [m], false);
@@ -488,22 +487,15 @@ function syncRowsFromCfg() {
   }
 }
 
-/** 各模式初始時間下拉的「自動」顯示實際用到的初始時間(跟著上方初始時間 / 時間軸) */
-function updateModelAutoLabels() {
+/** 系集下拉選單停在實際用到的時間:手動選過的用選的,沒選過的用依時間軸算出來的 */
+function syncEnsSelects() {
+  const inits = Object.values(ens.resolved);
+  $('ens-init').value = ens.baseInit || (inits.length ? inits.reduce((a, b) => (a > b ? a : b)) : '');
   for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
-    const m = row.dataset.model, opt = row.querySelector('select')?.options[0];
-    if (!opt) continue;
-    const got = !ens.cfg[m].init && ens.resolved[m];
-    opt.textContent = got ? `自動（${fmtInit(got)}）` : '自動';
+    const m = row.dataset.model, sel = row.querySelector('select');
+    if (sel) sel.value = ens.cfg[m].init || ens.resolved[m] || '';
   }
-}
-
-/** 有效時間「自動」顯示目前算出來的起點 */
-function updateEnsValidLabel() {
-  const opt = $('ens-valid-start').options[0];
-  if (!opt) return;
-  const s = ens.validStart ? null : ens.windowStart();
-  opt.textContent = s ? `自動（${fmtTW(s)}）` : '自動';
+  $('ens-valid-start').value = ens.validStart || ens.windowStart() || '';
 }
 
 /** 實際路徑:最新一次氣象署颱風資料裡的過去定位 */
@@ -526,10 +518,10 @@ function bindEnsUI() {
       $('ens-valid-box').hidden = ens.mode !== 'valid';
       for (const r of document.querySelectorAll('#ens-models [data-k=tau0]')) r.closest('.row').hidden = ens.mode !== 'tau';
       ens.draw();
-      updateEnsValidLabel();
+      syncEnsSelects();
     };
   }
-  $('ens-valid-start').onchange = (e) => { ens.validStart = e.target.value; ens.draw(); updateEnsValidLabel(); };
+  $('ens-valid-start').onchange = (e) => { ens.validStart = e.target.value; ens.draw(); syncEnsSelects(); };
   $('ens-valid-hours').onchange = (e) => { ens.validHours = +e.target.value; ens.draw(); };
   for (const c of document.querySelectorAll('[data-ens-opt]')) {
     c.onchange = () => { ens.opts[c.dataset.ensOpt] = c.checked; ens.draw(); };
