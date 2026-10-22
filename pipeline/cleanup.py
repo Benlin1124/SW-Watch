@@ -1,13 +1,14 @@
-"""保留策略:10 分鐘資料保留 KEEP_FULL_DAYS 天,更舊的只留整點;颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天。"""
+"""保留策略:10 分鐘資料保留 KEEP_FULL_DAYS 天,更舊的只留整點;颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天;ECMWF 只留 ECMWF_KEEP_DAYS 天。"""
 import json
 from datetime import datetime, timedelta, timezone
 
 from . import config
 from .common import log, remove, save_json
+from .fetch_ecmwf import cleanup as cleanup_ecmwf
 from .fetch_satellite import cleanup as cleanup_satellite
 from .station_series import compress_old_months
 
-SKIP = ("typhoon",)
+SKIP = ("typhoon", "ecmwf")
 
 
 def run():
@@ -29,6 +30,7 @@ def run():
         log.info("cleanup %s:刪除 %d 筆", rel, len(drop))
     compress_old_months()
     cleanup_satellite()
+    cleanup_ecmwf()
 
 
 if __name__ == "__main__":

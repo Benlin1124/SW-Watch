@@ -35,7 +35,7 @@ const LABEL_MAX = 500;
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
 /** 箭頭圖示(朝北,SDF 才能依數值上色) */
-function arrowImage() {
+export function arrowImage() {
   const s = 32, c = document.createElement('canvas');
   c.width = c.height = s;
   const g = c.getContext('2d');

@@ -180,3 +180,7 @@ body[data-map-theme=dark] .st-label { color: #fff; text-shadow: 0 0 3px #000, 0 
 .fold:hover { background: none; color: var(--fg); }
 .layer.folded .layer-opts { display: none; }
 .layer-opts { padding-left: 28px; }
+/* 選項列不撐寬面板:格線欄可縮、標籤文字不換行 */
+.layer-opts { grid-template-columns: minmax(0, 1fr); }
+.layer-opts label { white-space: nowrap; min-width: 0; }
+.layer-opts label button { flex: 0 0 auto; padding: 2px 6px; }

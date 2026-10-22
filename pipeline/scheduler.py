@@ -8,13 +8,14 @@
 import argparse
 import logging
 import os
+import threading
 import warnings
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import (cleanup, config, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_satellite, fetch_stations,
+from . import (cleanup, config, fetch_ecmwf, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_satellite, fetch_stations,
                fetch_typhoon, r2)
 from .common import read_status, record_status, stamp_dt
 
@@ -122,6 +123,25 @@ def safe_satellite():
         log.exception("satellite 失敗")
 
 
+_ecmwf_lock = threading.Lock()
+
+
+def safe_ecmwf():
+    """ECMWF 預報:每 10 分檢查 00/12Z 起報(起報後約 7–8 小時上架);一報下載約 400 MB、數分鐘。
+    啟動時那一次和定時的是不同工作,用鎖避免同時跑兩個。"""
+    if not _ecmwf_lock.acquire(blocking=False):
+        return
+    try:
+        status, stamp, prev = fetch_ecmwf.run()
+        if status == "new":
+            record_status("ecmwf", status, stamp, prev)
+    except Exception as e:
+        log.exception("ecmwf 失敗")
+        record_status("ecmwf", "error", error=f"{type(e).__name__}: {e}")
+    finally:
+        _ecmwf_lock.release()
+
+
 def safe_r2_flush():
     try:
         n, d = r2.flush()
@@ -163,6 +183,8 @@ def main():
         sched.add_job(job, "cron", id=name, max_instances=1, coalesce=True,
                       misfire_grace_time=50, **cron)
     sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
+    sched.add_job(safe_ecmwf, "cron", minute="4,14,24,34,44,54", id="ecmwf", max_instances=1, coalesce=True)
+    sched.add_job(safe_ecmwf, "date", run_date=datetime.now(timezone.utc), id="ecmwf_start")
     sched.add_job(safe_satellite, "cron", minute="*", id="satellite", max_instances=1, coalesce=True,
                   misfire_grace_time=50)
     if r2.enabled():

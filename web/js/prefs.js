@@ -1,7 +1,7 @@
 // 網頁設定存在瀏覽器(localStorage):圖層開關、透明度、變數、篩選、時間軸範圍、系集各模式、地圖位置…
 // 重新整理後還原。只存「設定」,不存時間類選項(預報初始、系集初始時間等,下次打開已過時)。
 const KEY = 'sw-watch-prefs-v1';
-const SKIP = new Set(['st-search', 'ty-issue', 'ens-tc', 'ens-init', 'ens-valid-start', 'slider']);
+const SKIP = new Set(['st-search', 'ty-issue', 'ens-tc', 'ens-init', 'ens-valid-start', 'slider', 'ec-init', 'ec-step']);
 
 function read() {
   try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; }

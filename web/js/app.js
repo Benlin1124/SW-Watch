@@ -3,6 +3,7 @@ import { REFRESH_SEC, STEP_MIN, TIMELINE_DAYS } from './config.js';
 import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
 import { RadarLayer } from './layers/radar.js';
 import { SatelliteLayer } from './layers/satellite.js';
+import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
 import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js';
 import { StationCard } from './station_card.js';
@@ -90,6 +91,7 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
 window.swMap = map;     // 除錯 / 之後截圖功能用
 const radar = new RadarLayer(map);
 const satellite = new SatelliteLayer(map);
+const ecmwf = new EcmwfLayer(map);
 const typhoon = new TyphoonLayer(map);
 const ens = new EnsembleLayer(map);
 // 系集各模式的設定(初始時間不存:下次打開已過時)
@@ -97,7 +99,7 @@ for (const [m, c] of Object.entries(prefs.get('ensCfg') ?? {})) ens.cfg[m] = { .
 const stations = new StationLayer(map);
 const card = new StationCard(stations);
 stations.onSelect = (id) => openStation(id, false);
-const LAYERS = [satellite, radar, stations, typhoon, ens];
+const LAYERS = [satellite, ecmwf, radar, stations, typhoon, ens];
 
 // ── 狀態 ──
 const state = {
@@ -157,6 +159,7 @@ async function render() {
     if (seq === state.renderSeq) updateLayerTime(l, stamp, sync);   // 較慢的舊畫面不覆蓋新的時間標示
   }));
   if (!state.playing) { renderStorms(); refreshStationUI(); }
+  if (ecmwf.visible) updateLegend();        // ECMWF 圖例跟著變數、時刻、雨量時段
   card.update(state.T);
 }
 
@@ -175,6 +178,7 @@ function updateLayerTime(l, stamp, sync) {
     syncEnsSelects();
     return;
   }
+  if (l.key === 'ecmwf') syncEcmwfUI();
   const custom = l.timeLabel?.(stamp);
   if (custom) {
     el.textContent = custom.text;
@@ -346,6 +350,7 @@ async function reload() {
   refreshSlider();
   fillIssueSelect();
   fillEnsPanel();
+  fillEcmwfPanel();
   await loadBestTrack();
   if (!state.T || wasEnd || !state.slots.includes(state.T) || !ok(state.T)) state.T = latestSlot();
 }
@@ -530,7 +535,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [satellite, radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, ecmwf, radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
 }
@@ -581,6 +586,53 @@ function bindSatUI() {
   $('sat-style').onchange = apply;
   $('chk-satellite').onchange = (e) => { satellite.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   $('op-satellite').oninput = (e) => satellite.setOpacity(e.target.value / 100);
+}
+
+// ── ECMWF 預報 ──
+const ecStepLabel = (init, s) => `${fmtTW(ecmwf.validOf(init, s))}（+${s}h）`;
+
+/** 初始時間、預報時刻選單(資料更新時重建) */
+function fillEcmwfPanel() {
+  if (!ecmwf.index) return;
+  const iSel = $('ec-init'), init = ecmwf.activeInit;
+  iSel.innerHTML = ecmwf.inits.map((i) => `<option value="${i}">${fmtEcInit(i)}</option>`).join('');
+  $('ec-step').innerHTML = ecmwf.steps.map((s) => `<option value="${s}">${ecStepLabel(init, s)}</option>`).join('');
+  syncEcmwfUI();
+}
+
+/** 選單停在目前顯示的起報、時刻 */
+function syncEcmwfUI() {
+  if (!ecmwf.index) return;
+  const init = ecmwf.activeInit;
+  $('ec-init').value = init;
+  const sel = $('ec-step');
+  if (sel.dataset.init !== init) {           // 換起報:時刻標籤跟著換
+    for (const o of sel.options) o.textContent = ecStepLabel(init, +o.value);
+    sel.dataset.init = init;
+  }
+  sel.value = ecmwf.pickedStep ?? ecmwf.step ?? ecmwf.defaultStep(init);
+  $('ec-rain').hidden = ecmwf.variable !== 'rain';
+}
+
+function bindEcmwfUI() {
+  const apply = () => { updateLegend(); render(); };
+  $('chk-ecmwf').onchange = (e) => { ecmwf.setVisible(e.target.checked); apply(); };
+  $('op-ecmwf').oninput = (e) => ecmwf.setOpacity(e.target.value / 100);
+  $('ec-var').onchange = (e) => { ecmwf.variable = e.target.value; syncEcmwfUI(); apply(); };
+  $('ec-rain').onchange = (e) => { ecmwf.rainHours = +e.target.value; apply(); };
+  $('ec-init').onchange = (e) => { ecmwf.init = e.target.value; apply(); };
+  $('ec-step').onchange = (e) => { ecmwf.step = +e.target.value; setFollow(false); apply(); };
+  const move = (d) => {
+    const st = ecmwf.steps, i = st.indexOf(ecmwf.pickedStep ?? ecmwf.step) + d;
+    if (i < 0 || i >= st.length) return;
+    ecmwf.step = st[i];
+    setFollow(false);
+    apply();
+  };
+  $('ec-prev').onclick = () => move(-1);
+  $('ec-next').onclick = () => move(1);
+  const setFollow = (on) => { ecmwf.follow = on; $('ec-follow').checked = on; };
+  $('ec-follow').onchange = (e) => { setFollow(e.target.checked); apply(); };
 }
 
 // ── 測站:搜尋、篩選、排行榜、資訊卡 ──
@@ -695,6 +747,7 @@ function bindUI() {
   bindStationUI();
   bindStationTools();
   bindSatUI();
+  bindEcmwfUI();
   pairNumbers();
   $('play-range').onchange = () => {
     if (state.playing) stop();
@@ -735,7 +788,7 @@ function bindUI() {
   document.addEventListener('input', saveEns);
 
   map.on('mousemove', (e) => {
-    const v = [radar, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
+    const v = [radar, ecmwf, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
     const el = $('readout');
     el.style.display = 'block';
     el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${e.lngLat.lng.toFixed(3)}°E${v ? `　${v}` : ''}`;
@@ -751,6 +804,7 @@ map.on('load', async () => {
   await reload();
   radar.addTo();
   satellite.addTo('radar');
+  ecmwf.addTo('radar');
   typhoon.addTo();
   ens.addTo('ty-cone-fill');
   addOverlays('ens-members');

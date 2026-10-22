@@ -58,6 +58,40 @@
         </div>
       </div>
 
+      <div class="layer" data-layer="ecmwf">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-ecmwf">
+          <span class="layer-name">ECMWF 預報</span>
+          <span class="layer-time" id="time-ecmwf">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>變數
+            <select id="ec-var">
+              <option value="rain">降雨</option>
+              <option value="t2">溫度</option>
+              <option value="msl">海平面氣壓</option>
+              <option value="wind">平均風</option>
+              <option value="gust">陣風</option>
+            </select>
+            <select id="ec-rain">
+              <option value="3">3 小時</option><option value="6">6 小時</option>
+              <option value="12">12 小時</option><option value="24">24 小時</option>
+              <option value="0">起報後累積</option>
+            </select>
+          </label>
+          <label>初始 <select id="ec-init"></select></label>
+          <label>
+            <button id="ec-prev" title="上一個時刻">◀</button>
+            <select id="ec-step"></select>
+            <button id="ec-next" title="下一個時刻">▶</button>
+          </label>
+          <div class="ty-toggles">
+            <label title="預報時刻跟著下方時間軸（時間軸停在哪就顯示那之前最近的時刻）"><input type="checkbox" id="ec-follow"> 對齊時間軸</label>
+          </div>
+          <label>透明度 <input type="range" id="op-ecmwf" min="0" max="100" value="80"></label>
+        </div>
+      </div>
+
       <div class="layer" data-layer="stations">
         <label class="layer-head">
           <input type="checkbox" id="chk-stations" checked>
