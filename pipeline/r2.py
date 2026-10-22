@@ -18,6 +18,7 @@ import hashlib
 import logging
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import config
@@ -31,6 +32,8 @@ _lock = threading.Lock()
 _pending_put = set()
 _pending_del = set()
 _client = None
+STATUS_EVERY_SEC = 600         # status.json 每分鐘都在變、網頁沒用到 → 最多 10 分鐘傳一次,省 R2 寫入次數
+_status_sent = 0.0
 
 
 def enabled():
@@ -107,10 +110,17 @@ def flush():
     """上傳 / 刪除待辦;失敗的放回待辦下次再試。回傳 (上傳數, 刪除數)。"""
     if not enabled():
         return 0, 0
+    global _status_sent
     with _lock:
         puts, dels = sorted(_pending_put), sorted(_pending_del)
         _pending_put.clear()
         _pending_del.clear()
+        if "status.json" in puts:
+            if time.time() - _status_sent < STATUS_EVERY_SEC:
+                puts.remove("status.json")
+                _pending_put.add("status.json")          # 留到下次
+            else:
+                _status_sent = time.time()
     # index.json 最後傳:網頁讀到新 index 時,資料檔一定已經在了
     data_keys = [k for k in puts if not k.endswith("index.json")]
     idx_keys = [k for k in puts if k.endswith("index.json")]
