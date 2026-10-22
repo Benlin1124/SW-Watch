@@ -29,7 +29,7 @@ export function binLUT(spec, levels, colors, { minVisible = -Infinity } = {}) {
 /** notebook 的作法是 dBZ < 0 不畫(含 raw 0 = 範圍內無回波) */
 export const radarLUT = (spec) => binLUT(spec, DBZ_LEVELS, DBZ_COLORS, { minVisible: 0 });
 
-export function legendHTML(title, levels, colors, from = 1, w = 18) {
+export function legendHTML(title, levels, colors, from = 1, w = 22) {
   const bar = colors.slice(from).map((c) => `<span style="background:${c};width:${w}px"></span>`).join('');
   const labels = levels.slice(from, -1).map((v) => `<span style="width:${w}px">${v}</span>`).join('');
   return `<div class="legend-title">${title}</div><div class="legend-bar">${bar}</div><div class="legend-labels">${labels}</div>`;
@@ -61,10 +61,10 @@ export function beaufort(ms) {
 
 /** 風級圖例:每級一格,上排級數、下排該級下界風速 */
 export function beaufortLegendHTML(title, colors) {
-  const cell = (c, k) => `<span style="background:${c};width:22px;text-align:center;font-size:10px;line-height:12px;color:${isDark(c) ? '#fff' : '#222'}">${k}</span>`;
-  const ms = BEAUFORT.map((v) => `<span style="width:22px;font-size:9px;transform:translateX(-6px)">${v}</span>`).join('');
+  const cell = (c, k) => `<span style="background:${c};width:28px;height:20px;text-align:center;font-size:13px;font-weight:700;line-height:20px;color:${isDark(c) ? '#fff' : '#222'}">${k}</span>`;
+  const ms = BEAUFORT.map((v) => `<span style="width:28px;font-size:11px;transform:translateX(-8px)">${v}</span>`).join('');
   return `<div class="legend-title">${title}</div><div class="legend-bar">${colors.map(cell).join('')}</div>
-    <div class="legend-labels">${ms}</div><div class="legend-title" style="margin:2px 0 0">上排：級數　下排：該級下限 (m/s)</div>`;
+    <div class="legend-labels">${ms}</div><div class="legend-title" style="margin:4px 0 0;font-size:11px;color:var(--muted)">上排：級數　下排：該級下限 (m/s)</div>`;
 }
 
 const range = (a, b, step) => Array.from({ length: Math.round((b - a) / step) + 1 }, (_, i) => +(a + i * step).toFixed(1));
@@ -152,6 +152,6 @@ export function satLegendHTML(title, band, style, [vmin, vmax], ticks) {
   const pos = (v) => ((v - vmin) / (vmax - vmin)) * 100;
   const labels = ticks.map((t) => `<span style="position:absolute;left:${pos(t)}%;transform:translateX(-50%)">${t}</span>`).join('');
   return `<div class="legend-title">${title}</div>
-    <div style="width:300px;height:10px;background:linear-gradient(90deg,${stops.join(',')})"></div>
-    <div class="legend-labels" style="position:relative;height:12px;width:300px">${labels}</div>`;
+    <div style="width:360px;height:14px;background:linear-gradient(90deg,${stops.join(',')})"></div>
+    <div class="legend-labels" style="position:relative;height:14px;width:360px">${labels}</div>`;
 }

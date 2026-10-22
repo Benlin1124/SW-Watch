@@ -77,11 +77,11 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 }
 .legend-block + .legend-block { margin-top: 6px; }
 .st-label { font: 11px/1 var(--font); color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; pointer-events: none; white-space: nowrap; }
-.legend-title { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.legend-title { font-size: 13px; color: var(--fg); margin-bottom: 4px; }
 .legend-bar { display: flex; }
-.legend-bar span { width: 18px; height: 10px; }
-.legend-labels { display: flex; font-size: 10px; color: var(--muted); }
-.legend-labels span { width: 18px; text-align: left; transform: translateX(-4px); }
+.legend-bar span { width: 22px; height: 14px; }
+.legend-labels { display: flex; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.legend-labels span { width: 22px; text-align: left; transform: translateX(-5px); }
 
 /* ── 時間軸 ── */
 #timeline {
