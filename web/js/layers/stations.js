@@ -109,6 +109,17 @@ export class StationLayer {
     const rain = !!this.v.rain;
     this.map.setFilter('st-zero', rain ? ['==', ['get', 'v'], 0] : ['==', ['get', 'v'], -9999]);
     this.map.setFilter('st-pt', rain ? ['all', ['>', ['get', 'v'], 0], ['!', ['has', 'dir']]] : ['!', ['has', 'dir']]);
+    // 風速、陣風:圓點與箭頭依風級放大,級數高的畫在上面
+    const wind = this.v.scale === 'wind';
+    const bf = ['get', 'bf'];
+    this.map.setPaintProperty('st-pt', 'circle-radius', wind
+      ? ['interpolate', ['linear'], ['zoom'], 6, ['+', 2, ['*', 0.4, bf]], 10, ['+', 4, ['*', 0.8, bf]]]
+      : ['interpolate', ['linear'], ['zoom'], 6, 3.5, 10, 7]);
+    this.map.setLayoutProperty('st-arrow', 'icon-size', wind
+      ? ['interpolate', ['linear'], ['zoom'], 6, ['+', 0.18, ['*', 0.045, bf]], 10, ['+', 0.35, ['*', 0.08, bf]]]
+      : ['interpolate', ['linear'], ['zoom'], 6, 0.28, 9, 0.5, 12, 0.8]);
+    this.map.setLayoutProperty('st-pt', 'circle-sort-key', wind ? bf : 0);
+    this.map.setLayoutProperty('st-arrow', 'symbol-sort-key', wind ? bf : 0);
   }
 
   /** 切換變數 / 統計 / 時數;回傳 true 表示時間軸要重建(換了 index) */
@@ -160,6 +171,7 @@ export class StationLayer {
         alt: r[f.alt], obs: v.rain ? snap.time : r[f.obs], v: x };
       // 風向 = 風吹來的方向,箭頭畫成吹去的方向;最大 / 最小沒有對應風向,只畫圓點
       if (v.dir && !agg && r[f[v.dir]] != null && x > 0) props.dir = (r[f[v.dir]] + 180) % 360;
+      if (v.scale === 'wind') props.bf = beaufort(x);
       out.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [r[f.lon], r[f.lat]] } });
     }
     return { stamp, agg, features: out };
