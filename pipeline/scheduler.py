@@ -61,6 +61,9 @@ def setup_logging():
         h.setFormatter(fmt)
         root.addHandler(h)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    # 衛星 B03 一筆要 1–2 分鐘,期間每分鐘的觸發被略過是預期的,不寫進 log
+    logging.getLogger("apscheduler.scheduler").addFilter(
+        lambda r: not ("safe_satellite" in r.getMessage() and "maximum number of running instances" in r.getMessage()))
 
 
 def make_job(name, fn, cycle, last):

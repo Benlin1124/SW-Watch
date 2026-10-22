@@ -167,39 +167,53 @@ def wanted(stamp, band, have):
 
 
 def run(now=None):
-    """最近 SAT_WAIT_MIN 分鐘內的時次,還沒有的頻道上架了就處理(新的先)。回傳處理的 [(stamp, band)]。"""
+    """最近 SAT_WAIT_MIN 分鐘內的時次,還沒有的頻道上架了就處理。回傳處理的 [(stamp, band)]。
+    每輪只處理一個時次就結束(B03 一筆要 1–2 分鐘),下一分鐘重新從最新的找起,
+    新上架的時次才不會被舊時次卡住。順序:B13/B08 由新到舊 → 都齊了才做 B03。"""
     now = now or datetime.now(timezone.utc)
     have = {b: set(read_index(f"{LAYER}/{b}")["times"]) for b in config.SAT_BANDS}
     t = now.replace(minute=now.minute - now.minute % 10, second=0, microsecond=0)
-    done = []
+    slots = []                                              # 窗口內、還缺頻道的時次(新的先)
     for k in range(0, config.SAT_WAIT_MIN // 10 + 2):
         slot = t - timedelta(minutes=10 * k)
         stamp = slot.strftime("%Y%m%d%H%M")
-        age = (now - slot).total_seconds() / 60
         need = [b for b in config.SAT_BANDS if wanted(stamp, b, have)]
         if not need:
             continue
-        if age > config.SAT_WAIT_MIN:
+        if (now - slot).total_seconds() / 60 > config.SAT_WAIT_MIN:
             for b in need:                                   # 過了窗口:試過才記 missed
                 if (stamp, b) in _attempted:
                     record_status(f"sat_{b}", "missed", stamp, max(have[b], default=None), 0, None)
                     _attempted.discard((stamp, b))
             continue
-        avail = list_slot(stamp)
-        for b in need:
-            prev = max(have[b], default=None)
-            if b not in avail:
-                _attempted.add((stamp, b))
+        slots.append((stamp, need))
+
+    avail_cache = {}
+    for slow in (False, True):                               # 先 B13/B08,再 B03
+        for stamp, need in slots:
+            bands = [b for b in need if (b == "B03") == slow]
+            if not bands:
                 continue
-            try:
-                process(stamp, b, avail[b])
-                record_status(f"sat_{b}", "new", stamp, prev, 0, None)
-                done.append((stamp, b))
-            except Exception as e:
-                log.exception("satellite %s %s 失敗", b, stamp)
-                record_status(f"sat_{b}", "error", stamp, prev, 0, f"{type(e).__name__}: {e}")
-            _attempted.discard((stamp, b))
-    return done
+            if stamp not in avail_cache:
+                avail_cache[stamp] = list_slot(stamp)
+            avail = avail_cache[stamp]
+            done = []
+            for b in bands:
+                prev = max(have[b], default=None)
+                if b not in avail:
+                    _attempted.add((stamp, b))
+                    continue
+                try:
+                    process(stamp, b, avail[b])
+                    record_status(f"sat_{b}", "new", stamp, prev, 0, None)
+                    done.append((stamp, b))
+                except Exception as e:
+                    log.exception("satellite %s %s 失敗", b, stamp)
+                    record_status(f"sat_{b}", "error", stamp, prev, 0, f"{type(e).__name__}: {e}")
+                _attempted.discard((stamp, b))
+            if done:
+                return done
+    return []
 
 
 def backfill(start, end, bands):

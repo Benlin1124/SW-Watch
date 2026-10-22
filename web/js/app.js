@@ -108,10 +108,29 @@ const state = {
 function enabled() { return LAYERS.filter((l) => l.visible && l.index); }
 
 /** 時間軸範圍 = 「範圍」選單的長度(也是播放範圍),結尾為最新資料;每 10 分一格 */
+/** 同步基準:開著的雷達、衛星都有資料的時間點(只開一個就用它的;都沒開或交集為空 → 不限制) */
+function commonTimes() {
+  const ls = [radar, satellite].filter((l) => l.visible && l.index);
+  if (!ls.length) return null;
+  const sets = ls.slice(1).map((l) => new Set(l.times));
+  const common = ls[0].times.filter((t) => sets.every((x) => x.has(t)));
+  return common.length ? new Set(common) : null;
+}
+
+const ok = (t) => !state.common || state.common.has(t);
+
+/** 最後一個雷達、雲圖都有的格 */
+function latestSlot() {
+  for (let i = state.slots.length - 1; i >= 0; i--) if (ok(state.slots[i])) return state.slots[i];
+  return state.slots[state.slots.length - 1] ?? null;
+}
+
 function buildSlots() {
+  state.common = commonTimes();
   const all = LAYERS.flatMap((l) => l.times);
   if (!all.length) { state.slots = []; return; }
-  const end = floorStep(all.reduce((a, b) => (a > b ? a : b)));
+  // 結尾 = 雷達、雲圖都有的最新時間(衛星約晚 20 分上架,不讓時間軸停在只有雷達的格)
+  const end = floorStep(state.common ? [...state.common].reduce((a, b) => (a > b ? a : b)) : all.reduce((a, b) => (a > b ? a : b)));
   const earliest = floorStep(all.reduce((a, b) => (a < b ? a : b)));
   const limit = addMin(end, -Math.min(+$('play-range').value * 60, TIMELINE_DAYS * 1440) + STEP_MIN);
   let t = earliest > limit ? earliest : limit;
@@ -208,7 +227,7 @@ function drawCoverage() {
   ctx.clearRect(0, 0, w, h);
   const n = state.slots.length;
   if (!n) return;
-  const rows = [[satellite, '#b0bec5'], [radar, '#4fc3f7'], [stations, '#81c784'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
+  const rows = [[{ times: [...(state.common ?? [])], cadence: 10 }, '#ffffff'], [satellite, '#b0bec5'], [radar, '#4fc3f7'], [stations, '#81c784'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
   const rh = h / rows.length;
   const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
   rows.forEach(([l, color], r) => {
@@ -246,11 +265,23 @@ function setSync(on) {
   $('btn-sync').textContent = on ? '🔗 同步' : '⛓️‍💥 不同步';
 }
 
-function goto(i) {
-  if (!state.slots.length) return;
-  i = Math.max(0, Math.min(state.slots.length - 1, i));
+/** 跳到第 i 格;該格雷達、雲圖不齊時,dir = ±1 往該方向找,0 找最近的 */
+function goto(i, dir = 0) {
+  const n = state.slots.length;
+  if (!n) return;
+  i = Math.max(0, Math.min(n - 1, i));
+  if (!ok(state.slots[i])) {
+    let found = -1;
+    for (let d = 1; d < n && found < 0; d++) {
+      for (const j of dir ? [i + dir * d] : [i - d, i + d]) {
+        if (j >= 0 && j < n && ok(state.slots[j])) { found = j; break; }
+      }
+    }
+    if (found < 0) { updateClock(); return; }   // 這個方向已經沒有了
+    i = found;
+  }
   state.T = state.slots[i];
-  state.follow = i === state.slots.length - 1;
+  state.follow = state.T === latestSlot();
   if (!state.sync) setSync(true);   // 拖動時間軸 = 指定時間 → 自動切到同步
   render();
 }
@@ -261,7 +292,7 @@ async function play() {
   // 結尾 = 開啟中、固定週期圖層都有資料的最新時間
   const ends = enabled().filter((l) => l.cadence).map((l) => l.latest).filter(Boolean);
   const end = ends.length ? ends.reduce((a, b) => (a < b ? a : b)) : state.slots[state.slots.length - 1];
-  const frames = state.slots.filter((t) => t <= end);      // 時間軸本身就是播放範圍
+  const frames = state.slots.filter((t) => t <= end && ok(t));      // 時間軸本身就是播放範圍;只播雷達、雲圖都有的格
   if (!frames.length) return;
   state.wasSync = state.sync;
   state.playing = true;
@@ -289,7 +320,7 @@ function stop() {
   clearTimeout(state.playTimer);
   $('btn-play').textContent = '▶';
   setSync(state.wasSync ?? state.sync);
-  if (!state.sync) state.T = state.slots[state.slots.length - 1];
+  if (!state.sync) state.T = latestSlot();
   render();
 }
 
@@ -310,7 +341,7 @@ async function reload() {
   fillIssueSelect();
   fillEnsPanel();
   await loadBestTrack();
-  if (!state.T || wasEnd || !state.slots.includes(state.T)) state.T = state.slots[state.slots.length - 1] ?? null;
+  if (!state.T || wasEnd || !state.slots.includes(state.T) || !ok(state.T)) state.T = latestSlot();
 }
 
 function fillIssueSelect() {
@@ -508,17 +539,26 @@ function bindStationUI() {
   $('chk-stations').onchange = (e) => { stations.setVisible(e.target.checked); updateLegend(); };
 }
 
+/** 開關雷達 / 衛星或換頻道後,同步基準時間會變 → 重建時間軸 */
+function refreshTimeline() {
+  if (state.playing) stop();
+  buildSlots();
+  refreshSlider();
+  if (!state.slots.includes(state.T) || !ok(state.T) || state.follow) state.T = latestSlot();
+  render();
+}
+
 function bindSatUI() {
   const apply = async () => {
     $('sat-style').hidden = $('sat-band').value !== 'B13';
     const changed = await satellite.configure({ band: $('sat-band').value, style: $('sat-style').value });
-    if (changed) { buildSlots(); refreshSlider(); }
     updateLegend();
-    render();
+    if (changed) refreshTimeline();
+    else render();
   };
   $('sat-band').onchange = apply;
   $('sat-style').onchange = apply;
-  $('chk-satellite').onchange = (e) => { satellite.setVisible(e.target.checked); updateLegend(); };
+  $('chk-satellite').onchange = (e) => { satellite.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   $('op-satellite').oninput = (e) => satellite.setOpacity(e.target.value / 100);
 }
 
@@ -527,13 +567,13 @@ function bindUI() {
   $('btn-sync').onclick = () => {
     if (state.playing) return;
     setSync(!state.sync);
-    if (!state.sync) state.T = state.slots[state.slots.length - 1];
+    if (!state.sync) state.T = latestSlot();
     render();
   };
   $('slider').oninput = (e) => { if (state.playing) stop(); goto(+e.target.value); };
-  $('btn-prev').onclick = () => goto(state.slots.indexOf(state.T) - 1);
-  $('btn-next').onclick = () => goto(state.slots.indexOf(state.T) + 1);
-  $('btn-latest').onclick = () => goto(state.slots.length - 1);
+  $('btn-prev').onclick = () => goto(state.slots.indexOf(state.T) - 1, -1);
+  $('btn-next').onclick = () => goto(state.slots.indexOf(state.T) + 1, 1);
+  $('btn-latest').onclick = () => goto(state.slots.length - 1, -1);
   $('btn-play').onclick = play;
 
   document.addEventListener('keydown', (e) => {
@@ -543,14 +583,14 @@ function bindUI() {
     if (e.key === ' ') { e.preventDefault(); play(); }
   });
 
-  $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); };
+  $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   bindStationUI();
   bindSatUI();
   $('play-range').onchange = () => {
     if (state.playing) stop();
     buildSlots();
     refreshSlider();
-    if (!state.slots.includes(state.T)) state.T = state.slots[state.slots.length - 1] ?? null;
+    if (!state.slots.includes(state.T) || !ok(state.T)) state.T = latestSlot();
     render();
   };
   $('op-radar').oninput = (e) => radar.setOpacity(e.target.value / 100);
