@@ -156,6 +156,7 @@ def grid_and_vars(shape):
 def process(init):
     """下載一報、存成每變數一個檔;任何一步失敗就整報放棄(下次排程再試)。"""
     t0 = time.time()
+    log.info("ECMWF %s 開始下載(%d 步,約 400 MB、10–15 分鐘)", stamp_of(init), len(STEPS))
     data = {k: [] for k in VARS}
     with ThreadPoolExecutor(4) as pool:
         for step in STEPS:
