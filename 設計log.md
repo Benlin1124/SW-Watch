@@ -523,3 +523,10 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - `web/js/config.js`：`R2_URL` 填 r2.dev 網址後，github.io 讀 R2；本機網頁加 `?data=r2` 也能讀 R2（排程搬走後本機沒有新資料）。
 - 遷移建議：舊電腦 `data\` 整個複製到新電腦，保留歷史、各站 CSV 與 index；同一時間只能一台跑排程。
 - `SAT_KEEP_DAYS` 可在 `.env` 調整（新電腦磁碟夠就調大）。
+
+### 部署完成（2026-10-22）
+
+- Cloudflare R2 bucket `sw-watch-data`，公開網址 `https://pub-95cef959cf924e2e938a1d1b2a833e45.r2.dev/`，CORS 允許 benlin1124.github.io 與本機 8765。API token 為 Object Read & Write、限此 bucket；金鑰只存在排程電腦的 `.env`（舊電腦的 `r2金鑰.txt` 已被 .gitignore 排除）。
+- GitHub repo 改為公開（檢查過 21 個版本沒有金鑰）；Pages 用 GitHub Actions 部署 `web/`，網址 https://benlin1124.github.io/SW-Watch/ ，已確認從 R2 讀到所有圖層。
+- 排程改在另一台電腦跑（Windows 使用者名稱含中文；設 `PYTHONUTF8=1`）。舊電腦 `data/` 壓成 zip 搬過去後 `--reconcile` 上傳 786 個檔；10:47 啟動排程，雷達／測站／衛星都已更新到 R2。舊電腦排程已停，**不要兩台同時跑**。
+- 踩到的問題：`requirements.txt` 有中文註解 → 中文 Windows 的 pip 用 cp950 讀會失敗，改成全英文。
