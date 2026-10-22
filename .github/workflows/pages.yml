@@ -25,6 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # 每次部署在 CSS / JS 網址加版本號(commit),瀏覽器才不會拿到「新 HTML + 快取裡的舊 JS」而壞掉
+      - name: Cache-bust asset URLs
+        run: |
+          V=${GITHUB_SHA::7}
+          sed -i -E "s#(href=\"css/[^\"]+\.css)\"#\1?v=$V\"#; s#(src=\"js/[^\"]+\.js)\"#\1?v=$V\"#" web/index.html
+          find web/js -name '*.js' -exec sed -i -E "s#(from '\.{1,2}/[^']+\.js)'#\1?v=$V'#g" {} +
+          grep -n "?v=" web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
