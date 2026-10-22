@@ -60,3 +60,16 @@ RAIN_ACC = {
 }
 
 TAIWAN_GEOJSON_URL = "https://watch.ncdr.nat.gov.tw/00_Wxmap/json/area/low/TWN_CITY_low.json"
+
+# ── 衛星(Himawari-9,AWS noaa-himawari9 全盤 HSD)──
+SAT_BUCKET = "noaa-himawari9/AHI-L1b-FLDK"
+SAT_EXTENT = (105.0, 5.0, 155.0, 35.0)     # lon_min, lat_min, lon_max, lat_max
+# 頻道 → (輸出解析度 °, 校正方式, 量化 scale, offset, 單位)
+SAT_BANDS = {
+    "B13": (0.02, "brightness_temperature", 0.6, -100.0, "°C"),
+    "B08": (0.02, "brightness_temperature", 0.6, -100.0, "°C"),
+    "B03": (0.01, "reflectance", 0.5, 0.0, "%"),
+}
+SAT_WAIT_MIN = 60            # 掃描開始後幾分鐘內等資料上架,超過記 missed
+SAT_B03_EVERY_MIN = 10       # B03 每次約下載 130 MB;改 30 或 60 可大幅省流量
+SAT_KEEP_DAYS = 3            # 本機只留幾天(C 槽空間有限;B03 一天約 0.5–1 GB)

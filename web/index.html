@@ -23,6 +23,28 @@
     <section>
       <h3>圖層</h3>
 
+      <div class="layer" data-layer="satellite">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-satellite" checked>
+          <span class="layer-name">衛星雲圖</span>
+          <span class="layer-time" id="time-satellite">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>頻道
+            <select id="sat-band">
+              <option value="B13">B13 紅外線</option>
+              <option value="B08">B08 水氣</option>
+              <option value="B03">B03 可見光</option>
+            </select>
+            <select id="sat-style">
+              <option value="bd">增強色階</option>
+              <option value="gray">灰階</option>
+            </select>
+          </label>
+          <label>透明度 <input type="range" id="op-satellite" min="0" max="100" value="100"></label>
+        </div>
+      </div>
+
       <div class="layer" data-layer="radar">
         <label class="layer-head">
           <input type="checkbox" id="chk-radar" checked>
@@ -142,13 +164,16 @@
       <div id="slider-ticks"></div>
     </div>
     <button id="btn-latest" title="跳到最新">最新</button>
-    <label class="tl-opt">播放
+    <label class="tl-opt" title="時間軸顯示的長度，也是播放的範圍">範圍
       <select id="play-range">
         <option value="1">1 小時</option>
         <option value="3" selected>3 小時</option>
         <option value="6">6 小時</option>
         <option value="12">12 小時</option>
         <option value="24">24 小時</option>
+        <option value="48">2 天</option>
+        <option value="72">3 天</option>
+        <option value="168">7 天</option>
       </select>
     </label>
     <label class="tl-opt">速度

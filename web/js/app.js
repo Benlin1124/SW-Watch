@@ -2,6 +2,7 @@
 import { REFRESH_SEC, STEP_MIN, TIMELINE_DAYS } from './config.js';
 import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
 import { RadarLayer } from './layers/radar.js';
+import { SatelliteLayer } from './layers/satellite.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
 import { STATION_VARS, StationLayer } from './layers/stations.js';
 import { EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
@@ -86,10 +87,11 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
 
 window.swMap = map;     // 除錯 / 之後截圖功能用
 const radar = new RadarLayer(map);
+const satellite = new SatelliteLayer(map);
 const typhoon = new TyphoonLayer(map);
 const ens = new EnsembleLayer(map);
 const stations = new StationLayer(map);
-const LAYERS = [radar, stations, typhoon, ens];
+const LAYERS = [satellite, radar, stations, typhoon, ens];
 
 // ── 狀態 ──
 const state = {
@@ -100,17 +102,18 @@ const state = {
   playing: false,
   playTimer: null,
   frames: [],
+  renderSeq: 0,
 };
 
 function enabled() { return LAYERS.filter((l) => l.visible && l.index); }
 
-/** 時間軸範圍:最近 TIMELINE_DAYS 天內,從最早資料到最新資料,每 10 分一格 */
+/** 時間軸範圍 = 「範圍」選單的長度(也是播放範圍),結尾為最新資料;每 10 分一格 */
 function buildSlots() {
   const all = LAYERS.flatMap((l) => l.times);
   if (!all.length) { state.slots = []; return; }
   const end = floorStep(all.reduce((a, b) => (a > b ? a : b)));
   const earliest = floorStep(all.reduce((a, b) => (a < b ? a : b)));
-  const limit = addMin(end, -TIMELINE_DAYS * 1440);
+  const limit = addMin(end, -Math.min(+$('play-range').value * 60, TIMELINE_DAYS * 1440) + STEP_MIN);
   let t = earliest > limit ? earliest : limit;
   const slots = [];
   while (t <= end) { slots.push(t); t = addMin(t, STEP_MIN); }
@@ -121,11 +124,12 @@ function buildSlots() {
 async function render() {
   const sync = state.sync || state.playing;
   updateClock();
+  const seq = ++state.renderSeq;
   await Promise.all(LAYERS.map(async (l) => {
     if (!l.index) return;
     const stamp = l.pick(state.T, sync);
     try { await l.show(stamp); } catch (e) { console.warn(l.key, stamp, e); await l.show(null); }
-    updateLayerTime(l, stamp, sync);
+    if (seq === state.renderSeq) updateLayerTime(l, stamp, sync);   // 較慢的舊畫面不覆蓋新的時間標示
   }));
   if (!state.playing) renderStorms();
 }
@@ -143,6 +147,7 @@ function updateLayerTime(l, stamp, sync) {
     el.textContent = inits.length === 1 ? `初始 ${fmtInit(inits[0])}` : inits.length ? '各模式不同' : '無資料';
     if (!inits.length) el.classList.add('nodata');
     updateEnsValidLabel();
+    updateModelAutoLabels();
     return;
   }
   const custom = l.timeLabel?.(stamp);
@@ -203,7 +208,7 @@ function drawCoverage() {
   ctx.clearRect(0, 0, w, h);
   const n = state.slots.length;
   if (!n) return;
-  const rows = [[radar, '#4fc3f7'], [stations, '#81c784'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
+  const rows = [[satellite, '#b0bec5'], [radar, '#4fc3f7'], [stations, '#81c784'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
   const rh = h / rows.length;
   const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
   rows.forEach(([l, color], r) => {
@@ -224,7 +229,7 @@ function drawTicks() {
   const n = state.slots.length;
   if (n < 2) return;
   const hours = (n * STEP_MIN) / 60;
-  const every = hours <= 6 ? 60 : hours <= 24 ? 180 : hours <= 72 ? 720 : 1440; // 分鐘
+  const every = hours <= 1.5 ? 10 : hours <= 3 ? 30 : hours <= 6 ? 60 : hours <= 24 ? 180 : hours <= 72 ? 720 : 1440; // 分鐘
   state.slots.forEach((t, i) => {
     const twMin = (+t.slice(8, 10) * 60 + +t.slice(10, 12) + 480) % 1440;
     if (twMin % every !== 0) return;
@@ -253,11 +258,10 @@ function goto(i) {
 // ── 播放(永遠對齊)──
 async function play() {
   if (state.playing) return stop();
-  const hours = +$('play-range').value;
   // 結尾 = 開啟中、固定週期圖層都有資料的最新時間
   const ends = enabled().filter((l) => l.cadence).map((l) => l.latest).filter(Boolean);
   const end = ends.length ? ends.reduce((a, b) => (a < b ? a : b)) : state.slots[state.slots.length - 1];
-  const frames = state.slots.filter((t) => t <= end && t > addMin(end, -hours * 60));
+  const frames = state.slots.filter((t) => t <= end);      // 時間軸本身就是播放範圍
   if (!frames.length) return;
   state.wasSync = state.sync;
   state.playing = true;
@@ -392,7 +396,7 @@ function buildModelRows() {
     row.innerHTML = `<div class="model-head">
         <label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" data-on ${c.on ? 'checked' : ''}>
           <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#888'}"></span>${m}</label>
-        <select><option value="">同上</option>${[...ens.index.models[m]].reverse().map((i) => `<option value="${i}">${fmtInit(i)}</option>`).join('')}</select>
+        <select><option value="">自動</option>${[...ens.index.models[m]].reverse().map((i) => `<option value="${i}">${fmtInit(i)}</option>`).join('')}</select>
         <button class="expand">▸</button>
       </div>
       <div class="model-body" hidden>${body(c)}</div>`;
@@ -423,6 +427,16 @@ function syncRowsFromCfg() {
       else if (k === 'tau1') inp.value = c.tau[1];
       else inp.checked = c[k];
     }
+  }
+}
+
+/** 各模式初始時間下拉的「自動」顯示實際用到的初始時間(跟著上方初始時間 / 時間軸) */
+function updateModelAutoLabels() {
+  for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
+    const m = row.dataset.model, opt = row.querySelector('select')?.options[0];
+    if (!opt) continue;
+    const got = !ens.cfg[m].init && ens.resolved[m];
+    opt.textContent = got ? `自動（${fmtInit(got)}）` : '自動';
   }
 }
 
@@ -466,7 +480,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
 }
@@ -494,6 +508,20 @@ function bindStationUI() {
   $('chk-stations').onchange = (e) => { stations.setVisible(e.target.checked); updateLegend(); };
 }
 
+function bindSatUI() {
+  const apply = async () => {
+    $('sat-style').hidden = $('sat-band').value !== 'B13';
+    const changed = await satellite.configure({ band: $('sat-band').value, style: $('sat-style').value });
+    if (changed) { buildSlots(); refreshSlider(); }
+    updateLegend();
+    render();
+  };
+  $('sat-band').onchange = apply;
+  $('sat-style').onchange = apply;
+  $('chk-satellite').onchange = (e) => { satellite.setVisible(e.target.checked); updateLegend(); };
+  $('op-satellite').oninput = (e) => satellite.setOpacity(e.target.value / 100);
+}
+
 // ── 綁定 UI ──
 function bindUI() {
   $('btn-sync').onclick = () => {
@@ -517,6 +545,14 @@ function bindUI() {
 
   $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); };
   bindStationUI();
+  bindSatUI();
+  $('play-range').onchange = () => {
+    if (state.playing) stop();
+    buildSlots();
+    refreshSlider();
+    if (!state.slots.includes(state.T)) state.T = state.slots[state.slots.length - 1] ?? null;
+    render();
+  };
   $('op-radar').oninput = (e) => radar.setOpacity(e.target.value / 100);
   $('chk-typhoon').onchange = (e) => typhoon.setVisible(e.target.checked);
   $('ty-issue').onchange = (e) => { typhoon.fixedIssue = e.target.value; render(); };
@@ -532,7 +568,7 @@ function bindUI() {
   $('chk-county').onchange = (e) => map.setLayoutProperty('county', 'visibility', e.target.checked ? 'visible' : 'none');
 
   map.on('mousemove', (e) => {
-    const v = radar.valueAt(e.lngLat.lng, e.lngLat.lat);
+    const v = [radar, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
     const el = $('readout');
     el.style.display = 'block';
     el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${e.lngLat.lng.toFixed(3)}°E${v ? `　${v}` : ''}`;
@@ -547,6 +583,7 @@ map.on('load', async () => {
   setSync(true);
   await reload();
   radar.addTo();
+  satellite.addTo('radar');
   typhoon.addTo();
   ens.addTo('ty-cone-fill');
   addOverlays('ens-members');

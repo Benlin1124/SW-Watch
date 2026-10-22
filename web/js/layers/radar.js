@@ -3,10 +3,10 @@ import { getGrid, getIndex } from '../data.js';
 import { DBZ_COLORS, DBZ_LEVELS, legendHTML, radarLUT } from '../colormaps.js';
 import { latestLE } from '../time.js';
 
-const EMPTY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
+export const EMPTY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
 const CACHE_MAX = 200;
 
-async function renderPNG(raw, g, lut) {
+export async function renderPNG(raw, g, lut) {
   const canvas = document.createElement('canvas');
   canvas.width = g.nx;
   canvas.height = g.ny;

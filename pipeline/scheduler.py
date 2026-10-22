@@ -12,7 +12,8 @@ from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import cleanup, config, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_stations, fetch_typhoon
+from . import (cleanup, config, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_satellite, fetch_stations,
+               fetch_typhoon)
 from .common import read_status, record_status, stamp_dt
 
 log = logging.getLogger("pipeline")
@@ -105,6 +106,14 @@ def safe_ensemble():
         log.exception("ensemble 失敗")
 
 
+def safe_satellite():
+    """衛星:每分鐘檢查最近 SAT_WAIT_MIN 分鐘內還沒處理的時次(AWS 免費、不計氣象署額度;狀態由 fetch_satellite 自己記)。"""
+    try:
+        fetch_satellite.run()
+    except Exception:
+        log.exception("satellite 失敗")
+
+
 def safe_cleanup():
     try:
         cleanup.run()
@@ -130,6 +139,8 @@ def main():
         sched.add_job(job, "cron", id=name, max_instances=1, coalesce=True,
                       misfire_grace_time=50, **cron)
     sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
+    sched.add_job(safe_satellite, "cron", minute="*", id="satellite", max_instances=1, coalesce=True,
+                  misfire_grace_time=50)
     sched.add_job(safe_cleanup, "cron", hour=19, minute=30, id="cleanup")  # 台灣 03:30
     for name, job, _ in jobs:          # 啟動時先跑一輪
         sched.add_job(job, "date", run_date=datetime.now(timezone.utc),

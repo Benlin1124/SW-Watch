@@ -1,9 +1,10 @@
-"""保留策略:10 分鐘資料保留 KEEP_FULL_DAYS 天,更舊的只留整點;颱風資料永久保留。"""
+"""保留策略:10 分鐘資料保留 KEEP_FULL_DAYS 天,更舊的只留整點;颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天。"""
 import json
 from datetime import datetime, timedelta, timezone
 
 from . import config
 from .common import log, save_json
+from .fetch_satellite import cleanup as cleanup_satellite
 from .station_series import compress_old_months
 
 SKIP = ("typhoon",)
@@ -27,6 +28,7 @@ def run():
         save_json(idx_path, idx)
         log.info("cleanup %s:刪除 %d 筆", rel, len(drop))
     compress_old_months()
+    cleanup_satellite()
 
 
 if __name__ == "__main__":

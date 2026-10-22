@@ -68,3 +68,63 @@ export function stepExpr(scale, prop = 'v') {
   for (let i = 1; i < scale.colors.length; i++) e.push(scale.levels[i], scale.colors[i]);
   return e;
 }
+
+// ── 衛星色階:每個 raw(0–254)一個顏色,255 = nodata 透明 ──
+// B13 增強色階沿用 Satellite_full_dvorak_(1).ipynb(對流色段 + 兩段灰階)
+const BD_LEVELS = [-100, -86, -81, -76, -70, -64, -54, -42, -31,
+  -27, -23, -19, -15, -11, -7, -3, 1, 5, 9,
+  11, 13, 15, 17, 19, 21, 23, 25, 27, 29];
+const BD_COLORS = ['#ffffff', '#001212', '#fe0000', '#00c8c8', '#ff00fe', '#ffff00', '#01af00', '#003cf6',
+  '#e2e2e2', '#dadada', '#d1d1d1', '#c6c6c6', '#bdbdbd', '#aeaeae', '#a0a0a0', '#939393', '#868686', '#7a7a7a',
+  '#f3f3f3', '#e2e2e2', '#cecece', '#b5b5b5', '#959595', '#7a7a7a', '#5f5f5f', '#404040', '#1d1d1d', '#000000'];
+const WV_ANCHORS = [[-85, '#ffffff'], [-65, '#9ecae1'], [-50, '#2166ac'], [-40, '#1a1a2e'], [-30, '#7f4f24'], [-18, '#e0a050'], [-5, '#fff1c1']];
+
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const gray = (g) => { const v = Math.round(clamp01(g) * 255); return ((255 << 24) | (v << 16) | (v << 8) | v) >>> 0; };
+
+function anchorColor(anchors, v) {
+  if (v <= anchors[0][0]) return anchors[0][1];
+  for (let i = 1; i < anchors.length; i++) {
+    if (v <= anchors[i][0]) {
+      const [a, ca] = anchors[i - 1], [b, cb] = anchors[i];
+      const f = (v - a) / (b - a), x = hexToRgb(ca), y = hexToRgb(cb);
+      return '#' + x.map((c, j) => Math.round(c + (y[j] - c) * f).toString(16).padStart(2, '0')).join('');
+    }
+  }
+  return anchors[anchors.length - 1][1];
+}
+
+/** 衛星值 → 顏色函式(回傳 packed ABGR);style:B13 'bd' | 'gray' */
+function satColorFn(band, style) {
+  if (band === 'B03') return (v) => gray(Math.pow(clamp01(v / 100), 0.6));
+  if (band === 'B08') return (v) => packHex(anchorColor(WV_ANCHORS, v));
+  if (style === 'gray') return (v) => gray((40 - v) / 120);   // −80 °C 白 → +40 °C 黑
+  return (v) => {
+    let i = 0;
+    while (i + 1 < BD_LEVELS.length - 1 && v >= BD_LEVELS[i + 1]) i++;
+    return packHex(BD_COLORS[Math.min(i, BD_COLORS.length - 1)]);
+  };
+}
+
+export function satLUT(spec, band, style = 'bd') {
+  const f = satColorFn(band, style);
+  const lut = new Uint32Array(spec.nodata + 1);
+  for (let raw = 0; raw < spec.nodata; raw++) lut[raw] = f(raw * spec.scale + spec.offset);
+  return lut;
+}
+
+const cssOf = (p) => `rgb(${p & 255},${(p >> 8) & 255},${(p >>> 16) & 255})`;
+
+/** 連續色階圖例:取樣顏色做漸層,ticks 標在對應位置 */
+export function satLegendHTML(title, band, style, [vmin, vmax], ticks) {
+  const f = satColorFn(band, style), n = 120, stops = [];
+  for (let i = 0; i < n; i++) {
+    const v = vmin + ((i + 0.5) / n) * (vmax - vmin);
+    stops.push(`${cssOf(f(v))} ${(i / n) * 100}% ${((i + 1) / n) * 100}%`);
+  }
+  const pos = (v) => ((v - vmin) / (vmax - vmin)) * 100;
+  const labels = ticks.map((t) => `<span style="position:absolute;left:${pos(t)}%;transform:translateX(-50%)">${t}</span>`).join('');
+  return `<div class="legend-title">${title}</div>
+    <div style="width:300px;height:10px;background:linear-gradient(90deg,${stops.join(',')})"></div>
+    <div class="legend-labels" style="position:relative;height:12px;width:300px">${labels}</div>`;
+}
