@@ -629,10 +629,43 @@ function bindEcmwfUI() {
     setFollow(false);
     apply();
   };
-  $('ec-prev').onclick = () => move(-1);
-  $('ec-next').onclick = () => move(1);
+  $('ec-prev').onclick = () => { ecPause(); move(-1); };
+  $('ec-next').onclick = () => { ecPause(); move(1); };
   const setFollow = (on) => { ecmwf.follow = on; $('ec-follow').checked = on; };
-  $('ec-follow').onchange = (e) => { setFollow(e.target.checked); apply(); };
+  $('ec-follow').onchange = (e) => { ecPause(); setFollow(e.target.checked); apply(); };
+
+  // 預報播放:和下方時間軸各自獨立,只換 ECMWF 圖層的時刻;速度用時間軸的「速度」
+  let timer = null, playing = false;
+  const showEc = async () => {
+    await ecmwf.show(ecmwf.pick(state.T));
+    updateLayerTime(ecmwf, ecmwf.shown?.key, true);
+    updateLegend();
+  };
+  const ecPause = () => {
+    playing = false;
+    clearTimeout(timer);
+    $('ec-play').classList.remove('on');
+  };
+  $('ec-pause').onclick = ecPause;
+  $('ec-play').onclick = async () => {
+    if (playing || !ecmwf.index) return;
+    if (!ecmwf.visible) { $('chk-ecmwf').checked = true; ecmwf.setVisible(true); }
+    playing = true;
+    setFollow(false);
+    $('ec-play').classList.add('on');
+    await ecmwf.prefetch((d, n) => toast(`載入 ECMWF ${d}/${n}`, d === n ? 600 : 0));
+    const st = ecmwf.steps;
+    const tick = async () => {
+      if (!playing) return;
+      const i = st.indexOf(ecmwf.pickedStep ?? ecmwf.step);
+      ecmwf.step = st[(i + 1) % st.length];
+      await showEc();
+      const last = ecmwf.step === st[st.length - 1];
+      if (playing) timer = setTimeout(tick, +$('play-speed').value * (last ? 3 : 1));   // 最後一張多停一下
+    };
+    tick();
+  };
+  for (const id of ['ec-var', 'ec-rain', 'ec-init', 'ec-step', 'chk-ecmwf']) $(id).addEventListener('change', ecPause);
 }
 
 // ── 測站:搜尋、篩選、排行榜、資訊卡 ──

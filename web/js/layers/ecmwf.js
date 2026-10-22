@@ -28,6 +28,7 @@ const RAIN_LEVELS = {
 const UP = 8;                      // 畫圖放大倍數(色塊邊界才不會有鋸齒)
 const ARROW_EVERY = 1;             // 每格(0.1°)都放風向箭頭,重疊的由地圖自動略過 → 放大越密
 const CACHE_MAX = 24;
+const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(一報 29 個時刻,夠播兩個變數)
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 const latOf = (y) => (Math.atan(Math.exp(y)) * 360) / Math.PI - 90;
@@ -53,6 +54,7 @@ export class EcmwfLayer {
   follow = false;            // 對齊時間軸:預報時刻跟著時間軸 T
   shown = null;              // { key, init, step, field, label }
   cache = new Map();         // `${init}/${var}` → Promise<Uint16Array>
+  frames = new Map();        // key → Promise<畫好的圖>
 
   constructor(map) { this.map = map; }
 
@@ -224,17 +226,43 @@ export class EcmwfLayer {
       this.shown = null;
       return;
     }
-    const [init, s, variable, rh] = key.split('|'), step = +s;
-    const r = await this.field(init, step, variable, +rh);
+    const f = await this.frame(key);
     if (this.wanted !== key) return;
-    const sc = this.scale(variable, r.rainSpan);
-    const url = await this.render(r.field, sc);
-    if (this.wanted !== key) { URL.revokeObjectURL(url); return; }
-    const old = this.shown?.url;
-    src.updateImage({ url, coordinates: this.corners() });
-    if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
-    arr.setData(r.u ? this.arrows(r.u, r.v) : EMPTY);
-    this.shown = { key, init, step, variable, field: r.field, label: r.label, sc, url };
+    src.updateImage({ url: f.url, coordinates: this.corners() });
+    arr.setData(f.arrows);
+    this.shown = { key, ...f };
+  }
+
+  /** 一張畫好的圖(場、色階、PNG、箭頭);留著給播放重複用 */
+  frame(key) {
+    if (!this.frames.has(key)) {
+      const [init, s, variable, rh] = key.split('|'), step = +s;
+      const p = (async () => {
+        const r = await this.field(init, step, variable, +rh);
+        const sc = this.scale(variable, r.rainSpan);
+        return { init, step, variable, field: r.field, label: r.label, sc, url: await this.render(r.field, sc),
+          arrows: r.u ? this.arrows(r.u, r.v) : EMPTY };
+      })();
+      p.catch(() => this.frames.delete(key));
+      this.frames.set(key, p);
+      while (this.frames.size > FRAMES_MAX) {
+        const [k, old] = this.frames.entries().next().value;
+        if (k === this.shown?.key) { this.frames.delete(k); this.frames.set(k, old); continue; }
+        this.frames.delete(k);
+        old.then((x) => URL.revokeObjectURL(x.url)).catch(() => {});
+      }
+    }
+    return this.frames.get(key);
+  }
+
+  /** 播放前先把整段畫好(目前的初始、變數),回報進度 */
+  async prefetch(onProgress) {
+    const init = this.activeInit, keys = this.steps.map((s) => `${init}|${s}|${this.variable}|${this.rainHours}`);
+    let done = 0;
+    for (const k of keys) {
+      try { await this.frame(k); } catch { /* 缺檔:播放時跳過 */ }
+      onProgress?.(++done, keys.length);
+    }
   }
 
   timeLabel() {

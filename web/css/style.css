@@ -184,3 +184,6 @@ body[data-map-theme=dark] .st-label { color: #fff; text-shadow: 0 0 3px #000, 0 
 .layer-opts { grid-template-columns: minmax(0, 1fr); }
 .layer-opts label { white-space: nowrap; min-width: 0; }
 .layer-opts label button { flex: 0 0 auto; padding: 2px 6px; }
+.ec-play { display: flex; gap: 6px; }
+.ec-play button { flex: 1; padding: 3px 0; }
+.ec-play button.on { background: var(--accent); color: #000; border-color: var(--accent); }
