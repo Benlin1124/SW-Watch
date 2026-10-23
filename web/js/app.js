@@ -709,7 +709,7 @@ function refreshStationUI() {
   if (box.hidden) return;
   const v = stations.v, list = stations.ranking(+$('st-rank-n').value, $('st-rank-order').value);
   box.innerHTML = list.length ? list.map((p) => `<li data-id="${p.id}">${p.name} <small>${p.county}${p.town}</small>
-      <b>${stations.fmt(p.v)}${v.scale === 'wind' ? `（${p.bf}級）` : ` ${v.unit}`}</b></li>`).join('')
+      <b>${stations.fmt(p.v)}${v.scale === 'wind' ? `（${p.bf}級）` : ` ${v.unit}`}</b>${p.gt ? ` <small>@${stations.fmtAt(p.gt)}</small>` : ''}</li>`).join('')
     : '<small>目前沒有資料</small>';
   for (const li of box.querySelectorAll('li')) li.onclick = () => openStation(li.dataset.id);
 }

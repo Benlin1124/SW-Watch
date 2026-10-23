@@ -1,10 +1,13 @@
 """測站過去 N 小時最大 / 最小(N = 1、2、3、6、12、24、48、72)
   data/stations/agg_{N}h/{stamp}.json.gz(gzip 壓縮的 JSON,前端自己解)
     {time, start, hours, vars, ids, max: [[各變數]...], min: [[...]...],
-     expected, found, missing, gust_t: {站: 最大陣風發生時間}(只有日本氣象廳站)}     ← missing = 區間內缺的快照時間(缺漏要看得到,不補)
+     max_t: [[各變數發生時間]...], min_t: [[...]...],
+     expected, found, missing}     ← missing = 區間內缺的快照時間(缺漏要看得到,不補)
+發生時間:氣象要素 = 觀測時間 obs;雨量 = 那 10 分鐘 / 1 小時的結束時間(快照時間,日本站用 obs);
+陣風 = 實際發生時間(CWA GustInfo 的 gust_at、日本站 gust_t)。同值取最早的一次。
 區間為 (stamp - N 小時, stamp]。
   - 6 小時以內:直接從快照(data/stations/{stamp}.json)算。
-    氣象要素(溫度、風…)是每小時一筆,用各站自己的觀測時間 obs 判斷是否在區間內;
+    氣象要素(溫度、風…)是整點或 10 分鐘一筆,用各站自己的觀測時間 obs 判斷是否在區間內;
     雨量(10 分鐘、1 小時)每 10 分鐘一筆,用快照時間判斷。
     日本氣象廳站的陣風另外算(day_max_gust):只有當日最大與發生時間,只算最大,最小留空。
   - 12 小時以上:把 N 個互不重疊的 1 小時區間 (T-k-1h, T-kh] 合併,不必每 10 分鐘讀 432 個快照。
@@ -54,7 +57,7 @@ def compute(stamp, hours, times, until=None):
     have = set(times)
     found = [t for t in expected if t in have]
     extra = [t for t in times if stamp < t <= until] if until else []
-    acc = {}                                   # id → {var: [值...]}
+    acc = {}                                   # id → {var: [(值, 發生時間)...]}
     order, gust_max_only = [], set()
     for t in found + extra:
         rain_ok = t <= stamp
@@ -67,25 +70,34 @@ def compute(stamp, hours, times, until=None):
             if sid not in acc:
                 acc[sid] = {v: [] for v in VARS}
                 order.append(sid)
-            wx_ok = start < (row[f["obs"]] or "") <= stamp
+            obs = row[f["obs"]] or ""
+            wx_ok = start < obs <= stamp
+            jma = "type" in f and row[f["type"]] == "jma"
             day_gust = "gust_t" in f and row[f["gust_t"]]
             if day_gust:
                 gust_max_only.add(sid)
             for v in VARS:
                 x = row[f[v]] if v in f and not (v == "gust" and day_gust) else None
                 if x is not None and (rain_ok if v in RAIN_VARS else wx_ok):
-                    acc[sid][v].append(x)
+                    at = (obs if jma else t) if v in RAIN_VARS else (
+                        row[f["gust_at"]] if v == "gust" and "gust_at" in f and row[f["gust_at"]] else obs)
+                    acc[sid][v].append((x, at))
     rnd = lambda x: round(x, 1)
-    ids, mx, mn = [], [], []
+    ids, mx, mn, mxt, mnt = [], [], [], [], []
     for sid in order:
         vals = acc[sid]
         if not any(vals.values()):
             continue
         ids.append(sid)
-        mx.append([rnd(max(vals[v])) if vals[v] else None for v in VARS])
-        mn.append([rnd(min(vals[v])) if vals[v] and not (v == "gust" and sid in gust_max_only) else None for v in VARS])
+        hi = [min(vals[v], key=lambda p: (-p[0], p[1])) if vals[v] else None for v in VARS]
+        lo = [min(vals[v], key=lambda p: (p[0], p[1])) if vals[v] and not (v == "gust" and sid in gust_max_only) else None
+              for v in VARS]
+        mx.append([rnd(p[0]) if p else None for p in hi])
+        mn.append([rnd(p[0]) if p else None for p in lo])
+        mxt.append([p[1] if p else None for p in hi])
+        mnt.append([p[1] if p else None for p in lo])
     return {"time": stamp, "start": start, "hours": hours, "vars": VARS, "ids": ids,
-            "max": mx, "min": mn, "expected": len(expected), "found": len(found),
+            "max": mx, "min": mn, "max_t": mxt, "min_t": mnt, "expected": len(expected), "found": len(found),
             "missing": [t for t in expected if t not in have]}
 
 
@@ -106,17 +118,22 @@ def _one_hour(end, now, times):
 def merge(stamp, hours, times):
     """N 個互不重疊的 1 小時結果合併成 N 小時(由舊到新算,邊算邊釋放舊快照)。"""
     parts = [_one_hour(_shift(stamp, -60 * k), stamp, times) for k in reversed(range(hours))]
-    mx, mn, order = {}, {}, []
+    acc, order = {}, []                        # id → {"max"/"min": [[值, 時間] 各變數]}
     for p in parts:
-        for sid, a, b in zip(p["ids"], p["max"], p["min"]):
-            if sid not in mx:
-                mx[sid], mn[sid] = list(a), list(b)
+        nv = len(VARS)
+        for i, sid in enumerate(p["ids"]):
+            if sid not in acc:
+                acc[sid] = {k: [[None, None] for _ in VARS] for k in ("max", "min")}
                 order.append(sid)
-                continue
-            mx[sid] = [y if x is None else x if y is None else max(x, y) for x, y in zip(mx[sid], a)]
-            mn[sid] = [y if x is None else x if y is None else min(x, y) for x, y in zip(mn[sid], b)]
+            for k, better in (("max", lambda a, b: a > b), ("min", lambda a, b: a < b)):
+                ts = p.get(f"{k}_t") or [[None] * nv] * len(p["ids"])
+                for j, (x, at) in enumerate(zip(p[k][i], ts[i])):
+                    cur = acc[sid][k][j]
+                    if x is not None and (cur[0] is None or better(x, cur[0])):   # 由舊到新,同值保留較早的
+                        acc[sid][k][j] = [x, at]
+    pick = lambda k, n: [[c[n] for c in acc[s][k]] for s in order]
     return {"time": stamp, "start": _shift(stamp, -hours * 60), "hours": hours, "vars": VARS, "ids": order,
-            "max": [mx[s] for s in order], "min": [mn[s] for s in order],
+            "max": pick("max", 0), "min": pick("min", 0), "max_t": pick("max", 1), "min_t": pick("min", 1),
             "expected": sum(p["expected"] for p in parts), "found": sum(p["found"] for p in parts),
             "missing": [t for p in parts for t in p["missing"]]}
 
@@ -163,11 +180,11 @@ def _apply_day_gust(out, stamp, hours, times):
                 continue
             idx[sid] = len(out["ids"])
             out["ids"].append(sid)
-            out["max"].append([None] * len(VARS))
-            out["min"].append([None] * len(VARS))
-        out["max"][idx[sid]][gi] = round(best[sid][0], 1) if sid in best else None
-        out["min"][idx[sid]][gi] = None
-    out["gust_t"] = {sid: t for sid, (v, t) in best.items()}     # 最大陣風發生時間(前端標在數值旁)
+            for k in ("max", "min", "max_t", "min_t"):
+                out[k].append([None] * len(VARS))
+        i = idx[sid]
+        out["max"][i][gi], out["max_t"][i][gi] = (round(best[sid][0], 1), best[sid][1]) if sid in best else (None, None)
+        out["min"][i][gi] = out["min_t"][i][gi] = None
     return out
 
 

@@ -11,7 +11,8 @@ LAYER = "stations"
 # 輸出欄位(順序即 rows 每列的順序)
 META_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "obs", "type"]   # type:manned 局屬 / auto 自動 / rain 雨量
 WX_FIELDS = ["temp", "rh", "pres", "ws", "wd", "gust", "gust_dir", "tmax", "tmin"]
-EXTRA_FIELDS = ["gust_day", "gust_t",   # 當日最大陣風與發生時間(只有日本氣象廳站有,見 fetch_jma)
+EXTRA_FIELDS = ["gust_at",              # 陣風(gust)的發生時間
+                "gust_day", "gust_t",   # 當日最大陣風與發生時間(只有日本氣象廳站有,見 fetch_jma)
                 "wx10"]                 # 1 = 氣象要素 10 分鐘一筆(O-A0003-001 的站、日本氣象廳站)
 RAIN_FIELDS = [f"rain_{k}" for k in config.RAIN_ACC]
 FIELDS = META_FIELDS + WX_FIELDS + RAIN_FIELDS + EXTRA_FIELDS
@@ -53,6 +54,13 @@ def _base(st):
             "obs": utc_stamp(st["ObsTime"]["DateTime"])}
 
 
+def _at(iso):
+    try:
+        return utc_stamp(iso) if iso else None
+    except ValueError:
+        return None
+
+
 def _wx(w):
     return dict(temp=_num(w.get("AirTemperature"), True), rh=_num(w.get("RelativeHumidity")),
                 pres=_num(w.get("AirPressure")), ws=_num(w.get("WindSpeed")), wd=_num(w.get("WindDirection")))
@@ -72,6 +80,7 @@ def collect():
             _wx(w),
             gust=_num(_get(w, "GustInfo", "PeakGustSpeed")),
             gust_dir=_num(_get(w, "GustInfo", "Occurred_at", "WindDirection")),
+            gust_at=_at(_get(w, "GustInfo", "Occurred_at", "DateTime")),
             tmax=_num(_get(w, "DailyExtreme", "DailyHigh", "TemperatureInfo", "AirTemperature"), True),
             tmin=_num(_get(w, "DailyExtreme", "DailyLow", "TemperatureInfo", "AirTemperature"), True),
         )

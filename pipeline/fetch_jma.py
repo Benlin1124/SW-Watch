@@ -108,7 +108,7 @@ def collect(stamp):
             "county": county, "town": town, "obs": obs, "type": "jma", "wx10": 1,
             "temp": _val(d, "temp"), "rh": _val(d, "humidity"), "pres": _val(d, "pressure"),
             "ws": _val(d, "wind"), "wd": _dir(_val(d, "windDirection")),
-            "gust": None, "gust_dir": None, "gust_day": None, "gust_t": None, "tmax": None, "tmin": None,
+            "gust": None, "gust_dir": None, "gust_at": None, "gust_day": None, "gust_t": None, "tmax": None, "tmin": None,
             "rain_10m": _val(d, "precipitation10m"), "rain_1h": _val(d, "precipitation1h"),
             "rain_3h": _val(d, "precipitation3h"), "rain_24h": _val(d, "precipitation24h"),
         })
@@ -122,7 +122,7 @@ def collect(stamp):
         r = by_id[f"J{code}"]
         r["gust_day"], r["gust_t"] = v, gt.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
         if t - gt <= timedelta(hours=1):
-            r["gust"], r["gust_dir"] = v, gd
+            r["gust"], r["gust_dir"], r["gust_at"] = v, gd, r["gust_t"]
     log.info("jma %s JST:%d 站(陣風 %d 站)", f"{t:%m/%d %H:%M}", len(recs), sum(g is not None for g in gusts.values()))
     return recs
 

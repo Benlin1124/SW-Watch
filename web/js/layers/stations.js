@@ -186,17 +186,21 @@ export class StationLayer {
     const snap = await this.fetch(`${this.path}/${stamp}.json`);
     const f = Object.fromEntries(snap.fields.map((k, i) => [k, i]));
     const v = this.v;
-    let agg = null, val, gustAt;
+    let agg = null, val, at;
     if (this.aggMode) {
       agg = await this.fetch(`${this.aggPath}/${stamp}.json.gz`);
       const j = agg.vars.indexOf(this.variable);
       const rows = agg[this.stat];
       const byId = new Map(agg.ids.map((id, i) => [id, rows[i][j]]));
       val = (r) => byId.get(r[f.id]) ?? null;
-      gustAt = (r) => agg.gust_t?.[r[f.id]] ?? null;
+      // 發生時間(max_t / min_t;舊檔沒有,只有日本站陣風的 gust_t)
+      const ts = agg[`${this.stat}_t`];
+      const atById = ts ? new Map(agg.ids.map((id, i) => [id, ts[i][j]]))
+        : new Map(this.variable === 'gust' && this.stat === 'max' ? Object.entries(agg.gust_t ?? {}) : []);
+      at = (r) => atById.get(r[f.id]) ?? null;
     } else {
       val = (r) => r[f[this.variable]];
-      gustAt = (r) => (f.gust_t != null ? r[f.gust_t] : null);
+      at = (r) => (this.variable === 'gust' && f.gust_at != null ? r[f.gust_at] : null);
     }
     const out = [];
     this.snap = { time: snap.time, f, rows: new Map(snap.rows.map((r) => [r[f.id], r])) };
@@ -211,8 +215,8 @@ export class StationLayer {
       // 風向 = 風吹來的方向,箭頭畫成吹去的方向;最大 / 最小沒有對應風向,只畫圓點
       if (v.dir && !agg && r[f[v.dir]] != null && x > 0) props.dir = (r[f[v.dir]] + 180) % 360;
       if (v.scale === 'wind') props.bf = beaufort(x);
-      // 日本氣象廳站的陣風有發生時間(最小沒有對應時間)
-      if (this.variable === 'gust' && !(agg && this.stat === 'min') && gustAt(r)) props.gt = gustAt(r);
+      // 發生時間:最大 / 最小的每個變數;當前值只有陣風
+      if (at(r)) props.gt = at(r);
       out.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [r[f.lon], r[f.lat]] } });
     }
     return { stamp, agg, features: out };
@@ -256,7 +260,7 @@ export class StationLayer {
     return this.v.rain || this.variable === 'pres' || this.variable === 'rh' ? `${x}` : x.toFixed(1);
   }
 
-  /** 陣風發生時間:24 小時以上的區間要帶日期 */
+  /** 發生時間:24 小時以上的區間要帶日期 */
   fmtAt(t) {
     return fmtTW(t, (this.current?.agg?.hours ?? 0) >= 24 ? 'md' : 'hm');
   }
