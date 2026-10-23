@@ -351,6 +351,48 @@ function toast(msg, hideAfter = 0) {
   if (hideAfter) el._t = setTimeout(() => { el.style.display = 'none'; }, hideAfter);
 }
 
+// ── 視窗擷取 ──
+// 地圖畫布(WebGL)在 render 當下讀出;其餘 HTML(標題列、測站數值、颱風標示、色階、測站卡、出處)用 html-to-image 轉圖,
+// 疊在地圖上面。不擷取:圖層選單、時間軸、地圖縮放鈕、擷取鈕、色階的縮放收合鈕
+const SHOT_SKIP = new Set(['panel', 'timeline', 'toast', 'btn-shot', 'legend-ctl']);
+async function screenshot() {
+  const btn = $('btn-shot');
+  btn.disabled = true;
+  toast('擷取中…');
+  try {
+    const { toCanvas } = await import('https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/+esm');
+    const mapImg = await new Promise((resolve) => {
+      map.once('render', () => resolve(map.getCanvas().toDataURL('image/png')));
+      map.triggerRepaint();
+    });
+    const pr = devicePixelRatio;
+    const html = await toCanvas(document.body, {
+      pixelRatio: pr, skipFonts: true, style: { background: 'transparent' },
+      filter: (n) => !(n.id && SHOT_SKIP.has(n.id)) && !n.classList?.contains('maplibregl-canvas')
+        && !n.classList?.contains('maplibregl-ctrl-top-right'),
+    });
+    const out = document.createElement('canvas');
+    out.width = html.width; out.height = html.height;
+    const ctx = out.getContext('2d');
+    const img = new Image();
+    img.src = mapImg;
+    await img.decode();
+    const r = map.getContainer().getBoundingClientRect();
+    ctx.drawImage(img, r.left * pr, r.top * pr, r.width * pr, r.height * pr);
+    ctx.drawImage(html, 0, 0);
+    const a = document.createElement('a');
+    a.download = `SW-Watch_${addMin(state.T ?? nowStamp(), 480)}.png`;   // 檔名用台灣時間
+    a.href = out.toDataURL('image/png');
+    a.click();
+    toast('已存成圖片', 1500);
+  } catch (e) {
+    console.error('擷取失敗', e);
+    toast('擷取失敗', 2500);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ── 資料更新 ──
 async function reload() {
   await Promise.all(LAYERS.map((l) => l.load().catch((e) => console.warn(`${l.key} 尚無資料`, e))));
@@ -809,6 +851,7 @@ function bindUI() {
   $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   bindStationUI();
   bindLegendScale();
+  $('btn-shot').onclick = screenshot;
   bindStationTools();
   bindSatUI();
   bindEcmwfUI();

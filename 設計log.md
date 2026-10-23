@@ -650,3 +650,8 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 色階框右上加 −/＋ 按鈕,用 CSS `zoom` 讓 `#legend-body` 整塊等比例縮放(0.6–2 倍,每次 0.1),存在 prefs `legendScale`,重新整理後還原。
 - `updateLegend` 改寫入 `#legend-body`,按鈕在 `#legend-ctl` 不會被覆蓋;按鈕平時半透明,滑鼠移到色階上才清楚。
 - 色階可收合:右上 ▾/▸ 切換,收合後只剩「色階 ▸」標題列(`#legend.folded`),狀態存在 prefs `legendFolded`。
+
+## 2026-10-23 視窗擷取
+- 標題列加「📷 擷取」:存成 PNG,檔名 `SW-Watch_{台灣時間 YYYYMMDDHHmm}.png`(目前顯示的時間)。
+- 做法:地圖 WebGL 畫布在 `render` 事件當下 `toDataURL`(不開 preserveDrawingBuffer,平時不耗效能);其餘 HTML(標題列、測站數值、颱風標示、色階、測站卡、出處)用 html-to-image 1.11.11(按下才從 jsdelivr 載入)轉圖疊上去。
+- 不擷取:圖層選單、時間軸、地圖縮放鈕、擷取鈕、色階的縮放收合鈕。`skipFonts`(Google Fonts 跨網域 CSS 讀不到),標題字型會換成系統字型。
