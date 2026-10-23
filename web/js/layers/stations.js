@@ -34,17 +34,35 @@ const LABEL_ZOOM = 9;          // 放大到這個等級才標數值
 const LABEL_MAX = 500;
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
-/** 箭頭圖示(朝北,SDF 才能依數值上色) */
+/** 箭頭圖示(朝北)。做成真正的 SDF(距離場):才能依數值上色,而且 icon-halo(外框)畫得出來。
+ *  MapLibre 的 SDF 慣例:alpha = 1 − (d / 8 + 0.25),d = 到邊界的距離(外正內負),邊界 alpha 0.75;外框最寬約 6 px */
 export function arrowImage() {
-  const s = 32, c = document.createElement('canvas');
+  const P = 6, s = 32 + P * 2, c = document.createElement('canvas');
   c.width = c.height = s;
   const g = c.getContext('2d');
+  g.translate(P, P);
   g.fillStyle = '#000';
   g.beginPath();
   g.moveTo(16, 2); g.lineTo(25, 15); g.lineTo(19, 14); g.lineTo(19, 30);
   g.lineTo(13, 30); g.lineTo(13, 14); g.lineTo(7, 15); g.closePath();
   g.fill();
-  return g.getImageData(0, 0, s, s);
+  const img = g.getImageData(0, 0, s, s), a = img.data;
+  const inside = Array.from({ length: s * s }, (_, i) => a[i * 4 + 3] > 127);
+  const out = new ImageData(s, s);
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const me = inside[y * s + x];
+      let best = Infinity;
+      for (let j = 0; j < s * s; j++) {
+        if (inside[j] === me) continue;
+        const dx = (j % s) - x, dy = Math.floor(j / s) - y;
+        best = Math.min(best, dx * dx + dy * dy);
+      }
+      const d = me ? -(Math.sqrt(best) - 0.5) : Math.sqrt(best) - 0.5;
+      out.data[(y * s + x) * 4 + 3] = Math.round(255 * Math.max(0, Math.min(1, 1 - (d / 8 + 0.25))));
+    }
+  }
+  return out;
 }
 
 export class StationLayer {
@@ -152,6 +170,12 @@ export class StationLayer {
     this.map.setLayoutProperty('st-arrow', 'icon-size', wind
       ? ['interpolate', ['linear'], ['zoom'], 6, ['+', 0.18, ['*', 0.045, bf]], 10, ['+', 0.35, ['*', 0.08, bf]]]
       : ['interpolate', ['linear'], ['zoom'], 6, 0.28, 9, 0.5, 12, 0.8]);
+    // 14 級(含)以上加白邊
+    const strong = ['>=', ['coalesce', bf, 0], 14];
+    this.map.setPaintProperty('st-pt', 'circle-stroke-color', wind ? ['case', strong, '#fff', '#333'] : '#333');
+    this.map.setPaintProperty('st-pt', 'circle-stroke-width', wind ? ['case', strong, 2, 0.6] : 0.6);
+    this.map.setPaintProperty('st-arrow', 'icon-halo-color', wind ? ['case', strong, '#fff', '#333'] : '#333');
+    this.map.setPaintProperty('st-arrow', 'icon-halo-width', wind ? ['case', strong, 2, 0.6] : 0.6);
     this.map.setLayoutProperty('st-pt', 'circle-sort-key', wind ? bf : 0);
     this.map.setLayoutProperty('st-arrow', 'symbol-sort-key', wind ? bf : 0);
   }
