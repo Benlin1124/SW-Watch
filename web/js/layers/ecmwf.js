@@ -298,7 +298,7 @@ export class EcmwfLayer {
     const { variable, sc, label, init, step } = this.shown;
     const title = `ECMWF ${label}（${fmtEcInit(init)} +${step}h）`;
     if (variable === 'wind' || variable === 'gust') return beaufortLegendHTML(`${title}（蒲福風級）`, sc.colors);
-    return legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0);
+    return legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks);
   }
 }
 

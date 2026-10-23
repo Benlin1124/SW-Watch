@@ -29,14 +29,16 @@ export function binLUT(spec, levels, colors, { minVisible = -Infinity } = {}) {
 /** notebook 的作法是 dBZ < 0 不畫(含 raw 0 = 範圍內無回波) */
 export const radarLUT = (spec) => binLUT(spec, DBZ_LEVELS, DBZ_COLORS, { minVisible: 0 });
 
-/** 分級圖例:數字標在色格交界(該色下界);數字太長放不下時,格子放寬,還是太擠就隔幾個標一個 */
-export function legendHTML(title, levels, colors, from = 1, w = 22) {
-  const cols = colors.slice(from), labs = levels.slice(from, colors.length);
+/** 分級圖例:數字標在色格交界(該色下界);數字太長放不下時,格子放寬,還是太擠就隔幾個標一個。
+ *  有 ticks 時色格縮窄到總寬約 460 px,只標 ticks 裡的值(含最後的上界) */
+export function legendHTML(title, levels, colors, from = 1, w = 22, ticks = null) {
+  const cols = colors.slice(from), labs = levels.slice(from, colors.length + 1);
   const need = Math.max(...labs.map((v) => String(v).length)) * 6.5 + 6;     // 11px 字一個標籤要的寬度
-  w = Math.max(w, Math.min(need, Math.floor(460 / cols.length)));
+  w = ticks ? Math.max(6, Math.floor(460 / cols.length)) : Math.max(w, Math.min(need, Math.floor(460 / cols.length)));
   const every = Math.ceil(need / w);
+  const show = (v, i) => (ticks ? ticks.includes(v) : i < cols.length && !(i % every));
   const bar = cols.map((c) => `<span style="background:${c};width:${w}px"></span>`).join('');
-  const labels = labs.map((v, i) => (i % every ? '' : `<span style="left:${i * w}px">${v}</span>`)).join('');
+  const labels = labs.map((v, i) => (show(v, i) ? `<span style="left:${i * w}px">${v}</span>` : '')).join('');
   return `<div class="legend-title">${title}</div><div class="legend-bar">${bar}</div>
     <div class="legend-labels abs" style="width:${cols.length * w}px">${labels}</div>`;
 }
@@ -80,7 +82,14 @@ export const SCALES = {
   rain: { levels: [0.5, 2, 6, 10, 15, 20, 30, 40, 50, 70, 90, 110, 130, 150, 200, 300, 400],
     colors: ['#9bffff', '#00cfff', '#0198ff', '#0165ff', '#309901', '#32ff00', '#f8ff00', '#ffcb00',
       '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'] },
-  temp: { levels: [-4, ...range(0, 38, 2), 40], colors: ramp(['#2c1b8f', '#2f6bd9', '#6ec6f0', '#9be27a', '#f7e65a', '#f39a2d', '#d7301f', '#7a0177'], 21) },
+  // 溫度:使用者提供的色階圖取色;0°C 以下每 2 度一色、0–40°C 每 1 度一色,40 以上用最後一色
+  temp: { levels: [...range(-14, -2, 2), ...range(0, 40, 1)],
+    colors: ['#3c016e', '#5a009e', '#6d00be', '#8200e5', '#9910fe', '#a42dfd', '#bf69fd',
+      '#010075', '#0101a1', '#0100c7', '#0000ea', '#0d57fd', '#0087ed', '#179bff', '#00cefe', '#02e5fd', '#01fffd',
+      '#8ffefe', '#096b16', '#217900', '#2e9801', '#35bc00', '#3cd101', '#44f200', '#7aff46', '#a6fe83', '#d5fec4',
+      '#fcfdaf', '#fdfc7d', '#f4f27b', '#f1ee53', '#efd856', '#f1bc54', '#ecad2a', '#d89510', '#b17c0c', '#97670b',
+      '#fe9595', '#fd7c7c', '#fe6464', '#fb4949', '#fc1f21', '#c10302', '#a700a6', '#d000d0', '#fa01f8', '#fd5afc'],
+    ticks: [-10, 0, 5, 10, 15, 20, 25, 30, 35, 40] },
   rh: { levels: range(0, 100, 10), colors: ramp(['#8c510a', '#d8b365', '#f6e8c3', '#c7eae5', '#5ab4ac', '#01665e', '#08306b'], 10) },
   // 氣壓:颱風中心可到 920 hPa 以下;低壓段 10 hPa 一級、980 以上 5、1000 以上 4
   pres: { levels: [920, 930, 940, 950, 960, 970, 980, 985, 990, 995, 1000, 1004, 1008, 1012, 1016, 1020, 1024, 1028, 1032],

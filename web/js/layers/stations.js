@@ -327,7 +327,7 @@ export class StationLayer {
     const s = SCALES[this.v.scale];
     const title = this.aggMode ? `${this.v.name} 過去 ${this.hours} 小時${this.stat === 'max' ? '最大' : '最小'}` : this.v.name;
     if (this.v.scale === 'wind') return beaufortLegendHTML(`測站 ${title}（蒲福風級）`, s.colors);
-    return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0);
+    return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks);
   }
 }
 
