@@ -134,7 +134,9 @@ export class StationCard {
       note.textContent = '';
       return;
     }
-    const ax = tab.x === 'h' ? d.th : d.t10, t0 = toSec(ax.start);
+    // 日本氣象廳站的氣象要素也是 10 分鐘一筆(st.wx10)
+    const hourly = tab.x === 'h' && !st.wx10;
+    const ax = hourly ? d.th : d.t10, t0 = toSec(ax.start);
     const xsAll = Array.from({ length: ax.n }, (_, i) => t0 + i * ax.step * 60);
     // 時段:結尾 = 最新資料;時間軸在這段之前時,改成讓時間軸落在中間
     const H = this.hours * 3600, latest = toSec(d.time), T = this.T && toSec(this.T);
@@ -146,7 +148,7 @@ export class StationCard {
     const miss = [...d.have].filter((c, i) => c === '0' && t10 + i * 600 > end - H && t10 + i * 600 <= end).length;
     const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end), 'hm')}`;
     note.textContent = `${this.hours} 小時（${endTxt}）`
-      + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (tab.x === 'h' ? '；氣象要素為整點觀測' : '');
+      + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '');
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };

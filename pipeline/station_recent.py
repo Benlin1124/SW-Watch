@@ -6,6 +6,8 @@
      have: "1101…"               每個 10 分鐘格有沒有快照(缺漏要看得到,不補)
      stations: {站號: {name, town, type, alt, lon, lat,
                        rain_10m: [n10], rain_1h: [n10], temp/rh/pres/ws/wd/gust/gust_dir: [nh]}}}
+  日本氣象廳站(type = jma)有 10 分鐘的氣象要素:wx10 = true,temp…gust_dir 也是 [n10];
+  而且資料比 CWA 晚 10 分鐘,雨量和氣象要素都依各站觀測時間 obs 放格,不用快照時間。
 每 10 分鐘:讀回各縣市檔 → 時間窗往後移 → 填入新快照 → 寫回(22 個檔,R2 每月約 9.5 萬次寫入)。
 不放每站一個檔:1362 站 × 每 10 分鐘 = 每月約 590 萬次寫入,超過 R2 免費額度。
 重建:python -m pipeline.station_recent --rebuild"""
@@ -74,7 +76,7 @@ def rewindow(state, stamp):
         for v in RAIN:
             st[v] = _shift(st[v], k10, n10)
         for v in WX:
-            st[v] = _shift(st[v], kh, nh)
+            st[v] = _shift(st[v], k10, n10) if st.get("wx10") else _shift(st[v], kh, nh)
     state["t10"]["start"], state["th"]["start"], state["time"] = s10, sh, stamp
     return state
 
@@ -94,17 +96,27 @@ def apply(states, snap, stamp):
             state = states[county] = empty(county, stamp)
         sid = row[f["id"]]
         st = state["stations"].get(sid)
+        wx10 = "type" in f and row[f["type"]] == "jma"
         if st is None:
             st = state["stations"][sid] = {**{k: None for k in INFO},
                                            **{v: [None] * (HOURS * 6) for v in RAIN},
                                            **{v: [None] * HOURS for v in WX}}
+        if wx10 and not st.get("wx10"):                  # 改版前建立的整點陣列換成 10 分鐘
+            st.update({v: [None] * (HOURS * 6) for v in WX}, wx10=True)
         for k in INFO:
             if k in f and row[f[k]] is not None:
                 st[k] = row[f[k]]
+        obs = row[f["obs"]] if "obs" in f else None
+        if wx10:
+            io = _offset(s10, obs, 10) if obs else -1
+            if 0 <= io < HOURS * 6:
+                for v in RAIN + WX:
+                    if v in f:
+                        st[v][io] = row[f[v]]
+            continue
         for v in RAIN:
             if v in f:
                 st[v][i10] = row[f[v]]
-        obs = row[f["obs"]] if "obs" in f else None
         if obs and obs.endswith("00"):
             ih = _offset(sh, obs, 60)
             if 0 <= ih < HOURS:
