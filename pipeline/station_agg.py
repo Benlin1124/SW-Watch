@@ -6,6 +6,8 @@
   - 6 小時以內:直接從快照(data/stations/{stamp}.json)算。
     氣象要素(溫度、風…)是每小時一筆,用各站自己的觀測時間 obs 判斷是否在區間內;
     雨量(10 分鐘、1 小時)每 10 分鐘一筆,用快照時間判斷。
+    陣風有發生時間 gust_t 的(日本氣象廳站,值是當日最大)改用發生時間判斷;
+    發生時間在區間內,當日最大就是區間最大,所以只算最大,最小留空。
   - 12 小時以上:把 N 個互不重疊的 1 小時區間 (T-k-1h, T-kh] 合併,不必每 10 分鐘讀 432 個快照。
     氣象要素是整點觀測、會晚幾十分鐘才出現在快照裡,所以每一段依「觀測時間」歸屬:
     往後多看 LOOKAHEAD 分鐘的快照(不超過 T);看滿的段落結果不會再變,存在記憶體重複使用。
@@ -53,7 +55,7 @@ def compute(stamp, hours, times, until=None):
     found = [t for t in expected if t in have]
     extra = [t for t in times if stamp < t <= until] if until else []
     acc = {}                                   # id → {var: [值...]}
-    order = []
+    order, gust_max_only = [], set()
     for t in found + extra:
         rain_ok = t <= stamp
         snap = _load(t)
@@ -66,9 +68,13 @@ def compute(stamp, hours, times, until=None):
                 acc[sid] = {v: [] for v in VARS}
                 order.append(sid)
             wx_ok = start < (row[f["obs"]] or "") <= stamp
+            gust_t = row[f["gust_t"]] if "gust_t" in f else None
+            if gust_t:
+                gust_max_only.add(sid)
             for v in VARS:
                 x = row[f[v]] if v in f else None
-                if x is not None and (rain_ok if v in RAIN_VARS else wx_ok):
+                ok = rain_ok if v in RAIN_VARS else (start < gust_t <= stamp) if v == "gust" and gust_t else wx_ok
+                if x is not None and ok:
                     acc[sid][v].append(x)
     rnd = lambda x: round(x, 1)
     ids, mx, mn = [], [], []
@@ -78,7 +84,7 @@ def compute(stamp, hours, times, until=None):
             continue
         ids.append(sid)
         mx.append([rnd(max(vals[v])) if vals[v] else None for v in VARS])
-        mn.append([rnd(min(vals[v])) if vals[v] else None for v in VARS])
+        mn.append([rnd(min(vals[v])) if vals[v] and not (v == "gust" and sid in gust_max_only) else None for v in VARS])
     return {"time": stamp, "start": start, "hours": hours, "vars": VARS, "ids": ids,
             "max": mx, "min": mn, "expected": len(expected), "found": len(found),
             "missing": [t for t in expected if t not in have]}

@@ -11,8 +11,9 @@ LAYER = "stations"
 # 輸出欄位(順序即 rows 每列的順序)
 META_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "obs", "type"]   # type:manned 局屬 / auto 自動 / rain 雨量
 WX_FIELDS = ["temp", "rh", "pres", "ws", "wd", "gust", "gust_dir", "tmax", "tmin"]
+EXTRA_FIELDS = ["gust_t"]   # 陣風發生時間(只有日本氣象廳站有,見 fetch_jma)
 RAIN_FIELDS = [f"rain_{k}" for k in config.RAIN_ACC]
-FIELDS = META_FIELDS + WX_FIELDS + RAIN_FIELDS
+FIELDS = META_FIELDS + WX_FIELDS + RAIN_FIELDS + EXTRA_FIELDS
 
 
 def _num(v, allow_negative=False):

@@ -2,9 +2,13 @@
 來源是氣象廳官網アメダス頁面用的 JSON(非正式 API,格式可能不另行通知就改;出典：気象庁):
   測站表 bosai/amedas/const/amedastable.json(快取一天)
   全國同一時刻 bosai/amedas/data/map/{JST YYYYMMDDHHmm00}.json(10 分鐘一檔)
-map 檔沒有陣風與當日最高最低溫(那些只在單站檔,而且陣風是當日最大,和 CWA 的定義不同),所以留空。"""
+陣風只在單站檔 point/{code}/{JST YYYYMMDD_HH}.json(3 小時一檔),而且是日本時間當日 00 時起的最大值與發生時間:
+  gust   只有發生時間在觀測前 1 小時內才填(和 CWA PeakGustSpeed「過去 1 小時最大」同義),否則留空
+  gust_t 發生時間(UTC stamp);station_agg 用它判斷是否落在「過去 N 小時」區間內
+當日最高最低溫的日界和 CWA 差 1 小時,留空。"""
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -59,12 +63,33 @@ def _map(stamp):
         return t, _json(f"{BASE}/data/map/{t:%Y%m%d%H%M}00.json")
 
 
+def _dir(code):
+    """16 方位碼 → 度:1 = 北北東 … 16 = 北,0 = 靜風。"""
+    return None if code is None else (0.0 if code == 0 else code * 22.5)
+
+
+def _gust(code, t):
+    """單站檔裡 t 那筆的當日最大陣風 → (值, 風向, 發生時間 JST);抓不到回傳 None。"""
+    try:
+        blk = t.replace(hour=t.hour // 3 * 3, minute=0)
+        d = _json(f"{BASE}/data/point/{code}/{blk:%Y%m%d_%H}.json").get(f"{t:%Y%m%d%H%M}00", {})
+    except Exception:
+        return None
+    v, gt = _val(d, "gust"), d.get("gustTime")
+    if v is None or not gt:
+        return None
+    g = t.replace(hour=0, minute=0) + timedelta(hours=gt["hour"], minutes=gt["minute"])
+    if g > t:                                            # 00:00 那筆是前一天的總結
+        g -= timedelta(days=1)
+    return v, _dir(_val(d, "gustDirection")), g
+
+
 def collect(stamp):
     """回傳和 fetch_stations 同格式的測站紀錄(type='jma',id 前綴 J)。"""
     table = _table()
     t, data = _map(stamp)
     obs = t.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
-    recs = []
+    recs, wind_codes = [], []
     for code, st in table.items():
         lon, lat = _deg(st["lon"]), _deg(st["lat"])
         if not (AREA[0] <= lon <= AREA[2] and AREA[1] <= lat <= AREA[3]):
@@ -73,18 +98,29 @@ def collect(stamp):
         if not d:
             continue
         county, town = REGION.get(code[:2], ("日本", ""))
-        wd = _val(d, "windDirection")                       # 16 方位:1 = 北北東 … 16 = 北,0 = 靜風
-        ws = _val(d, "wind")
+        if "wind" in d:
+            wind_codes.append(code)
         recs.append({
             "id": f"J{code}", "name": st["kjName"], "lon": lon, "lat": lat, "alt": st.get("alt"),
             "county": county, "town": town, "obs": obs, "type": "jma",
             "temp": _val(d, "temp"), "rh": _val(d, "humidity"), "pres": _val(d, "pressure"),
-            "ws": ws, "wd": None if wd is None else (0.0 if wd == 0 else wd * 22.5),
-            "gust": None, "gust_dir": None, "tmax": None, "tmin": None,
+            "ws": _val(d, "wind"), "wd": _dir(_val(d, "windDirection")),
+            "gust": None, "gust_dir": None, "gust_t": None, "tmax": None, "tmin": None,
             "rain_10m": _val(d, "precipitation10m"), "rain_1h": _val(d, "precipitation1h"),
             "rain_3h": _val(d, "precipitation3h"), "rain_24h": _val(d, "precipitation24h"),
         })
-    log.info("jma %s JST:%d 站", f"{t:%m/%d %H:%M}", len(recs))
+    with ThreadPoolExecutor(8) as ex:
+        gusts = dict(zip(wind_codes, ex.map(lambda c: _gust(c, t), wind_codes)))
+    by_id = {r["id"]: r for r in recs}
+    for code, g in gusts.items():
+        if g is None:
+            continue
+        v, gd, gt = g
+        r = by_id[f"J{code}"]
+        r["gust_t"] = gt.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
+        if t - gt <= timedelta(hours=1):
+            r["gust"], r["gust_dir"] = v, gd
+    log.info("jma %s JST:%d 站(陣風 %d 站)", f"{t:%m/%d %H:%M}", len(recs), sum(g is not None for g in gusts.values()))
     return recs
 
 
