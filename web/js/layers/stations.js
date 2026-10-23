@@ -24,7 +24,7 @@ export const STATION_VARS = {
 };
 
 const AGG_HOURS = [1, 2, 3, 6, 12, 24, 48, 72];
-export const STATION_TYPES = { manned: '局屬站', auto: '自動站', rain: '雨量站' };
+export const STATION_TYPES = { manned: '局屬站', auto: '自動站', rain: '雨量站', jma: '日本氣象廳' };
 
 /** 站種;舊快照沒有 type 欄位時用站號 / 有無氣象要素推估 */
 const stationType = (r, f) => (f.type != null && r[f.type]) || (String(r[f.id]).startsWith('46') ? 'manned'

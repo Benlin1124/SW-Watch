@@ -1,9 +1,10 @@
-"""測站:合併 O-A0001-001(自動站)、O-A0003-001(局屬站)、O-A0002-001(雨量站)
+"""測站:合併 O-A0001-001(自動站)、O-A0003-001(局屬站)、O-A0002-001(雨量站),
+再加日本氣象廳宮古、八重山一帶的 AMeDAS 站(fetch_jma,抓不到就略過,不影響 CWA)
 → data/stations/{stamp}.json(所有變數一個檔,前端切換變數不用重抓)
 過去 1/2/3/6 小時最大最小 → data/stations/agg_{N}h/{stamp}.json(station_agg)
 並用同一批雨量做 IDW → data/rain/idw/{acc}/{stamp}.bin.gz。"""
 from .common import check_update, fetch_cwa, log, save_points, twd67_to_wgs84, utc_stamp
-from . import config, idw, station_agg, station_recent, station_series
+from . import config, fetch_jma, idw, station_agg, station_recent, station_series
 
 LAYER = "stations"
 
@@ -81,7 +82,12 @@ def collect():
 
     # 檔名時間 = 雨量站最新觀測時間(10 分鐘一筆)
     stamp = utc_stamp(max(rain_times))
-    return stamp, list(sta.values())
+    recs = list(sta.values())
+    try:
+        recs += fetch_jma.collect(stamp)
+    except Exception as e:
+        log.warning("jma 測站抓取失敗,這次略過:%s", e)
+    return stamp, recs
 
 
 def run():
@@ -92,12 +98,12 @@ def run():
     rows = [[r.get(f) for f in FIELDS] for r in recs]
     snapshot = {"time": stamp, "fields": FIELDS, "rows": rows}
     save_points(LAYER, stamp, snapshot,
-                fields=FIELDS, source="CWA O-A0001-001 / O-A0003-001 / O-A0002-001")
+                fields=FIELDS, source="CWA O-A0001-001 / O-A0003-001 / O-A0002-001;気象庁 AMeDAS")
     log.info("stations %s 完成(%d 站)", stamp, len(rows))
     station_series.append(snapshot)
     station_agg.run(stamp)
     station_recent.run(snapshot)
-    idw.run(stamp, recs)
+    idw.run(stamp, [r for r in recs if r.get("type") != "jma"])   # IDW 只用台灣測站
     return status, stamp, prev
 
 

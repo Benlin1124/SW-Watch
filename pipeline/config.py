@@ -81,3 +81,6 @@ ECMWF_RUNS = (0, 12)                      # 只抓 00、12Z(06/18Z 只到 90 小
 ECMWF_MAX_STEP = 84                       # 預報到幾小時(每 3 小時一步)
 ECMWF_WAIT_H = 6                          # 起報後幾小時才開始檢查(通常 7–8 小時上架)
 ECMWF_KEEP_DAYS = int(os.environ.get("ECMWF_KEEP_DAYS", 3))
+
+# 日本氣象廳 AMeDAS 測站範圍(宮古、八重山、與那國),和 ECMWF 同區
+JMA_AREA = ECMWF_AREA
