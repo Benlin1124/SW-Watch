@@ -107,7 +107,7 @@ export class TyphoonLayer {
   tracks = [];             // 各颱風的時間序列(過去定位 + 預報),draw() 重建
   probeMarkers = [];       // 動畫 / 點選位置旁的時間標示
   raf = 0;                 // 動畫 requestAnimationFrame
-  animSec = 10;            // 動畫一輪秒數
+  animSec = 25;            // 動畫一輪秒數
   onAnim = null;           // 動畫開始 / 停止時呼叫(true / false)
 
   constructor(map) { this.map = map; }
@@ -142,11 +142,17 @@ export class TyphoonLayer {
     m.addLayer({ id: 'ty-c15-line', type: 'line', source: 'ty-c15', paint: circleLine('#f9a825') });
     m.addLayer({ id: 'ty-c25-fill', type: 'fill', source: 'ty-c25', paint: circleFill('#e53935') });
     m.addLayer({ id: 'ty-c25-line', type: 'line', source: 'ty-c25', paint: circleLine('#e53935') });
-    // 動畫 / 點選位置的暴風圈(畫在路徑線下面)
+    // 動畫 / 點選位置的 70% 機率圓(同潛勢區樣式)與暴風圈(畫在路徑線下面)
     m.addSource('ty-probe', { type: 'geojson', data: EMPTY });
-    m.addLayer({ id: 'ty-probe-fill', type: 'fill', source: 'ty-probe', filter: ['==', '$type', 'Polygon'],
+    const isC70 = ['==', ['get', 'k'], 'c70'];
+    m.addLayer({ id: 'ty-probe-c70-fill', type: 'fill', source: 'ty-probe', filter: isC70,
+      paint: { 'fill-color': th.cone, 'fill-opacity': th.coneOp * 2 } });
+    m.addLayer({ id: 'ty-probe-c70-line', type: 'line', source: 'ty-probe', filter: isC70,
+      paint: { 'line-color': th.cone, 'line-width': 1.5, 'line-dasharray': [3, 2] } });
+    const isWind = ['all', ['==', ['geometry-type'], 'Polygon'], ['!', isC70]];
+    m.addLayer({ id: 'ty-probe-fill', type: 'fill', source: 'ty-probe', filter: isWind,
       paint: { 'fill-color': ['match', ['get', 'k'], 'c25', '#e53935', '#f9a825'], 'fill-opacity': 0.18 } });
-    m.addLayer({ id: 'ty-probe-line', type: 'line', source: 'ty-probe', filter: ['==', '$type', 'Polygon'],
+    m.addLayer({ id: 'ty-probe-line', type: 'line', source: 'ty-probe', filter: isWind,
       paint: { 'line-color': ['match', ['get', 'k'], 'c25', '#e53935', '#f9a825'], 'line-width': 2 } });
     m.addLayer({ id: 'ty-past-line', type: 'line', source: 'ty-past', filter: ['==', '$type', 'LineString'],
       paint: { 'line-color': th.track, 'line-width': 2 } });
@@ -217,6 +223,7 @@ export class TyphoonLayer {
     const feats = [];
     for (const { q } of list) {
       const r15 = q.r15q ?? q.r15, r25 = q.r25q ?? q.r25;
+      if (this.show_cone && q.r70 > 0) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, q.r70), properties: { k: 'c70' } });
       if (r15) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r15), properties: { k: 'c15' } });
       if (r25) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r25), properties: { k: 'c25' } });
       feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [q.lon, q.lat] }, properties: { color: category(q.wind).color } });
@@ -236,7 +243,7 @@ export class TyphoonLayer {
     });
   }
 
-  /** 路徑動畫:所有颱風一起從最早的定位走到最後的預報點,到底停 1 秒再重來 */
+  /** 路徑動畫:所有颱風一起從目前位置走到最後的預報點(帶 70% 機率圓與暴風圈),到底停 1 秒再重來 */
   animate(on) {
     cancelAnimationFrame(this.raf);
     const was = !!this.raf;
@@ -248,13 +255,13 @@ export class TyphoonLayer {
     this.popup?.remove();
     const start = performance.now();
     const step = (now) => {
-      const tr = this.tracks;
+      const tr = this.tracks.filter((k) => k.pts[k.pts.length - 1].ms > k.nowMs);   // 有預報的才動
       if (!tr.length) { this.animate(false); return; }
-      const t0 = Math.min(...tr.map((k) => k.pts[0].ms)), t1 = Math.max(...tr.map((k) => k.pts[k.pts.length - 1].ms));
+      const t0 = Math.min(...tr.map((k) => k.nowMs)), t1 = Math.max(...tr.map((k) => k.pts[k.pts.length - 1].ms));
       const dur = this.animSec * 1000;
       const f = Math.min(1, ((now - start) % (dur + 1000)) / dur);
       const ms = t0 + f * (t1 - t0);
-      this.setProbe(tr.map((k) => ({ name: k.name, q: at(k, ms) })).filter((x) => x.q));
+      this.setProbe(tr.map((k) => ({ name: k.name, q: ms >= k.nowMs ? at(k, ms) : null })).filter((x) => x.q));
       this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
@@ -313,9 +320,10 @@ export class TyphoonLayer {
       if (this.circles.fcst) fp.forEach((p) => addCircles(p, 'fcst'));
 
       const ms = (p) => toDate(p.t).getTime();
-      const track = [...pts.map((p) => ({ ...p, kind: 'past', ms: ms(p) })),
+      // 目前位置的 70% 機率半徑當 0,動畫從這裡開始由 0 漸漸擴大到各預報點的半徑
+      const track = [...pts.map((p) => ({ ...p, kind: 'past', ms: ms(p), ...(p === now ? { r70: 0 } : {}) })),
         ...fp.map((p) => ({ ...p, kind: 'fcst', init: s.fcst_init, ms: ms(p) }))];
-      if (track.length) this.tracks.push({ name, pts: track });
+      if (track.length) this.tracks.push({ name, pts: track, nowMs: now ? ms(now) : track[0].ms });
 
       fp.forEach((p) => fcst.push({
         type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
@@ -349,7 +357,7 @@ export class TyphoonLayer {
     this.visible = v;
     for (const id of ['ty-cone-fill', 'ty-cone-line', 'ty-c15-fill', 'ty-c15-line', 'ty-c25-fill', 'ty-c25-line',
       'ty-past-line', 'ty-fcst-line', 'ty-past-hit', 'ty-fcst-hit', 'ty-past-pt', 'ty-fcst-pt',
-      'ty-probe-fill', 'ty-probe-line', 'ty-probe-pt']) {
+      'ty-probe-c70-fill', 'ty-probe-c70-line', 'ty-probe-fill', 'ty-probe-line', 'ty-probe-pt']) {
       this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
     }
     if (!v) { this.animate(false); this.popup?.remove(); this.setProbe([]); }
@@ -364,6 +372,9 @@ export class TyphoonLayer {
     m.setPaintProperty('ty-cone-fill', 'fill-color', th.cone);
     m.setPaintProperty('ty-cone-fill', 'fill-opacity', th.coneOp);
     m.setPaintProperty('ty-cone-line', 'line-color', th.cone);
+    m.setPaintProperty('ty-probe-c70-fill', 'fill-color', th.cone);
+    m.setPaintProperty('ty-probe-c70-fill', 'fill-opacity', th.coneOp * 2);
+    m.setPaintProperty('ty-probe-c70-line', 'line-color', th.cone);
     m.setPaintProperty('ty-past-line', 'line-color', th.track);
     m.setPaintProperty('ty-fcst-line', 'line-color', th.fcst);
     document.body.dataset.mapTheme = theme;   // HTML 標示的文字顏色(CSS)
