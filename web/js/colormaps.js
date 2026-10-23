@@ -135,8 +135,8 @@ function anchorColor(anchors, v) {
 function satColorFn(band, style) {
   if (band === 'B03') return (v) => gray(Math.pow(clamp01(v / 100), 0.6));
   if (band === 'B08') return (v) => packHex(anchorColor(WV_ANCHORS, v));
-  // −70 °C 以下白、+30 °C 以上黑;gamma 1.4 壓暗中間調(低雲/晴空偏黑,只有高雲頂接近白)
-  if (style === 'gray') return (v) => gray(Math.pow(clamp01((30 - v) / 100), 1.4));
+  // 比照 notebook:gray_r,vmin=190 K(−83.15 °C)白 → vmax=300 K(26.85 °C)黑,線性
+  if (style === 'gray') return (v) => gray((26.85 - v) / 110);
   return (v) => {
     let i = 0;
     while (i + 1 < BD_LEVELS.length - 1 && v >= BD_LEVELS[i + 1]) i++;

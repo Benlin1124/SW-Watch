@@ -31,7 +31,10 @@ jobs:
           V=${GITHUB_SHA::7}
           sed -i -E "s#(href=\"css/[^\"]+\.css)\"#\1?v=$V\"#; s#(src=\"js/[^\"]+\.js)\"#\1?v=$V\"#" web/index.html
           find web/js -name '*.js' -exec sed -i -E "s#(from '\.{1,2}/[^']+\.js)'#\1?v=$V'#g" {} +
-          grep -n "?v=" web/index.html
+          # 標題旁的版本號:部署日期(台灣時間)· commit
+          D=$(TZ=Asia/Taipei date +%Y.%m.%d)
+          sed -i -E "s#(id=\"app-ver\"[^>]*>)dev<#\1v$D · $V<#" web/index.html
+          grep -n "?v=\|app-ver" web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web

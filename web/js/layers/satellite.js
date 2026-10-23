@@ -6,7 +6,7 @@ import { latestLE } from '../time.js';
 import { EMPTY_PNG, renderPNG } from './radar.js';
 
 export const SAT_BANDS = {
-  B13: { name: 'B13 紅外線', cache: 60, legend: ['亮溫 (°C)', [-100, 40], [-90, -70, -50, -30, -10, 10, 30]] },
+  B13: { name: 'B13 紅外線', cache: 60, legend: ['亮溫 (°C)', [-85, 30], [-80, -60, -40, -20, 0, 20]] },
   B08: { name: 'B08 水氣', cache: 60, legend: ['亮溫 (°C)', [-90, 0], [-80, -60, -40, -20, 0]] },
   B03: { name: 'B03 可見光', cache: 24, legend: ['反照率 (%)', [0, 100], [0, 20, 40, 60, 80, 100]] },
 };
