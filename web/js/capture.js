@@ -287,7 +287,9 @@ export class Capture {
     body.style.zoom = 1;
     try {
       const bw = body.scrollWidth, bh = body.scrollHeight;
-      const s = Math.min(k * (+zoom || 1), (W - pad * 2 - 16 * k) / bw, (bottom * 0.45) / bh);
+      // 比螢幕上小一點(0.7),寬不超過圖寬 35%(直式 60%)、高不超過 30%;網頁上色階的 −/＋ 也會跟著放大縮小
+      const frac = this.outW >= bottom ? 0.35 : 0.6;
+      const s = Math.min(k * (+zoom || 1) * 0.7, Math.min(W - pad * 2 - 16 * k, this.outW * frac) / bw, (bottom * 0.3) / bh);
       const img = await toCanvas(body, { pixelRatio: s, skipFonts: true, width: bw, height: bh });
       const ip = 8 * s, w = bw * s, h = bh * s;
       const x = this.outW - pad - w - ip * 2, y = bottom - h - ip * 2;
