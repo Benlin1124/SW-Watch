@@ -81,6 +81,10 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
   background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px;
 }
 .legend-block + .legend-block { margin-top: 6px; }
+/* 色階大小:右上 −/＋ 調整(CSS zoom,整塊等比例縮放,存在 prefs) */
+#legend-ctl { display: flex; justify-content: flex-end; gap: 2px; margin: -2px -4px 2px 0; opacity: .45; }
+#legend:hover #legend-ctl { opacity: 1; }
+#legend-ctl button { padding: 0 6px; font-size: 12px; line-height: 16px; }
 .st-label { font: 11px/1 var(--font); color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; pointer-events: none; white-space: nowrap; }
 .legend-title { font-size: 13px; color: var(--fg); margin-bottom: 4px; }
 .legend-bar { display: flex; }

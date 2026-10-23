@@ -545,8 +545,21 @@ function bindEnsUI() {
 // ── 測站面板 ──
 function updateLegend() {
   const parts = [satellite, ecmwf, radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
-  $('legend').innerHTML = parts.join('');
+  $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
+}
+
+// 色階大小:0.6–2 倍,每次 ±0.1
+function bindLegendScale() {
+  const apply = (z) => {
+    z = Math.min(2, Math.max(0.6, Math.round(z * 10) / 10));
+    $('legend-body').style.zoom = z;
+    prefs.set('legendScale', z);
+    return z;
+  };
+  let z = apply(prefs.get('legendScale') ?? 1);
+  $('legend-minus').onclick = () => { z = apply(z - 0.1); };
+  $('legend-plus').onclick = () => { z = apply(z + 0.1); };
 }
 
 function bindStationUI() {
@@ -787,6 +800,7 @@ function bindUI() {
 
   $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   bindStationUI();
+  bindLegendScale();
   bindStationTools();
   bindSatUI();
   bindEcmwfUI();
