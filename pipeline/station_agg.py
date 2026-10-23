@@ -5,7 +5,8 @@
      expected, found, missing}     ← missing = 區間內缺的快照時間(缺漏要看得到,不補)
 發生時間:氣象要素 = 觀測時間 obs;雨量 = 那 10 分鐘 / 1 小時的結束時間(快照時間,日本站用 obs);
 陣風 = 實際發生時間(CWA GustInfo 的 gust_at、日本站 gust_t)。同值取最早的一次。
-區間為 (stamp - N 小時, stamp]。
+區間為 (stamp - N 小時, stamp];氣象要素含起點 [stamp - N 小時, stamp]:整點觀測要晚幾十分鐘才上架,
+整點那一刻區間內還沒有新觀測,不含起點的話過去 1 小時會整片無資料。相鄰區間共用起點那筆,對最大 / 最小沒影響。
   - 6 小時以內:直接從快照(data/stations/{stamp}.json)算。
     氣象要素(溫度、風…)是整點或 10 分鐘一筆,用各站自己的觀測時間 obs 判斷是否在區間內;
     雨量(10 分鐘、1 小時)每 10 分鐘一筆,用快照時間判斷。
@@ -71,7 +72,7 @@ def compute(stamp, hours, times, until=None):
                 acc[sid] = {v: [] for v in VARS}
                 order.append(sid)
             obs = row[f["obs"]] or ""
-            wx_ok = start < obs <= stamp
+            wx_ok = start <= obs <= stamp
             jma = "type" in f and row[f["type"]] == "jma"
             day_gust = "gust_t" in f and row[f["gust_t"]]
             if day_gust:
