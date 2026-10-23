@@ -1,7 +1,7 @@
 """測站過去 N 小時最大 / 最小(N = 1、2、3、6、12、24、48、72)
   data/stations/agg_{N}h/{stamp}.json.gz(gzip 壓縮的 JSON,前端自己解)
     {time, start, hours, vars, ids, max: [[各變數]...], min: [[...]...],
-     expected, found, missing}     ← missing = 區間內缺的快照時間(缺漏要看得到,不補)
+     expected, found, missing, gust_t: {站: 最大陣風發生時間}(只有日本氣象廳站)}     ← missing = 區間內缺的快照時間(缺漏要看得到,不補)
 區間為 (stamp - N 小時, stamp]。
   - 6 小時以內:直接從快照(data/stations/{stamp}.json)算。
     氣象要素(溫度、風…)是每小時一筆,用各站自己的觀測時間 obs 判斷是否在區間內;
@@ -122,7 +122,7 @@ def merge(stamp, hours, times):
 
 
 def day_max_gust(stamp, hours, times):
-    """日本氣象廳站的過去 N 小時最大陣風 → ({站: 值}, 有當日最大資料的站)。
+    """日本氣象廳站的過去 N 小時最大陣風 → ({站: (值, 發生時間)}, 有當日最大資料的站)。
     當日最大只增不減、日本時間 00 時(UTC 15 時)歸零:區間內每個日本日,取不晚於該日結束(或區間結尾)的
     最後一筆快照;它的當日最大發生時間落在區間內,就是那一段的最大。排程中途停過也沒關係,
     同一天之後任何一筆快照都帶得到;只有停機期間跨過日本時間 00 時,前一天的才拿不到。"""
@@ -148,8 +148,9 @@ def day_max_gust(stamp, hours, times):
             if not gt:
                 continue
             seen.add(row[f["id"]])
-            if v is not None and start < gt <= stamp:
-                best[row[f["id"]]] = max(v, best.get(row[f["id"]], v))
+            sid = row[f["id"]]
+            if v is not None and start < gt <= stamp and v >= best.get(sid, (v, gt))[0]:
+                best[sid] = (v, gt)
     return best, seen
 
 
@@ -164,8 +165,9 @@ def _apply_day_gust(out, stamp, hours, times):
             out["ids"].append(sid)
             out["max"].append([None] * len(VARS))
             out["min"].append([None] * len(VARS))
-        out["max"][idx[sid]][gi] = round(best[sid], 1) if sid in best else None
+        out["max"][idx[sid]][gi] = round(best[sid][0], 1) if sid in best else None
         out["min"][idx[sid]][gi] = None
+    out["gust_t"] = {sid: t for sid, (v, t) in best.items()}     # 最大陣風發生時間(前端標在數值旁)
     return out
 
 
