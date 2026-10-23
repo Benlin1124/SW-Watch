@@ -66,6 +66,7 @@ export class TyphoonLayer {
   circles = { now: true, fcst: true, past: false };   // 暴風圈:目前 / 各預報點 / 過去各定位
   circleStyle = { nowWidth: 1.8, fcstWidth: 1, nowFill: 20, fcstFill: 4 };   // 線寬(px)、填色濃度(%):目前 / 預報(過去各點同預報)
   theme = 'light';
+  show_names = true;       // 目前位置旁的颱風名稱
   show_labels = true;
   fixedIssue = "";         // 使用者指定的預報初始時間;空字串 = 依時間軸
   index = null;
@@ -181,7 +182,7 @@ export class TyphoonLayer {
       }));
 
       if (!this.visible) continue;
-      if (now) this.addMarker([now.lon, now.lat], 'ty-name', name);
+      if (now && this.show_names) this.addMarker([now.lon, now.lat], 'ty-name', name);
       if (this.show_labels) {
         fp.forEach((p) => this.addMarker([p.lon, p.lat], 'ty-label', fmtTW(p.t, 'dh')));
       }

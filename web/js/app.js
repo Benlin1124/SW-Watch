@@ -852,6 +852,7 @@ function bindUI() {
     nowFill: +$('ty-fill-now').value, fcstFill: +$('ty-fill-fcst').value,
   });
   for (const id of ['ty-w-now', 'ty-w-fcst', 'ty-fill-now', 'ty-fill-fcst']) $(id).oninput = tyStyle;
+  $('ty-names').onchange = (e) => { typhoon.show_names = e.target.checked; typhoon.draw(); };
   $('ty-labels').onchange = (e) => { typhoon.show_labels = e.target.checked; typhoon.draw(); };
   $('basemap').onchange = (e) => setTheme(e.target.value);
   $('chk-grid').onchange = (e) => {
