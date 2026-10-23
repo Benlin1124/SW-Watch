@@ -6,13 +6,13 @@
   - 6 小時以內:直接從快照(data/stations/{stamp}.json)算。
     氣象要素(溫度、風…)是每小時一筆,用各站自己的觀測時間 obs 判斷是否在區間內;
     雨量(10 分鐘、1 小時)每 10 分鐘一筆,用快照時間判斷。
-    陣風有發生時間 gust_t 的(日本氣象廳站,值是當日最大)改用發生時間判斷;
-    發生時間在區間內,當日最大就是區間最大,所以只算最大,最小留空。
+    日本氣象廳站的陣風另外算(day_max_gust):只有當日最大與發生時間,只算最大,最小留空。
   - 12 小時以上:把 N 個互不重疊的 1 小時區間 (T-k-1h, T-kh] 合併,不必每 10 分鐘讀 432 個快照。
     氣象要素是整點觀測、會晚幾十分鐘才出現在快照裡,所以每一段依「觀測時間」歸屬:
     往後多看 LOOKAHEAD 分鐘的快照(不超過 T);看滿的段落結果不會再變,存在記憶體重複使用。
 重建全部:python -m pipeline.station_agg --rebuild"""
 import argparse
+import bisect
 import json
 from datetime import timedelta
 
@@ -68,13 +68,12 @@ def compute(stamp, hours, times, until=None):
                 acc[sid] = {v: [] for v in VARS}
                 order.append(sid)
             wx_ok = start < (row[f["obs"]] or "") <= stamp
-            gust_t = row[f["gust_t"]] if "gust_t" in f else None
-            if gust_t:
+            day_gust = "gust_t" in f and row[f["gust_t"]]
+            if day_gust:
                 gust_max_only.add(sid)
             for v in VARS:
-                x = row[f[v]] if v in f else None
-                ok = rain_ok if v in RAIN_VARS else (start < gust_t <= stamp) if v == "gust" and gust_t else wx_ok
-                if x is not None and ok:
+                x = row[f[v]] if v in f and not (v == "gust" and day_gust) else None
+                if x is not None and (rain_ok if v in RAIN_VARS else wx_ok):
                     acc[sid][v].append(x)
     rnd = lambda x: round(x, 1)
     ids, mx, mn = [], [], []
@@ -122,6 +121,54 @@ def merge(stamp, hours, times):
             "missing": [t for p in parts for t in p["missing"]]}
 
 
+def day_max_gust(stamp, hours, times):
+    """日本氣象廳站的過去 N 小時最大陣風 → ({站: 值}, 有當日最大資料的站)。
+    當日最大只增不減、日本時間 00 時(UTC 15 時)歸零:區間內每個日本日,取不晚於該日結束(或區間結尾)的
+    最後一筆快照;它的當日最大發生時間落在區間內,就是那一段的最大。排程中途停過也沒關係,
+    同一天之後任何一筆快照都帶得到;只有停機期間跨過日本時間 00 時,前一天的才拿不到。"""
+    start = _shift(stamp, -hours * 60)
+    times = sorted(times)
+    ends, b = [stamp], stamp_dt(stamp).replace(hour=15, minute=0)
+    if b.strftime("%Y%m%d%H%M") > stamp:
+        b -= timedelta(days=1)
+    while b.strftime("%Y%m%d%H%M") > start:
+        ends.append(b.strftime("%Y%m%d%H%M"))
+        b -= timedelta(days=1)
+    best, seen = {}, set()
+    for e in ends:
+        i = bisect.bisect_right(times, e) - 1
+        if i < 0 or times[i] <= start:
+            continue
+        snap = _load(times[i])
+        if snap is None or "gust_t" not in snap["fields"]:
+            continue
+        f = {k: i for i, k in enumerate(snap["fields"])}
+        for row in snap["rows"]:
+            gt, v = row[f["gust_t"]], row[f["gust_day"]]
+            if not gt:
+                continue
+            seen.add(row[f["id"]])
+            if v is not None and start < gt <= stamp:
+                best[row[f["id"]]] = max(v, best.get(row[f["id"]], v))
+    return best, seen
+
+
+def _apply_day_gust(out, stamp, hours, times):
+    best, seen = day_max_gust(stamp, hours, times)
+    gi, idx = VARS.index("gust"), {s: i for i, s in enumerate(out["ids"])}
+    for sid in seen:
+        if sid not in idx:
+            if sid not in best:
+                continue
+            idx[sid] = len(out["ids"])
+            out["ids"].append(sid)
+            out["max"].append([None] * len(VARS))
+            out["min"].append([None] * len(VARS))
+        out["max"][idx[sid]][gi] = round(best[sid], 1) if sid in best else None
+        out["min"][idx[sid]][gi] = None
+    return out
+
+
 def _save(hours, stamp, out):
     layer = f"{LAYER}/agg_{hours}h"
     save_json(layer_dir(layer) / f"{stamp}.json.gz", out, gz=True)
@@ -133,7 +180,7 @@ def run(stamp, times=None):
     times = times if times is not None else read_index(LAYER)["times"]
     for h in WINDOWS:
         out = compute(stamp, h, times) if h <= SHORT_MAX else merge(stamp, h, times)
-        _save(h, stamp, out)
+        _save(h, stamp, _apply_day_gust(out, stamp, h, times))
     for cache, keep_min in ((_cache, SHORT_MAX * 60 + 60), (_cache_1h, max(WINDOWS) * 60 + 60)):
         oldest = _shift(stamp, -keep_min)
         for t in [t for t in cache if t <= oldest]:

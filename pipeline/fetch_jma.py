@@ -3,8 +3,9 @@
   測站表 bosai/amedas/const/amedastable.json(快取一天)
   全國同一時刻 bosai/amedas/data/map/{JST YYYYMMDDHHmm00}.json(10 分鐘一檔)
 陣風只在單站檔 point/{code}/{JST YYYYMMDD_HH}.json(3 小時一檔),而且是日本時間當日 00 時起的最大值與發生時間:
-  gust   只有發生時間在觀測前 1 小時內才填(和 CWA PeakGustSpeed「過去 1 小時最大」同義),否則留空
-  gust_t 發生時間(UTC stamp);station_agg 用它判斷是否落在「過去 N 小時」區間內
+  gust     只有發生時間在觀測前 1 小時內才填(和 CWA PeakGustSpeed「過去 1 小時最大」同義),否則留空
+  gust_day 當日最大陣風(不管多久以前發生都填,日本時間 00 時歸零)
+  gust_t   當日最大的發生時間(UTC stamp);station_agg 用 gust_day + gust_t 算「過去 N 小時最大」
 當日最高最低溫的日界和 CWA 差 1 小時,留空。"""
 import json
 import time
@@ -105,7 +106,7 @@ def collect(stamp):
             "county": county, "town": town, "obs": obs, "type": "jma",
             "temp": _val(d, "temp"), "rh": _val(d, "humidity"), "pres": _val(d, "pressure"),
             "ws": _val(d, "wind"), "wd": _dir(_val(d, "windDirection")),
-            "gust": None, "gust_dir": None, "gust_t": None, "tmax": None, "tmin": None,
+            "gust": None, "gust_dir": None, "gust_day": None, "gust_t": None, "tmax": None, "tmin": None,
             "rain_10m": _val(d, "precipitation10m"), "rain_1h": _val(d, "precipitation1h"),
             "rain_3h": _val(d, "precipitation3h"), "rain_24h": _val(d, "precipitation24h"),
         })
@@ -117,7 +118,7 @@ def collect(stamp):
             continue
         v, gd, gt = g
         r = by_id[f"J{code}"]
-        r["gust_t"] = gt.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
+        r["gust_day"], r["gust_t"] = v, gt.astimezone(timezone.utc).strftime("%Y%m%d%H%M")
         if t - gt <= timedelta(hours=1):
             r["gust"], r["gust_dir"] = v, gd
     log.info("jma %s JST:%d 站(陣風 %d 站)", f"{t:%m/%d %H:%M}", len(recs), sum(g is not None for g in gusts.values()))
