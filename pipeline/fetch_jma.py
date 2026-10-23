@@ -2,7 +2,8 @@
 來源是氣象廳官網アメダス頁面用的 JSON(非正式 API,格式可能不另行通知就改;出典：気象庁):
   測站表 bosai/amedas/const/amedastable.json(快取一天)
   全國同一時刻 bosai/amedas/data/map/{JST YYYYMMDDHHmm00}.json(10 分鐘一檔)
-陣風只在單站檔 point/{code}/{JST YYYYMMDD_HH}.json(3 小時一檔),而且是日本時間當日 00 時起的最大值與發生時間:
+陣風只在單站檔 point/{code}/{JST YYYYMMDD_HH}.json(3 小時一檔),而且是日本時間當日 00 時起的最大值與發生時間
+(gustTime 只有時分,而且是 UTC,不是日本時間:大原 14:41 JST 的陣風記成 hour 5、minute 41):
   gust     只有發生時間在觀測前 1 小時內才填(和 CWA PeakGustSpeed「過去 1 小時最大」同義),否則留空
   gust_day 當日最大陣風(不管多久以前發生都填,日本時間 00 時歸零)
   gust_t   當日最大的發生時間(UTC stamp);station_agg 用 gust_day + gust_t 算「過去 N 小時最大」
@@ -79,8 +80,9 @@ def _gust(code, t):
     v, gt = _val(d, "gust"), d.get("gustTime")
     if v is None or not gt:
         return None
-    g = t.replace(hour=0, minute=0) + timedelta(hours=gt["hour"], minutes=gt["minute"])
-    if g > t:                                            # 00:00 那筆是前一天的總結
+    tu = t.astimezone(timezone.utc)
+    g = tu.replace(hour=0, minute=0) + timedelta(hours=gt["hour"], minutes=gt["minute"])
+    if g > tu:                                           # 當日最大在 24 小時內,晚於觀測就是前一個 UTC 日
         g -= timedelta(days=1)
     return v, _dir(_val(d, "gustDirection")), g
 
