@@ -18,7 +18,7 @@
 
   <header id="topbar">
     <div class="brand"><img src="assets/logo.svg" alt="" width="30" height="30"><b>SW<i>-Watch</i></b><span>劇烈天氣監控</span></div>
-    <button id="btn-shot" title="擷取目前畫面存成 PNG（不含圖層選單與時間軸）">📷 擷取</button>
+    <button id="btn-shot" class="toggle" title="地圖擷取：選尺寸、調整框內範圍，存成 PNG">📷 擷取</button>
     <div id="clock">
       <div id="clock-main">--</div>
       <div id="clock-sub"></div>
@@ -277,6 +277,35 @@
     </label>
   </footer>
 
+  <div id="shot-frame" hidden></div>
+  <div id="shot-ui" hidden>
+    <div class="shot-row"><b>地圖擷取</b><span class="muted">移動、縮放地圖調整框內範圍（Esc 關閉）</span></div>
+    <div class="shot-row">
+      <label>尺寸
+        <select id="shot-size">
+          <option value="16:9">16:9（1920×1080）</option>
+          <option value="4:3">4:3（1600×1200）</option>
+          <option value="1:1">1:1（1080×1080）</option>
+          <option value="9:16">9:16（1080×1920）</option>
+          <option value="A4L">A4 橫（300 dpi）</option>
+          <option value="A4P">A4 直（300 dpi）</option>
+          <option value="custom">自訂</option>
+        </select>
+      </label>
+      <input id="shot-w" type="number" class="num" min="100" max="10000"> × <input id="shot-h" type="number" class="num" min="100" max="10000"> px
+      <label><input type="checkbox" id="shot-lock"> 鎖定比例</label>
+      <label>倍率 <select id="shot-mult"><option value="1">1×</option><option value="2">2×</option></select></label>
+    </div>
+    <div class="shot-row">
+      <label><input type="checkbox" id="shot-title"> 標題</label>
+      <label><input type="checkbox" id="shot-time"> 資料時間</label>
+      <label><input type="checkbox" id="shot-legend"> 色階</label>
+      <label><input type="checkbox" id="shot-source"> 資料來源</label>
+      <label><input type="checkbox" id="shot-scale"> 比例尺</label>
+      <label><input type="checkbox" id="shot-grid"> 經緯網格</label>
+    </div>
+    <div class="shot-row"><button id="shot-go" class="toggle on">下載 PNG</button><button id="shot-cancel">取消</button><span id="shot-info" class="muted"></span></div>
+  </div>
   <div id="toast"></div>
   <script type="module" src="js/app.js"></script>
 </body>

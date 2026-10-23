@@ -39,6 +39,16 @@ button.toggle.on { background: var(--accent); color: #000; border-color: var(--a
 #panel .ver { margin-top: 10px; text-align: right; font-size: 11px; color: var(--muted); opacity: .75; }
 #clock { text-align: right; }
 #btn-shot { margin: 0 14px 0 auto; }
+
+/* 地圖擷取:框外變暗,框內照常移動縮放地圖 */
+#shot-frame { position: absolute; z-index: 3; pointer-events: none; border: 2px solid #00e5ff;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45); }
+#shot-ui { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); z-index: 7; display: grid; gap: 6px;
+  background: var(--bg-solid); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; }
+#shot-ui .shot-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+#shot-ui label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+#shot-ui .num { width: 64px; flex: 0 0 64px; }
+#shot-ui .muted { color: var(--muted); font-size: 12px; }
 #clock-main { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 #clock-sub { font-size: 11px; color: var(--muted); }
 
