@@ -131,6 +131,7 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
   font-weight: 700; font-size: 13px; color: #fff; white-space: nowrap; pointer-events: none;
   text-shadow: 0 0 3px #000, 0 0 3px #000; transform: translate(14px, -14px);
 }
+.ty-label.ty-probe-label { font-weight: 700; font-size: 12px; }
 .ty-label {
   font-size: 11px; color: #fff; white-space: nowrap; pointer-events: none;
   text-shadow: 0 0 2px #000, 0 0 2px #000; transform: translate(10px, 0);

@@ -1,7 +1,7 @@
 // 氣象署颱風路徑:過去路徑、預報路徑、70% 潛勢區、7 級 / 10 級暴風圈
 // 文字標示用 HTML marker(中文不需要地圖字型檔)
 import { getIndex, getJSON } from '../data.js';
-import { addMin, fmtTW, latestLE } from '../time.js';
+import { addMin, fmtTW, latestLE, toDate, toStamp } from '../time.js';
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
@@ -42,11 +42,42 @@ export function category(wind) {
 
 const fmtNum = (v, unit) => (v == null ? '—' : `${v}${unit}`);
 
+// ── 依時間內插路徑(動畫、點選路徑線用)──
+const SCALAR = ['wind', 'gust', 'pres', 'r15', 'r25', 'r70'];
+const lerp = (a, b, f) => (a == null || b == null ? null : a + (b - a) * f);
+const round = (v) => (v == null ? null : Math.round(v));
+
+/** 兩點之間 f(0–1)的位置、強度、暴風圈;四象限半徑兩端都有才內插 */
+function between(a, b, f) {
+  if (f <= 0) return { ...a, exact: true };
+  if (f >= 1) return { ...b, exact: true };
+  const q = { ms: lerp(a.ms, b.ms, f), lon: lerp(a.lon, b.lon, f), lat: lerp(a.lat, b.lat, f), kind: b.kind, init: b.init, exact: false };
+  for (const k of SCALAR) q[k] = lerp(a[k], b[k], f);
+  for (const k of ['r15q', 'r25q']) if (a[k] && b[k]) q[k] = a[k].map((x, i) => lerp(x, b[k][i], f));
+  q.t = toStamp(new Date(Math.round(q.ms / 60e3) * 60e3));
+  if (q.kind === 'fcst') q.tau = Math.round(((q.ms - toDate(q.init).getTime()) / 36e5) * 10) / 10;
+  return q;
+}
+
+/** 路徑上時間 ms 的位置;超出範圍回 null */
+function at(track, ms) {
+  const pts = track.pts;
+  if (!pts.length || ms < pts[0].ms || ms > pts[pts.length - 1].ms) return null;
+  for (let i = 1; i < pts.length; i++) {
+    if (ms <= pts[i].ms) return between(pts[i - 1], pts[i], (ms - pts[i - 1].ms) / (pts[i].ms - pts[i - 1].ms || 1));
+  }
+  return { ...pts[0], exact: true };
+}
+
 function popupHTML(name, p, kind) {
+  if (p.exact === false) {
+    p = { ...p, wind: round(p.wind), gust: round(p.gust), pres: round(p.pres), r15: round(p.r15), r25: round(p.r25), r70: round(p.r70) };
+  }
   const c = category(p.wind);
+  const ip = p.exact === false;
   const time = kind === 'past'
-    ? `${fmtTW(p.t, 'full')}（實際位置）`
-    : `${fmtTW(p.t, 'full')}（+${p.tau} 小時預報）`;
+    ? `${fmtTW(p.t, 'full')}（${ip ? '實際路徑內插' : '實際位置'}）`
+    : `${fmtTW(p.t, 'full')}（${ip ? '內插，' : ''}+${p.tau} 小時預報）`;
   return `<div class="popup-title">${name}　${c.name}</div>
     <div>${time}</div>
     <div>位置 ${p.lat.toFixed(1)}°N ${p.lon.toFixed(1)}°E</div>
@@ -73,6 +104,11 @@ export class TyphoonLayer {
   data = null;
   markers = [];
   cache = new Map();
+  tracks = [];             // 各颱風的時間序列(過去定位 + 預報),draw() 重建
+  probeMarkers = [];       // 動畫 / 點選位置旁的時間標示
+  raf = 0;                 // 動畫 requestAnimationFrame
+  animSec = 10;            // 動畫一輪秒數
+  onAnim = null;           // 動畫開始 / 停止時呼叫(true / false)
 
   constructor(map) { this.map = map; }
 
@@ -106,26 +142,124 @@ export class TyphoonLayer {
     m.addLayer({ id: 'ty-c15-line', type: 'line', source: 'ty-c15', paint: circleLine('#f9a825') });
     m.addLayer({ id: 'ty-c25-fill', type: 'fill', source: 'ty-c25', paint: circleFill('#e53935') });
     m.addLayer({ id: 'ty-c25-line', type: 'line', source: 'ty-c25', paint: circleLine('#e53935') });
+    // 動畫 / 點選位置的暴風圈(畫在路徑線下面)
+    m.addSource('ty-probe', { type: 'geojson', data: EMPTY });
+    m.addLayer({ id: 'ty-probe-fill', type: 'fill', source: 'ty-probe', filter: ['==', '$type', 'Polygon'],
+      paint: { 'fill-color': ['match', ['get', 'k'], 'c25', '#e53935', '#f9a825'], 'fill-opacity': 0.18 } });
+    m.addLayer({ id: 'ty-probe-line', type: 'line', source: 'ty-probe', filter: ['==', '$type', 'Polygon'],
+      paint: { 'line-color': ['match', ['get', 'k'], 'c25', '#e53935', '#f9a825'], 'line-width': 2 } });
     m.addLayer({ id: 'ty-past-line', type: 'line', source: 'ty-past', filter: ['==', '$type', 'LineString'],
       paint: { 'line-color': th.track, 'line-width': 2 } });
     m.addLayer({ id: 'ty-fcst-line', type: 'line', source: 'ty-fcst', filter: ['==', '$type', 'LineString'],
       paint: { 'line-color': th.fcst, 'line-width': 2, 'line-dasharray': [2, 1.5] } });
+    // 路徑線很細,另外疊一條透明粗線方便點選
+    for (const k of ['past', 'fcst']) {
+      m.addLayer({ id: `ty-${k}-hit`, type: 'line', source: `ty-${k}`, filter: ['==', '$type', 'LineString'],
+        paint: { 'line-color': '#000', 'line-width': 14, 'line-opacity': 0 } });
+    }
     m.addLayer({ id: 'ty-past-pt', type: 'circle', source: 'ty-past', filter: ['==', '$type', 'Point'],
       paint: { 'circle-radius': ['case', ['get', 'now'], 7, 3.5], 'circle-color': ['get', 'color'],
         'circle-stroke-color': '#000', 'circle-stroke-width': ['case', ['get', 'now'], 2, 0.8] } });
     m.addLayer({ id: 'ty-fcst-pt', type: 'circle', source: 'ty-fcst', filter: ['==', '$type', 'Point'],
       paint: { 'circle-radius': 4.5, 'circle-color': 'rgba(0,0,0,0.4)', 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 2 } });
 
-    for (const id of ['ty-past-pt', 'ty-fcst-pt']) {
-      m.on('click', id, (e) => {
-        const f = e.features[0];
-        const p = JSON.parse(f.properties.json);
-        new maplibregl.Popup({ maxWidth: '320px' }).setLngLat(f.geometry.coordinates)
-          .setHTML(popupHTML(f.properties.name, p, id === 'ty-past-pt' ? 'past' : 'fcst')).addTo(m);
-      });
+    m.addLayer({ id: 'ty-probe-pt', type: 'circle', source: 'ty-probe', filter: ['==', '$type', 'Point'],
+      paint: { 'circle-radius': 8, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+
+    // 點路徑點 → 那一點;點路徑線 → 依時間內插的位置。都畫出當時的暴風圈
+    const PT = ['ty-past-pt', 'ty-fcst-pt'], HIT = ['ty-past-hit', 'ty-fcst-hit'];
+    m.on('click', (e) => {
+      if (!this.visible) return;
+      const hits = m.queryRenderedFeatures(e.point, { layers: [...PT, ...HIT] });
+      if (!hits.length) return;
+      const pt = hits.find((f) => PT.includes(f.layer.id));
+      let name, q, kind;
+      if (pt) {
+        name = pt.properties.name;
+        q = { ...JSON.parse(pt.properties.json), exact: true };
+        kind = pt.layer.id === 'ty-past-pt' ? 'past' : 'fcst';
+      } else {
+        const near = this.nearest(e.point);
+        if (!near) return;
+        ({ name, q } = near);
+        kind = q.kind;
+      }
+      this.animate(false);
+      this.popup?.remove();          // 先關舊的(關閉時會清掉暴風圈)再畫新的
+      this.setProbe([{ name, q }], false);
+      this.popup = new maplibregl.Popup({ maxWidth: '320px' }).setLngLat([q.lon, q.lat])
+        .setHTML(popupHTML(name, q, kind)).addTo(m);
+      this.popup.on('close', () => { if (!this.raf) this.setProbe([]); });
+    });
+    for (const id of [...PT, ...HIT]) {
       m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer'; });
       m.on('mouseleave', id, () => { m.getCanvas().style.cursor = ''; });
     }
+  }
+
+  /** 螢幕座標 point 最近的路徑位置(投影到各段,依比例內插時間) */
+  nearest(point) {
+    let best = null;
+    for (const tr of this.tracks) {
+      const px = tr.pts.map((p) => this.map.project([p.lon, p.lat]));
+      for (let i = 1; i < px.length; i++) {
+        const a = px[i - 1], b = px[i], dx = b.x - a.x, dy = b.y - a.y;
+        const u = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+        const d = Math.hypot(a.x + u * dx - point.x, a.y + u * dy - point.y);
+        if (!best || d < best.d) best = { d, tr, q: between(tr.pts[i - 1], tr.pts[i], u) };
+      }
+    }
+    return best && { name: best.tr.name, q: best.q };
+  }
+
+  /** 動畫 / 點選位置:圓點、暴風圈、時間標示;list = [{ name, q }] */
+  setProbe(list, label = true) {
+    const feats = [];
+    for (const { q } of list) {
+      const r15 = q.r15q ?? q.r15, r25 = q.r25q ?? q.r25;
+      if (r15) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r15), properties: { k: 'c15' } });
+      if (r25) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r25), properties: { k: 'c25' } });
+      feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [q.lon, q.lat] }, properties: { color: category(q.wind).color } });
+    }
+    this.map.getSource('ty-probe')?.setData({ type: 'FeatureCollection', features: feats });
+    const shown = label ? list : [];
+    while (this.probeMarkers.length > shown.length) this.probeMarkers.pop().remove();
+    shown.forEach(({ name, q }, i) => {
+      if (!this.probeMarkers[i]) {
+        const el = document.createElement('div');
+        el.className = 'ty-label ty-probe-label';
+        this.probeMarkers[i] = new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat([q.lon, q.lat]).addTo(this.map);
+      }
+      this.probeMarkers[i].setLngLat([q.lon, q.lat]);
+      this.probeMarkers[i].getElement().textContent =
+        `${this.show_names ? `${name} ` : ''}${fmtTW(q.t, 'md')}${q.kind === 'fcst' ? '（預報）' : ''}`;
+    });
+  }
+
+  /** 路徑動畫:所有颱風一起從最早的定位走到最後的預報點,到底停 1 秒再重來 */
+  animate(on) {
+    cancelAnimationFrame(this.raf);
+    const was = !!this.raf;
+    this.raf = 0;
+    if (!on || !this.visible || !this.tracks.length) {
+      if (was) { this.setProbe([]); this.onAnim?.(false); }
+      return false;
+    }
+    this.popup?.remove();
+    const start = performance.now();
+    const step = (now) => {
+      const tr = this.tracks;
+      if (!tr.length) { this.animate(false); return; }
+      const t0 = Math.min(...tr.map((k) => k.pts[0].ms)), t1 = Math.max(...tr.map((k) => k.pts[k.pts.length - 1].ms));
+      const dur = this.animSec * 1000;
+      const f = Math.min(1, ((now - start) % (dur + 1000)) / dur);
+      const ms = t0 + f * (t1 - t0);
+      this.setProbe(tr.map((k) => ({ name: k.name, q: at(k, ms) })).filter((x) => x.q));
+      this.raf = requestAnimationFrame(step);
+    };
+    this.raf = requestAnimationFrame(step);
+    this.onAnim?.(true);
+    return true;
   }
 
   /** 指定初始時間優先;同步取 ≤ T 的最近一次;不同步取最新 */
@@ -140,6 +274,7 @@ export class TyphoonLayer {
     if (!this.cache.has(stamp)) this.cache.set(stamp, getJSON(`${this.path}/${stamp}.json`));
     const data = await this.cache.get(stamp);
     if (this.wanted !== stamp) return;
+    if (data !== this.data && !this.raf) this.popup?.remove();   // 換了一次預報,點選的位置已不適用
     this.data = data;
     this.draw();
   }
@@ -149,6 +284,7 @@ export class TyphoonLayer {
     const cone = [], c15 = [], c25 = [], past = [], fcst = [];
     this.markers.forEach((mk) => mk.remove());
     this.markers = [];
+    this.tracks = [];
 
     for (const s of storms) {
       const name = s.name_zh ? `${s.name_zh} ${s.name_en ?? ''}`.trim() : (s.name_en ?? s.id);
@@ -175,6 +311,11 @@ export class TyphoonLayer {
       if (this.circles.past) pts.slice(0, -1).forEach((p) => addCircles(p, 'past'));
       if (this.circles.now && now) addCircles(now, 'now');
       if (this.circles.fcst) fp.forEach((p) => addCircles(p, 'fcst'));
+
+      const ms = (p) => toDate(p.t).getTime();
+      const track = [...pts.map((p) => ({ ...p, kind: 'past', ms: ms(p) })),
+        ...fp.map((p) => ({ ...p, kind: 'fcst', init: s.fcst_init, ms: ms(p) }))];
+      if (track.length) this.tracks.push({ name, pts: track });
 
       fp.forEach((p) => fcst.push({
         type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
@@ -207,9 +348,11 @@ export class TyphoonLayer {
   setVisible(v) {
     this.visible = v;
     for (const id of ['ty-cone-fill', 'ty-cone-line', 'ty-c15-fill', 'ty-c15-line', 'ty-c25-fill', 'ty-c25-line',
-      'ty-past-line', 'ty-fcst-line', 'ty-past-pt', 'ty-fcst-pt']) {
+      'ty-past-line', 'ty-fcst-line', 'ty-past-hit', 'ty-fcst-hit', 'ty-past-pt', 'ty-fcst-pt',
+      'ty-probe-fill', 'ty-probe-line', 'ty-probe-pt']) {
       this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
     }
+    if (!v) { this.animate(false); this.popup?.remove(); this.setProbe([]); }
     this.draw();
   }
 
