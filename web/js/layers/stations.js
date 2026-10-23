@@ -62,7 +62,8 @@ export class StationLayer {
   current = null;          // { stamp, features, agg }
   cache = new Map();       // path → Promise<JSON>
   markers = [];
-  filter = { county: '', types: new Set(Object.keys(STATION_TYPES)) };   // 縣市('' = 全部)、站種
+  filter = { countyOff: new Set(), types: new Set(Object.keys(STATION_TYPES)) };   // 不顯示的縣市(新出現的縣市預設顯示)、站種
+  showLabels = true;       // 地圖上測站旁的數值文字
   all = new Map();         // 站號 → 基本資料(不受篩選、不管有沒有值;搜尋用)
   snap = null;             // 目前時間的快照(資訊卡顯示各變數當前值)
   selected = null;         // 點選中的站號
@@ -70,9 +71,9 @@ export class StationLayer {
 
   constructor(map) { this.map = map; }
 
-  get filterKey() { return `${this.filter.county}|${[...this.filter.types].sort().join(',')}`; }
+  get filterKey() { return `${[...this.filter.countyOff].sort().join(',')}|${[...this.filter.types].sort().join(',')}`; }
 
-  passes(p) { return (!this.filter.county || p.county === this.filter.county) && this.filter.types.has(p.type); }
+  passes(p) { return !this.filter.countyOff.has(p.county) && this.filter.types.has(p.type); }
 
   setFilter(f) { Object.assign(this.filter, f); this.current = null; }
 
@@ -269,7 +270,7 @@ export class StationLayer {
   drawLabels() {
     for (const mk of this.markers) mk.remove();
     this.markers = [];
-    if (!this.visible || !this.current || this.map.getZoom() < LABEL_ZOOM) return;
+    if (!this.visible || !this.showLabels || !this.current || this.map.getZoom() < LABEL_ZOOM) return;
     const b = this.map.getBounds();
     let n = 0;
     for (const ft of this.current.features) {

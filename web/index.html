@@ -124,7 +124,12 @@
           <label>透明度 <input type="range" id="op-stations" min="0" max="100" value="100"></label>
           <label>搜尋 <input type="search" id="st-search" list="st-list" placeholder="站名或站號，例如 臺北、466920"></label>
           <datalist id="st-list"></datalist>
-          <label>縣市 <select id="st-county"><option value="">全部</option></select></label>
+          <details id="st-county-box">
+            <summary>縣市 <span id="st-county-sum">全部</span></summary>
+            <div class="st-county-btns"><button type="button" id="st-county-all">全選</button><button type="button" id="st-county-none">全不選</button></div>
+            <div id="st-counties"></div>
+          </details>
+          <label><input type="checkbox" id="st-labels" checked> 地圖上顯示數值文字</label>
           <div class="ty-toggles" id="st-types">
             <span>站種</span>
             <label><input type="checkbox" value="manned" checked> 局屬站</label>

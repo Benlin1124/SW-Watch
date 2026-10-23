@@ -707,24 +707,18 @@ function openStation(id, fly = true) {
   card.open(id, state.T);
 }
 
-let stListSize = 0, stCountyRestored = false;
-/** 搜尋清單、縣市選單(測站清單變動時才重建)與排行榜 */
+let stListSize = 0;
+/** 搜尋清單、縣市勾選(測站清單變動時才重建)與排行榜 */
 function refreshStationUI() {
   if (stations.all.size !== stListSize) {
     stListSize = stations.all.size;
     const all = [...stations.all.values()];
     $('st-list').innerHTML = all.map((s) => `<option value="${s.name}（${s.id}）">${s.county}${s.town}　${STATION_TYPES[s.type] ?? ''}</option>`).join('');
-    const sel = $('st-county'), cur = sel.value;
     const counties = [...new Set(all.map((s) => s.county).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    sel.innerHTML = '<option value="">全部</option>' + counties.map((c) => `<option>${c}</option>`).join('');
-    const want = cur || (!stCountyRestored ? prefs.get('controls')?.['st-county'] ?? '' : '');
-    stCountyRestored = true;
-    sel.value = counties.includes(want) ? want : '';
-    if (sel.value !== cur) {           // 上次選的縣市(縣市清單要等測站資料到了才有)
-      stations.setFilter({ county: sel.value });
-      setTimeout(render);
-      return;
-    }
+    const off = stations.filter.countyOff;
+    $('st-counties').innerHTML = counties.map((c) => `<label><input type="checkbox" value="${c}"${off.has(c) ? '' : ' checked'}> ${c}</label>`).join('');
+    for (const c of $('st-counties').querySelectorAll('input')) c.onchange = applyCounties;
+    countySummary();
   }
   const box = $('st-rank');
   box.hidden = !$('st-rank-on').checked;
@@ -736,7 +730,31 @@ function refreshStationUI() {
   for (const li of box.querySelectorAll('li')) li.onclick = () => openStation(li.dataset.id);
 }
 
+/** 縣市勾選 → 篩選;存「沒勾的縣市」,之後新出現的縣市預設顯示 */
+function applyCounties() {
+  const off = new Set([...$('st-counties').querySelectorAll('input')].filter((c) => !c.checked).map((c) => c.value));
+  stations.setFilter({ countyOff: off });
+  prefs.set('stCountyOff', [...off]);
+  countySummary();
+  render();
+}
+
+function countySummary() {
+  const box = [...$('st-counties').querySelectorAll('input')], on = box.filter((c) => c.checked);
+  $('st-county-sum').textContent = on.length === box.length ? '全部'
+    : on.length <= 2 ? on.map((c) => c.value).join('、') || '未選' : `${on.length} / ${box.length}`;
+}
+
 function bindStationTools() {
+  stations.setFilter({ countyOff: new Set(prefs.get('stCountyOff') ?? []) });
+  const setAll = (on) => {
+    for (const c of $('st-counties').querySelectorAll('input')) c.checked = on;
+    applyCounties();
+  };
+  $('st-county-all').onclick = () => setAll(true);
+  $('st-county-none').onclick = () => setAll(false);
+  stations.showLabels = $('st-labels').checked;
+  $('st-labels').onchange = (e) => { stations.showLabels = e.target.checked; stations.drawLabels(); };
   $('st-search').onchange = (e) => {
     const q = e.target.value.trim();
     const m = q.match(/（([^）]+)）$/);
@@ -744,7 +762,6 @@ function bindStationTools() {
     if (id) { openStation(id); e.target.value = ''; }
     else if (q) toast(`找不到測站「${q}」`, 2000);
   };
-  $('st-county').onchange = (e) => { stations.setFilter({ county: e.target.value }); render(); };
   for (const c of document.querySelectorAll('#st-types input')) {
     c.onchange = () => {
       const types = new Set([...document.querySelectorAll('#st-types input:checked')].map((x) => x.value));
