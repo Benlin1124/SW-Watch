@@ -112,6 +112,8 @@ const BD_LEVELS = [-100, -86, -81, -76, -70, -64, -54, -42, -31,
 const BD_COLORS = ['#ffffff', '#001212', '#fe0000', '#00c8c8', '#ff00fe', '#ffff00', '#01af00', '#003cf6',
   '#e2e2e2', '#dadada', '#d1d1d1', '#c6c6c6', '#bdbdbd', '#aeaeae', '#a0a0a0', '#939393', '#868686', '#7a7a7a',
   '#f3f3f3', '#e2e2e2', '#cecece', '#b5b5b5', '#959595', '#7a7a7a', '#5f5f5f', '#404040', '#1d1d1d', '#000000'];
+// notebook 色條刻度(cbar_ticks)
+const BD_TICKS = [-86, -81, -76, -70, -64, -54, -42, -31, 9, 25];
 const WV_ANCHORS = [[-85, '#ffffff'], [-65, '#9ecae1'], [-50, '#2166ac'], [-40, '#1a1a2e'], [-30, '#7f4f24'], [-18, '#e0a050'], [-5, '#fff1c1']];
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -151,8 +153,25 @@ export function satLUT(spec, band, style = 'bd') {
 
 const cssOf = (p) => `rgb(${p & 255},${(p >> 8) & 255},${(p >>> 16) & 255})`;
 
+/** B13 增強色階圖例:比照 notebook 的 BoundaryNorm 色條,每格等寬,刻度標在格界;太擠的刻度排到第二列 */
+function bdLegendHTML(title, ticks) {
+  const W = 420, n = BD_COLORS.length;
+  const cells = BD_COLORS.map((c) => `<span style="flex:1;background:${c}"></span>`).join('');
+  let last = [-1e9, -1e9];
+  const labels = ticks.map((t) => {
+    const x = (BD_LEVELS.indexOf(t) / n) * W;
+    const row = x - last[0] >= 22 ? 0 : 1;
+    last[row] = x;
+    return `<span style="position:absolute;left:${x}px;top:${row * 12}px;transform:translateX(-50%)">${t}</span>`;
+  }).join('');
+  return `<div class="legend-title">${title}</div>
+    <div style="display:flex;width:${W}px;height:14px;outline:1px solid rgba(128,128,128,.5)">${cells}</div>
+    <div class="legend-labels" style="position:relative;height:26px;width:${W}px">${labels}</div>`;
+}
+
 /** 連續色階圖例:取樣顏色做漸層,ticks 標在對應位置 */
 export function satLegendHTML(title, band, style, [vmin, vmax], ticks) {
+  if (band === 'B13' && style === 'bd') return bdLegendHTML(title, BD_TICKS);
   const f = satColorFn(band, style), n = 120, stops = [];
   for (let i = 0; i < n; i++) {
     const v = vmin + ((i + 0.5) / n) * (vmax - vmin);
