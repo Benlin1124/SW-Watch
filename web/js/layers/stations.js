@@ -184,8 +184,9 @@ export class StationLayer {
   async configure({ variable = this.variable, stat = this.stat, hours = this.hours }) {
     const before = this.activeIndex;
     Object.assign(this, { variable, stat, hours });
-    if (this.aggMode && !this.aggIndex[hours]) {
-      this.aggIndex[hours] = await getIndex(this.aggPath).catch(() => null);
+    // 每次切換都重抓:定時更新只更新當下的時數,其他時數留在記憶體的 index 會過時(最新時間對不到 → 無資料)
+    if (this.aggMode) {
+      this.aggIndex[hours] = await getIndex(this.aggPath).catch(() => this.aggIndex[hours] ?? null);
     }
     this.applyStyle();
     this.current = null;            // 強制重畫
