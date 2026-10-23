@@ -105,7 +105,7 @@ def collect(stamp):
             wind_codes.append(code)
         recs.append({
             "id": f"J{code}", "name": st["kjName"], "lon": lon, "lat": lat, "alt": st.get("alt"),
-            "county": county, "town": town, "obs": obs, "type": "jma",
+            "county": county, "town": town, "obs": obs, "type": "jma", "wx10": 1,
             "temp": _val(d, "temp"), "rh": _val(d, "humidity"), "pres": _val(d, "pressure"),
             "ws": _val(d, "wind"), "wd": _dir(_val(d, "windDirection")),
             "gust": None, "gust_dir": None, "gust_day": None, "gust_t": None, "tmax": None, "tmin": None,

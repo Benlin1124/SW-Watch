@@ -15,8 +15,8 @@ from .common import log
 SERIES_DIR = config.DATA_DIR / "stations" / "series"
 LAST_PATH = SERIES_DIR / "_last.json"          # 各站最後寫入時間,避免每次去讀 1000 多個檔尾
 INFO_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "type"]
-SKIP = set(INFO_FIELDS) | {"gust_day", "gust_t"}           # 其餘欄位都進 CSV;obs 改名 wx_obs(氣象要素的觀測時間)
-# gust_day、gust_t 只給 station_agg 用;CSV 欄位在月初建檔時就固定,中途加欄會錯位
+SKIP = set(INFO_FIELDS) | {"gust_day", "gust_t", "wx10"}           # 其餘欄位都進 CSV;obs 改名 wx_obs(氣象要素的觀測時間)
+# gust_day、gust_t、wx10 只給 station_agg / station_recent 用;CSV 欄位在月初建檔時就固定,中途加欄會錯位
 
 
 def _fmt(v):

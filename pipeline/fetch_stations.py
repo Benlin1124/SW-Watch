@@ -11,7 +11,8 @@ LAYER = "stations"
 # 輸出欄位(順序即 rows 每列的順序)
 META_FIELDS = ["id", "name", "lon", "lat", "alt", "county", "town", "obs", "type"]   # type:manned 局屬 / auto 自動 / rain 雨量
 WX_FIELDS = ["temp", "rh", "pres", "ws", "wd", "gust", "gust_dir", "tmax", "tmin"]
-EXTRA_FIELDS = ["gust_day", "gust_t"]   # 當日最大陣風與發生時間(只有日本氣象廳站有,見 fetch_jma)
+EXTRA_FIELDS = ["gust_day", "gust_t",   # 當日最大陣風與發生時間(只有日本氣象廳站有,見 fetch_jma)
+                "wx10"]                 # 1 = 氣象要素 10 分鐘一筆(O-A0003-001 的站、日本氣象廳站)
 RAIN_FIELDS = [f"rain_{k}" for k in config.RAIN_ACC]
 FIELDS = META_FIELDS + WX_FIELDS + RAIN_FIELDS + EXTRA_FIELDS
 
@@ -52,26 +53,40 @@ def _base(st):
             "obs": utc_stamp(st["ObsTime"]["DateTime"])}
 
 
+def _wx(w):
+    return dict(temp=_num(w.get("AirTemperature"), True), rh=_num(w.get("RelativeHumidity")),
+                pres=_num(w.get("AirPressure")), ws=_num(w.get("WindSpeed")), wd=_num(w.get("WindDirection")))
+
+
 def collect():
+    """O-A0001-001(876 站,整點)與 O-A0003-001(其中 363 站,10 分鐘)合併:
+    溫度、濕度、氣壓、風取兩者中觀測時間較新的那筆,obs 用那筆的時間,這些站標 wx10(時序圖 10 分鐘);
+    陣風、今日高低溫一律取 O-A0001-001 —— O-A0003-001 的陣風是「上一個整點小時內最大」,
+    16:50 那筆給的是 15–16 時,和觀測時間對不上。"""
     sta = {}
-    for code in ("O-A0001-001", "O-A0003-001"):
-        for st in fetch_cwa(code)["dataset"]["Station"]:
-            w = st["WeatherElement"]
-            rec = sta.setdefault(st["StationId"], _base(st))
-            rec["type"] = "manned" if code == "O-A0003-001" else rec.get("type", "auto")
-            rec.update(
-                temp=_num(w.get("AirTemperature"), True),
-                rh=_num(w.get("RelativeHumidity")),
-                pres=_num(w.get("AirPressure")),
-                ws=_num(w.get("WindSpeed")),
-                wd=_num(w.get("WindDirection")),
-                gust=_num(_get(w, "GustInfo", "PeakGustSpeed")),
-                gust_dir=_num(_get(w, "GustInfo", "Occurred_at", "WindDirection")),
-                tmax=_num(_get(w, "DailyExtreme", "DailyHigh", "TemperatureInfo", "AirTemperature"), True),
-                tmin=_num(_get(w, "DailyExtreme", "DailyLow", "TemperatureInfo", "AirTemperature"), True),
-            )
-            if rec["temp"] is not None and rec["temp"] < -50:
-                rec["temp"] = None
+    for st in fetch_cwa("O-A0001-001")["dataset"]["Station"]:
+        w = st["WeatherElement"]
+        rec = sta.setdefault(st["StationId"], _base(st))
+        rec["type"] = "manned" if st["StationId"].startswith("46") else "auto"   # 46 開頭 = 局屬站
+        rec.update(
+            _wx(w),
+            gust=_num(_get(w, "GustInfo", "PeakGustSpeed")),
+            gust_dir=_num(_get(w, "GustInfo", "Occurred_at", "WindDirection")),
+            tmax=_num(_get(w, "DailyExtreme", "DailyHigh", "TemperatureInfo", "AirTemperature"), True),
+            tmin=_num(_get(w, "DailyExtreme", "DailyLow", "TemperatureInfo", "AirTemperature"), True),
+        )
+    for st in fetch_cwa("O-A0003-001")["dataset"]["Station"]:
+        sid, obs = st["StationId"], utc_stamp(st["ObsTime"]["DateTime"])
+        rec = sta.get(sid)
+        if rec is None:
+            rec = sta[sid] = _base(st)
+            rec["type"] = "manned" if sid.startswith("46") else "auto"
+        rec["wx10"] = 1
+        if obs >= (rec.get("obs") or ""):
+            rec.update(_wx(st["WeatherElement"]), obs=obs)
+    for rec in sta.values():
+        if rec.get("temp") is not None and rec["temp"] < -50:
+            rec["temp"] = None
 
     rain_times = []
     for st in fetch_cwa("O-A0002-001")["dataset"]["Station"]:

@@ -6,8 +6,8 @@
      have: "1101…"               每個 10 分鐘格有沒有快照(缺漏要看得到,不補)
      stations: {站號: {name, town, type, alt, lon, lat,
                        rain_10m: [n10], rain_1h: [n10], temp/rh/pres/ws/wd/gust/gust_dir: [nh]}}}
-  日本氣象廳站(type = jma)有 10 分鐘的氣象要素:wx10 = true,temp…gust_dir 也是 [n10];
-  而且資料比 CWA 晚 10 分鐘,雨量和氣象要素都依各站觀測時間 obs 放格,不用快照時間。
+  有 10 分鐘氣象要素的站(快照欄位 wx10:O-A0003-001 的站、日本氣象廳站):wx10 = true,temp…gust_dir 也是 [n10],
+  依各站觀測時間 obs 放格。日本氣象廳站比 CWA 晚 10 分鐘,雨量也依 obs 放格。
 每 10 分鐘:讀回各縣市檔 → 時間窗往後移 → 填入新快照 → 寫回(22 個檔,R2 每月約 9.5 萬次寫入)。
 不放每站一個檔:1362 站 × 每 10 分鐘 = 每月約 590 萬次寫入,超過 R2 免費額度。
 重建:python -m pipeline.station_recent --rebuild"""
@@ -45,6 +45,10 @@ def window(stamp):
 
 def _offset(old_start, new_start, step):
     return round((stamp_dt(new_start) - stamp_dt(old_start)).total_seconds() / 60 / step)
+
+
+def _shift_stamp(stamp, minutes):
+    return _fmt(stamp_dt(stamp) + timedelta(minutes=minutes))
 
 
 def _shift(arr, k, n):
@@ -96,27 +100,37 @@ def apply(states, snap, stamp):
             state = states[county] = empty(county, stamp)
         sid = row[f["id"]]
         st = state["stations"].get(sid)
-        wx10 = "type" in f and row[f["type"]] == "jma"
+        jma = "type" in f and row[f["type"]] == "jma"
+        wx10 = jma or ("wx10" in f and bool(row[f["wx10"]]))   # 舊快照沒有 wx10 欄位
         if st is None:
             st = state["stations"][sid] = {**{k: None for k in INFO},
                                            **{v: [None] * (HOURS * 6) for v in RAIN},
                                            **{v: [None] * HOURS for v in WX}}
-        if wx10 and not st.get("wx10"):                  # 改版前建立的整點陣列換成 10 分鐘
-            st.update({v: [None] * (HOURS * 6) for v in WX}, wx10=True)
+        if wx10 and not st.get("wx10"):                  # 改版前建立的整點陣列換成 10 分鐘(整點值放到對應格)
+            conv = {v: [None] * (HOURS * 6) for v in WX}
+            for ih in range(HOURS):
+                io = _offset(s10, _shift_stamp(sh, 60 * ih), 10)
+                if 0 <= io < HOURS * 6:
+                    for v in WX:
+                        conv[v][io] = st[v][ih] if ih < len(st[v]) else None
+            st.update(conv, wx10=True)
         for k in INFO:
             if k in f and row[f[k]] is not None:
                 st[k] = row[f[k]]
         obs = row[f["obs"]] if "obs" in f else None
+        io = _offset(s10, obs, 10) if obs else -1
+        for v in RAIN:                                   # 日本站晚 10 分鐘,雨量依 obs 放格
+            if v in f:
+                if not jma:
+                    st[v][i10] = row[f[v]]
+                elif 0 <= io < HOURS * 6:
+                    st[v][io] = row[f[v]]
         if wx10:
-            io = _offset(s10, obs, 10) if obs else -1
             if 0 <= io < HOURS * 6:
-                for v in RAIN + WX:
+                for v in WX:
                     if v in f:
                         st[v][io] = row[f[v]]
             continue
-        for v in RAIN:
-            if v in f:
-                st[v][i10] = row[f[v]]
         if obs and obs.endswith("00"):
             ih = _offset(sh, obs, 60)
             if 0 <= ih < HOURS:
