@@ -649,3 +649,4 @@ Phase 0 + Phase 1 完成，已實際跑通：
 ## 2026-10-23 色階圖例可縮放
 - 色階框右上加 −/＋ 按鈕,用 CSS `zoom` 讓 `#legend-body` 整塊等比例縮放(0.6–2 倍,每次 0.1),存在 prefs `legendScale`,重新整理後還原。
 - `updateLegend` 改寫入 `#legend-body`,按鈕在 `#legend-ctl` 不會被覆蓋;按鈕平時半透明,滑鼠移到色階上才清楚。
+- 色階可收合:右上 ▾/▸ 切換,收合後只剩「色階 ▸」標題列(`#legend.folded`),狀態存在 prefs `legendFolded`。

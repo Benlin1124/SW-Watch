@@ -549,8 +549,16 @@ function updateLegend() {
   $('legend').style.display = parts.length ? '' : 'none';
 }
 
-// 色階大小:0.6–2 倍,每次 ±0.1
+// 色階大小:0.6–2 倍,每次 ±0.1;可收合成只剩標題列
 function bindLegendScale() {
+  const fold = (on) => {
+    $('legend').classList.toggle('folded', on);
+    $('legend-fold').textContent = on ? '▸' : '▾';
+    $('legend-fold').title = on ? '展開色階' : '收合色階';
+    prefs.set('legendFolded', on);
+  };
+  fold(!!prefs.get('legendFolded'));
+  $('legend-fold').onclick = () => fold(!$('legend').classList.contains('folded'));
   const apply = (z) => {
     z = Math.min(2, Math.max(0.6, Math.round(z * 10) / 10));
     $('legend-body').style.zoom = z;

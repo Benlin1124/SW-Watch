@@ -85,6 +85,11 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 #legend-ctl { display: flex; justify-content: flex-end; gap: 2px; margin: -2px -4px 2px 0; opacity: .45; }
 #legend:hover #legend-ctl { opacity: 1; }
 #legend-ctl button { padding: 0 6px; font-size: 12px; line-height: 16px; }
+#legend-name { display: none; margin-right: auto; font-size: 12px; color: var(--fg); }
+/* 收合:只留標題列 */
+#legend.folded #legend-body, #legend.folded #legend-minus, #legend.folded #legend-plus { display: none; }
+#legend.folded #legend-ctl { opacity: 1; margin: 0; gap: 6px; }
+#legend.folded #legend-name { display: inline; }
 .st-label { font: 11px/1 var(--font); color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; pointer-events: none; white-space: nowrap; }
 .legend-title { font-size: 13px; color: var(--fg); margin-bottom: 4px; }
 .legend-bar { display: flex; }
