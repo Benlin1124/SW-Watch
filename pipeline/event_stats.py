@@ -1,5 +1,5 @@
 """事件統計圖:一段期間(例如颱風影響期間)各測站的總累積雨量、最大平均風、最大陣風 → PNG + CSV。
-色階、風級、底圖與網頁相同(雨量用網頁 ECMWF 長時累積的色階,風用蒲福風級)。
+色階、風級與網頁相同(雨量用網頁 ECMWF 長時累積的色階,風用蒲福風級);底圖用 shp/TWN_CITY(--shp 指定資料夾)。
   python -m pipeline.event_stats --start "2026-10-22 00:00" [--end "2026-10-25 12:00"] [--local]
 時間為台灣時間;--end 省略 = 最新一筆快照。輸出到 charts/{起}_{迄}/。
 本機 data/stations 沒有的快照自動從 R2 下載(存在 pipeline/.cache/stations/),任何一台電腦都能跑;
@@ -12,6 +12,7 @@
 注意 CWA 的 Past2days / Past3days(rain_48h / rain_72h)是日曆日(昨天起 / 前天起,台灣 00 時),不是滾動 48 / 72 小時。
 最大平均風 / 最大陣風:觀測時間落在期間內的各筆取最大;陣風時間用 gust_at(有的話)。"""
 import argparse
+from pathlib import Path
 import csv
 import json
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import requests
 import shapely
-from shapely.geometry import mapping, shape
+from shapely.geometry import shape
 from matplotlib.collections import PatchCollection
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import BoundaryNorm, ListedColormap
@@ -33,7 +34,6 @@ from .common import read_index
 
 TW = timezone(timedelta(hours=8))
 R2_URL = "https://pub-95cef959cf924e2e938a1d1b2a833e45.r2.dev/"
-BASEMAP = config.ROOT / "web" / "assets" / "basemap"
 OUT_DIR = config.ROOT / "charts"
 FONT = ["Microsoft JhengHei", "Noto Sans CJK TC", "PingFang TC"]
 
@@ -183,44 +183,30 @@ def max_wind(start, end, snaps, col):
 
 
 # ── 畫圖 ──
-def load_geo(name):
-    return json.loads((BASEMAP / f"{name}.json").read_text(encoding="utf-8"))
+def load_shp(shp_dir):
+    """底圖:使用者提供的 shp/TWN_CITY(縣市多邊形,WGS84 經緯度,含金馬、澎湖、離島)。
+    陸地填色、縣市界、雨量內插的陸地範圍都用它。"""
+    import shapefile
+    r = shapefile.Reader(str(shp_dir / "TWN_CITY"), encoding="utf-8")
+    geoms = [shapely.make_valid(shape(sh.__geo_interface__)).simplify(0.0003) for sh in r.shapes()]
+    return {"city": geoms}
 
 
-def taiwan_land():
-    """陸地填色用的台灣縣市多邊形(NCDR,同 IDW 陸地遮罩;網頁的 taiwan.json 只有界線),第一次下載後快取。"""
-    path = config.CACHE_DIR / "taiwan_county.geojson"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(requests.get(config.TAIWAN_GEOJSON_URL, timeout=120).text, encoding="utf-8")
-    gj = json.loads(path.read_text(encoding="utf-8"))
-    for f in gj["features"]:
-        f["geometry"] = mapping(shapely.make_valid(shape(f["geometry"])).simplify(0.0005))
-    return gj
+def land_mask(geo):
+    """IDW 格點上的陸地範圍(依 TWN_CITY)。"""
+    lon2, lat2 = np.meshgrid(idw.LON, idw.LAT)
+    mask = np.zeros(lon2.shape, dtype=bool)
+    for g in geo["city"]:
+        mask |= shapely.contains_xy(g, lon2, lat2)
+    return mask
 
 
-def _rings(geom):
-    """各多邊形的外圈(縣市界可能是 GeometryCollection,用 shapely 拆)。"""
-    g = shapely.make_valid(shape(geom))
+def _polys(g):
     for part in getattr(g, "geoms", [g]):
         if part.geom_type == "Polygon":
-            yield np.asarray(part.exterior.coords)
-        elif part.geom_type in ("MultiPolygon", "GeometryCollection"):
-            yield from _rings(mapping(part))
-
-
-def _lines(geom):
-    t = geom["type"]
-    if t in ("LineString",):
-        yield np.asarray(geom["coordinates"])
-    elif t == "MultiLineString":
-        for c in geom["coordinates"]:
-            yield np.asarray(c)
-    elif t in ("Polygon", "MultiPolygon"):
-        polys = geom["coordinates"] if t == "MultiPolygon" else [geom["coordinates"]]
-        for p in polys:
-            for ring in p:
-                yield np.asarray(ring)
+            yield part
+        elif hasattr(part, "geoms"):
+            yield from _polys(part)
 
 
 def draw_base(ax, geo, extent):
@@ -232,15 +218,17 @@ def draw_base(ax, geo, extent):
     ax.set_facecolor(LIGHT["bg"])
     ax.set_xticks([])
     ax.set_yticks([])
-    patches = [MplPolygon(r, closed=True) for f in geo["land"]["features"] for r in _rings(f["geometry"])]
+    patches = [MplPolygon(np.asarray(p.exterior.coords), closed=True) for g in geo["city"] for p in _polys(g)]
     ax.add_collection(PatchCollection(patches, facecolor=LIGHT["land"], edgecolor="none", zorder=0))
 
 
 def draw_overlay(ax, geo):
-    """縣市界(含海岸)疊在資料上面;只用台灣的縣市界,不畫其他國家。"""
-    for f in geo["taiwan"]["features"]:
-        for c in _lines(f["geometry"]):
-            ax.plot(c[:, 0], c[:, 1], color=LIGHT["county"], lw=0.5, zorder=5)
+    """縣市界(含海岸)疊在資料上面。"""
+    for g in geo["city"]:
+        for p in _polys(g):
+            for ring in [p.exterior, *p.interiors]:
+                c = np.asarray(ring.coords)
+                ax.plot(c[:, 0], c[:, 1], color=LIGHT["county"], lw=0.5, zorder=5)
 
 
 def beaufort(ms):
@@ -287,7 +275,7 @@ def plot_rain(path, geo, stations, total):
     ok = np.isfinite(total)
     lon = np.array([s["lon"] for s in stations])[ok]
     lat = np.array([s["lat"] for s in stations])[ok]
-    grid = idw.interpolate(lon, lat, total[ok], idw.land_mask())
+    grid = idw.interpolate(lon, lat, total[ok], land_mask(geo))
     grid = np.where(grid >= RAIN_LEVELS[0], grid, np.nan)
     cmap = ListedColormap(RAIN_COLORS)
     norm = BoundaryNorm(RAIN_LEVELS, cmap.N)
@@ -335,6 +323,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--start", required=True, help='台灣時間,例如 "2026-10-22 00:00"')
     ap.add_argument("--end", help="台灣時間;省略 = 最新一筆快照")
+    ap.add_argument("--shp", default=str(config.ROOT / "shp"), help="底圖 shapefile 資料夾(含 TWN_CITY)")
     ap.add_argument("--local", action="store_true", help="只用本機 data/stations,不從 R2 補(排程那台電腦可用)")
     a = ap.parse_args()
     from matplotlib import font_manager
@@ -356,7 +345,7 @@ def main():
     wind = max_wind(start, end, snaps, col)
     print(f"雨量:{int(np.isfinite(total).sum())} 站接得起來;最多 {np.nanmax(total):.1f} mm")
 
-    geo = {"land": taiwan_land(), "taiwan": load_geo("taiwan")}
+    geo = load_shp(Path(a.shp))
     out = OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}"
     out.mkdir(parents=True, exist_ok=True)
     plot_rain(out / "rain_total.png", geo, stations, total)

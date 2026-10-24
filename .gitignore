@@ -18,3 +18,5 @@ __pycache__/
 
 # 事件統計圖輸出(pipeline.event_stats)
 charts/
+# 統計圖底圖 shapefile(使用者提供,約 24 MB,不進版控)
+shp/
