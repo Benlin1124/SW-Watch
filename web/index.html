@@ -115,14 +115,21 @@
               <option value="now">當前值</option>
               <option value="max">過去最大</option>
               <option value="min">過去最小</option>
+              <option value="sum">區段累積（雨量）</option>
             </select>
             <select id="st-hours" disabled>
               <option value="1">1 小時</option><option value="2">2 小時</option>
               <option value="3">3 小時</option><option value="6">6 小時</option>
               <option value="12">12 小時</option><option value="24">24 小時</option>
               <option value="48">48 小時</option><option value="72">72 小時</option>
+              <option value="custom">自訂區段</option>
             </select>
           </label>
+          <div id="st-custom" hidden>
+            <label>起 <input type="datetime-local" id="st-cstart" step="600"></label>
+            <label>迄 <input type="datetime-local" id="st-cend" step="600"> <button type="button" id="st-cend-clear" title="迄留空 = 跟著時間軸">清除</button></label>
+            <div class="hint">台灣時間，10 分鐘一格；迄留空 = 時間軸目前時間</div>
+          </div>
           <label>透明度 <input type="range" id="op-stations" min="0" max="100" value="100"></label>
           <label>搜尋 <input type="search" id="st-search" list="st-list" placeholder="站名或站號，例如 臺北、466920"></label>
           <datalist id="st-list"></datalist>

@@ -2,7 +2,8 @@
 // 圓點依色階上色;風速、陣風改畫箭頭(指向風吹去的方向);放大後在點旁標數值(HTML marker,不需字型檔)
 import { getIndex, getJSON } from '../data.js';
 import { beaufort, beaufortLegendHTML, legendHTML, SCALES, stepExpr } from '../colormaps.js';
-import { fmtTW, latestLE } from '../time.js';
+import { diffMin, fmtTW, latestLE } from '../time.js';
+import { customExtreme, customSum } from './station_custom.js';
 
 export const STATION_VARS = {
   temp: { name: '溫度', unit: '°C', scale: 'temp', agg: true },
@@ -73,8 +74,10 @@ export class StationLayer {
   visible = true;
   opacity = 1;
   variable = 'temp';
-  stat = 'now';            // now | max | min
-  hours = 1;
+  stat = 'now';            // now | max | min | sum(區段累積雨量)
+  hours = 1;               // 1–72,或 'custom' 自訂區段
+  custom = { start: '', end: '' };   // 自訂區段(UTC stamp);end 空白 = 跟著時間軸
+  customCache = new Map();
   index = null;            // 快照的 index
   aggIndex = {};           // hours → index
   current = null;          // { stamp, features, agg }
@@ -108,7 +111,8 @@ export class StationLayer {
   }
 
   get v() { return STATION_VARS[this.variable]; }
-  get aggMode() { return this.stat !== 'now' && this.v.agg; }
+  get customMode() { return this.stat === 'sum' ? !!this.v.rain : this.stat !== 'now' && this.v.agg && this.hours === 'custom'; }
+  get aggMode() { return this.stat !== 'now' && this.v.agg && this.hours !== 'custom' && this.stat !== 'sum'; }
   get aggPath() { return `${this.path}/agg_${this.hours}h`; }
   get activeIndex() { return this.aggMode ? this.aggIndex[this.hours] : this.index; }
   get times() { return this.activeIndex?.times ?? []; }
@@ -181,9 +185,9 @@ export class StationLayer {
   }
 
   /** 切換變數 / 統計 / 時數;回傳 true 表示時間軸要重建(換了 index) */
-  async configure({ variable = this.variable, stat = this.stat, hours = this.hours }) {
+  async configure({ variable = this.variable, stat = this.stat, hours = this.hours, custom = this.custom }) {
     const before = this.activeIndex;
-    Object.assign(this, { variable, stat, hours });
+    Object.assign(this, { variable, stat, hours, custom: { ...custom } });
     // 每次切換都重抓:定時更新只更新當下的時數,其他時數留在記憶體的 index 會過時(最新時間對不到 → 無資料)
     if (this.aggMode) {
       this.aggIndex[hours] = await getIndex(this.aggPath).catch(() => this.aggIndex[hours] ?? null);
@@ -208,12 +212,49 @@ export class StationLayer {
     return this.cache.get(path);
   }
 
+  /** 自訂區段:終點 = 指定的迄,或時間軸當下 */
+  customRange(stamp) {
+    const end = this.custom.end && (!stamp || this.custom.end < stamp) ? this.custom.end : stamp;
+    return { start: this.custom.start, end };
+  }
+
+  async customValues(start, end) {
+    const key = `${this.stat}|${this.variable}|${start}|${end}`;
+    if (!this.customCache.has(key)) {
+      const get = (t) => this.fetch(`${this.path}/${t}.json`).catch(() => null);
+      const times = this.index?.times ?? [];
+      const p = this.stat === 'sum'
+        ? customSum(start, end, get, times).then((r) => ({ values: new Map([...r.values].map(([k, v]) => [k, [v, null]])), note: r.missing.join('、'), missing: 0 }))
+        : customExtreme(start, end, this.variable, this.stat, {
+          get, times,
+          getIdx: (h) => (this.aggIndex[h] ? Promise.resolve(this.aggIndex[h])
+            : getIndex(`${this.path}/agg_${h}h`).then((i) => (this.aggIndex[h] = i)).catch(() => null)),
+          getAgg: (h, t) => this.fetch(`${this.path}/agg_${h}h/${t}.json.gz`),
+        }).then((r) => ({ values: r.values, missing: r.missing, note: '' }));
+      p.catch(() => this.customCache.delete(key));
+      this.customCache.set(key, p);
+      if (this.customCache.size > 20) this.customCache.delete(this.customCache.keys().next().value);
+    }
+    return this.customCache.get(key);
+  }
+
   async features(stamp) {
+    if (this.customMode) {
+      const { start, end } = this.customRange(stamp);
+      if (!start || !end || end <= start) return { stamp, agg: null, custom: { start, end, note: !start ? '請設定起點' : '起點要早於終點', missing: 0 }, features: [] };
+      stamp = latestLE(this.index?.times ?? [], end) ?? end;
+    }
     const snap = await this.fetch(`${this.path}/${stamp}.json`);
     const f = Object.fromEntries(snap.fields.map((k, i) => [k, i]));
     const v = this.v;
-    let agg = null, val, at;
-    if (this.aggMode) {
+    let agg = null, custom = null, val, at;
+    if (this.customMode) {
+      const { start, end } = this.customRange(stamp);
+      const r = await this.customValues(start, end);
+      custom = { start, end, note: r.note, missing: r.missing };
+      val = (row) => r.values.get(row[f.id])?.[0] ?? null;
+      at = (row) => r.values.get(row[f.id])?.[1] ?? null;
+    } else if (this.aggMode) {
       agg = await this.fetch(`${this.aggPath}/${stamp}.json.gz`);
       const j = agg.vars.indexOf(this.variable);
       const rows = agg[this.stat];
@@ -239,17 +280,17 @@ export class StationLayer {
       const { lon, lat, ...rest } = base;
       const props = { ...rest, obs: v.rain ? snap.time : r[f.obs], v: x };
       // 風向 = 風吹來的方向,箭頭畫成吹去的方向;最大 / 最小沒有對應風向,只畫圓點
-      if (v.dir && !agg && r[f[v.dir]] != null && x > 0) props.dir = (r[f[v.dir]] + 180) % 360;
+      if (v.dir && !agg && !custom && r[f[v.dir]] != null && x > 0) props.dir = (r[f[v.dir]] + 180) % 360;
       if (v.scale === 'wind') props.bf = beaufort(x);
       // 發生時間:最大 / 最小的每個變數;當前值只有陣風
       if (at(r)) props.gt = at(r);
       out.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [r[f.lon], r[f.lat]] } });
     }
-    return { stamp, agg, features: out };
+    return { stamp, agg, custom, features: out };
   }
 
   async show(stamp) {
-    const key = `${stamp}|${this.variable}|${this.stat}|${this.hours}|${this.filterKey}`;
+    const key = `${stamp}|${this.variable}|${this.stat}|${this.hours}|${this.custom.start}|${this.custom.end}|${this.filterKey}`;
     if (stamp && this.current?.key === key) return;
     this.wanted = key;
     const src = this.map.getSource('stations');
@@ -288,7 +329,9 @@ export class StationLayer {
 
   /** 發生時間:24 小時以上的區間要帶日期 */
   fmtAt(t) {
-    return fmtTW(t, (this.current?.agg?.hours ?? 0) >= 24 ? 'md' : 'hm');
+    const c = this.current?.custom;
+    const long = c ? diffMin(c.end, c.start) >= 1440 : (this.current?.agg?.hours ?? 0) >= 24;
+    return fmtTW(t, long ? 'md' : 'hm');
   }
 
   /** 放大後標數值;只標畫面內的站 */
@@ -311,9 +354,9 @@ export class StationLayer {
   }
 
   popupHTML(p) {
-    const v = this.v, agg = this.current?.agg;
-    const what = agg ? `過去 ${agg.hours} 小時${this.stat === 'max' ? '最大' : '最小'}${v.name}` : v.name;
-    const when = agg ? `${fmtTW(agg.start, agg.hours >= 24 ? 'md' : 'hm')}–${fmtTW(agg.time, 'hm')}` : `觀測 ${fmtTW(p.obs)}`;
+    const v = this.v, agg = this.current?.agg, c = this.current?.custom;
+    const what = c ? this.customTitle() : agg ? `過去 ${agg.hours} 小時${this.stat === 'max' ? '最大' : '最小'}${v.name}` : v.name;
+    const when = c ? `${fmtTW(c.start)}–${fmtTW(c.end)}` : agg ? `${fmtTW(agg.start, agg.hours >= 24 ? 'md' : 'hm')}–${fmtTW(agg.time, 'hm')}` : `觀測 ${fmtTW(p.obs)}`;
     const alt = p.alt != null && p.alt !== 'null' ? `　${p.alt} m` : '';
     return `<div class="popup-title">${p.name}（${p.id}）</div>
       <div>${p.county}${p.town}${alt}</div>
@@ -324,6 +367,11 @@ export class StationLayer {
 
   /** 圖層時間欄:最大 / 最小顯示區間,區間內缺快照就標出來 */
   timeLabel(stamp) {
+    const c = this.current?.custom;
+    if (this.customMode && c) {
+      const bad = c.note || c.missing;
+      return { text: `${c.start ? fmtTW(c.start) : '--'}–${c.end ? fmtTW(c.end) : '--'}${c.note ? `（${c.note}）` : c.missing ? `（缺 ${c.missing} 筆）` : ''}`, stale: !!bad };
+    }
     const agg = this.current?.agg;
     if (!this.aggMode || !agg || agg.time !== stamp) return null;
     const miss = agg.expected - agg.found;
@@ -348,9 +396,13 @@ export class StationLayer {
     this.drawLabels();
   }
 
+  customTitle() {
+    return this.stat === 'sum' ? '區段累積雨量' : `區段${this.stat === 'max' ? '最大' : '最小'}${this.v.name}`;
+  }
+
   legend() {
     const s = SCALES[this.v.scale];
-    const title = this.aggMode ? `${this.v.name} 過去 ${this.hours} 小時${this.stat === 'max' ? '最大' : '最小'}` : this.v.name;
+    const title = this.customMode ? this.customTitle() : this.aggMode ? `${this.v.name} 過去 ${this.hours} 小時${this.stat === 'max' ? '最大' : '最小'}` : this.v.name;
     if (this.v.scale === 'wind') return beaufortLegendHTML(`測站 ${title}（蒲福風級）`, s.colors);
     return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks);
   }

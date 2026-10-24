@@ -6,6 +6,7 @@ import { SatelliteLayer } from './layers/satellite.js';
 import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
 import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js';
+import { localToStamp, stampToLocal, twMidnight } from './layers/station_custom.js';
 import { StationCard } from './station_card.js';
 import { defaultCfg, EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
 import { getJSON } from './data.js';
@@ -573,15 +574,31 @@ function bindLegendScale() {
 
 function bindStationUI() {
   const vSel = $('st-var');
-  vSel.innerHTML = Object.entries(STATION_VARS).map(([k, v]) => `<option value="${k}">${v.name}${v.agg ? '' : '（僅當前值）'}</option>`).join('');
+  vSel.innerHTML = Object.entries(STATION_VARS).map(([k, v]) => `<option value="${k}">${v.name}${v.agg || v.rain ? '' : '（僅當前值）'}</option>`).join('');
   vSel.value = stations.variable;
+  const custom = prefs.get('stCustom') ?? {};
+  $('st-cstart').value = stampToLocal(custom.start ?? '');
+  $('st-cend').value = stampToLocal(custom.end ?? '');
   const apply = async () => {
     const v = STATION_VARS[vSel.value];
-    if (!v.agg) $('st-stat').value = 'now';
-    $('st-rank-order').value = $('st-stat').value === 'min' ? 'asc' : 'desc';   // 最小值排行預設低到高
-    $('st-stat').disabled = !v.agg;
-    $('st-hours').disabled = !v.agg || $('st-stat').value === 'now';
-    const changed = await stations.configure({ variable: vSel.value, stat: $('st-stat').value, hours: +$('st-hours').value });
+    const statSel = $('st-stat'), hSel = $('st-hours');
+    // 過去最大 / 最小:有預先統計的變數;區段累積:雨量
+    for (const o of statSel.options) o.disabled = o.value === 'sum' ? !v.rain : o.value !== 'now' && !v.agg;
+    if (statSel.selectedOptions[0].disabled) statSel.value = 'now';
+    const sum = statSel.value === 'sum';
+    if (sum) hSel.value = 'custom';
+    $('st-rank-order').value = statSel.value === 'min' ? 'asc' : 'desc';   // 最小值排行預設低到高
+    statSel.disabled = !v.agg && !v.rain;
+    hSel.disabled = statSel.value === 'now' || sum;
+    const isCustom = statSel.value !== 'now' && hSel.value === 'custom';
+    $('st-custom').hidden = !isCustom;
+    if (isCustom && !$('st-cstart').value) {   // 預設起點:最新資料那天(台灣)00:00
+      $('st-cstart').value = stampToLocal(twMidnight(stations.index?.latest ?? nowStamp()));
+    }
+    const range = { start: localToStamp($('st-cstart').value), end: localToStamp($('st-cend').value) };
+    prefs.set('stCustom', range);
+    const changed = await stations.configure({ variable: vSel.value, stat: statSel.value,
+      hours: hSel.value === 'custom' ? 'custom' : +hSel.value, custom: range });
     if (changed) {           // 最大 / 最小有自己的時間列表(缺漏不同)
       buildSlots();
       refreshSlider();
@@ -589,6 +606,9 @@ function bindStationUI() {
     updateLegend();
     render();
   };
+  $('st-cstart').onchange = apply;
+  $('st-cend').onchange = apply;
+  $('st-cend-clear').onclick = () => { $('st-cend').value = ''; apply(); };
   vSel.onchange = apply;
   $('st-stat').onchange = apply;
   $('st-hours').onchange = apply;

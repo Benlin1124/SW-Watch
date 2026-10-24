@@ -269,23 +269,22 @@ def legend_blocks(fig, rect, colors, labels, title, cell_text=None, label_at_edg
 
 
 def make_figure(geo, title, period, source):
-    fig = plt.figure(figsize=(9, 10), dpi=200)
+    """只有地圖(不放排行表);金門、馬祖小圖放在地圖框內左上的海面。"""
+    fig = plt.figure(figsize=(6.6, 10), dpi=200)
     fig.patch.set_facecolor("white")
-    ax = fig.add_axes([0.03, 0.12, 0.62, 0.78])
-    fig.text(0.03, 0.965, title, fontsize=17, fontweight="bold", va="top")
-    fig.text(0.03, 0.925, period, fontsize=10.5, va="top", color="#333")
-    fig.text(0.03, 0.012, source, fontsize=7.5, color="#666", va="bottom")
+    ax = fig.add_axes([0.09, 0.12, 0.815, 0.78])
+    fig.text(0.09, 0.965, title, fontsize=17, fontweight="bold", va="top")
+    fig.text(0.09, 0.925, period, fontsize=10.5, va="top", color="#333")
+    fig.text(0.09, 0.012, source, fontsize=7, color="#666", va="bottom")
     draw_base(ax, geo, MAIN)
-    insets, top = {}, 0.885
-    for name, ext in INSETS.items():                # 金門、馬祖小圖放左上
-        w = 0.17
-        h = w * (ext[3] - ext[2]) / ((ext[1] - ext[0]) * np.cos(np.deg2rad((ext[2] + ext[3]) / 2))) * 9 / 10
-        top -= h + 0.01
-        iax = fig.add_axes([0.035, top, w, h])
-        draw_base(iax, geo, ext)
+    insets = {}
+    for name, rect in zip(INSETS, ([0.07, 0.80, 0.30, 0.17], [0.07, 0.585, 0.30, 0.20])):
+        iax = ax.inset_axes(rect)
+        draw_base(iax, geo, INSETS[name])
+        iax.set_zorder(10)
         for sp in iax.spines.values():
             sp.set_edgecolor("#888")
-        iax.text(0.03, 0.95, name, transform=iax.transAxes, fontsize=8, va="top", zorder=9)
+        iax.text(0.04, 0.95, name, transform=iax.transAxes, fontsize=8, va="top", zorder=9)
         insets[name] = iax
     return fig, ax, insets
 
@@ -293,24 +292,6 @@ def make_figure(geo, title, period, source):
 def finish(ax, insets, geo):
     for a in [ax, *insets.values()]:
         draw_overlay(a, geo)
-
-
-def ranking(fig, rows, title, unit, fmt):
-    """右側排行表:站名(縣市)、數值、發生時間。"""
-    ax = fig.add_axes([0.67, 0.12, 0.31, 0.78])
-    ax.axis("off")
-    ax.text(0, 1, title, fontsize=11, fontweight="bold", va="top", transform=ax.transAxes)
-    y = 0.955
-    for k, r in enumerate(rows):
-        ax.text(0.0, y, f"{k + 1:>2}", fontsize=8.5, va="top", color="#666", transform=ax.transAxes)
-        ax.text(0.09, y, r["name"], fontsize=9, va="top", fontweight="bold", transform=ax.transAxes)
-        ax.text(0.09, y - 0.022, f'{r["county"]}{r["town"]}', fontsize=7, va="top", color="#666",
-                transform=ax.transAxes)
-        ax.text(1.0, y, f'{fmt(r["v"])} {unit}', fontsize=9.5, va="top", ha="right", fontweight="bold",
-                transform=ax.transAxes)
-        if r.get("sub"):
-            ax.text(1.0, y - 0.022, r["sub"], fontsize=7, va="top", ha="right", color="#666", transform=ax.transAxes)
-        y -= 0.05
 
 
 def label_top(axes, pts, fmt, n, gap=0.12):
@@ -355,8 +336,7 @@ def plot_rain(path, geo, stations, total, title, period, source, top):
     finish(ax, insets, geo)
     pts = sorted(({**s, "v": v} for s, v in zip(stations, total) if np.isfinite(v)), key=lambda p: -p["v"])
     label_top(pick_axes(ax, insets), pts, lambda v: f"{v:.0f}", top)
-    ranking(fig, pts[:16], "累積雨量排行", "mm", lambda v: f"{v:.1f}")
-    legend_blocks(fig, [0.05, 0.035, 0.58, 0.06], RAIN_COLORS, [str(x) for x in RAIN_LEVELS], "累積雨量 (mm)")
+    legend_blocks(fig, [0.09, 0.035, 0.815, 0.06], RAIN_COLORS, [str(x) for x in RAIN_LEVELS], "累積雨量 (mm)")
     fig.savefig(path, facecolor="white")
     plt.close(fig)
 
@@ -379,9 +359,7 @@ def plot_wind(path, geo, stations, w, title, period, source, top, label):
     pts = sorted(({**s, "v": x, "at": tw(w["at"][i], "%m/%d %H:%M") if w["at"][i] else ""}
                   for i, (s, x) in enumerate(zip(stations, v)) if np.isfinite(x)), key=lambda p: -p["v"])
     label_top(pick_axes(ax, insets), pts, lambda x: f"{x:.1f}", top)
-    ranking(fig, [{**p, "sub": f'{beaufort(p["v"])} 級　{p["at"]}'} for p in pts[:16]], f"{label}排行", "m/s",
-            lambda x: f"{x:.1f}")
-    legend_blocks(fig, [0.05, 0.035, 0.58, 0.06], WIND_COLORS, [f"{x:g}" for x in BEAUFORT],
+    legend_blocks(fig, [0.09, 0.035, 0.815, 0.06], WIND_COLORS, [f"{x:g}" for x in BEAUFORT],
                   f"{label}  蒲福風級 / 下界風速 (m/s)", cell_text=[str(k) for k in range(len(WIND_COLORS))],
                   label_at_edges=True)
     fig.savefig(path, facecolor="white")
