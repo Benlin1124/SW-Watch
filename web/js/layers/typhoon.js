@@ -20,12 +20,14 @@ function destination(lon, lat, bearing, km) {
   return [(l2 * 180) / Math.PI, (p2 * 180) / Math.PI];
 }
 
-/** 暴風圈多邊形;r = 半徑(km)或四象限 [NE, SE, SW, NW] */
+/** 暴風圈多邊形;r = 半徑(km)或四象限 [NE, SE, SW, NW]。
+ *  四象限:每個象限各畫 0–90° 的圓弧(兩端都畫),象限交界(正北 / 東 / 南 / 西)同一方位角接兩個半徑 → 交界是徑向直線 */
 function windCircle(lon, lat, r) {
   const ring = [];
-  for (let a = 0; a < 360; a += 4) {
-    const rr = Array.isArray(r) ? r[Math.min(3, Math.floor(a / 90))] : r;
-    ring.push(destination(lon, lat, a, rr));
+  if (Array.isArray(r)) {
+    for (let q = 0; q < 4; q++) for (let a = q * 90; a <= q * 90 + 90; a += 3) ring.push(destination(lon, lat, a, r[q]));
+  } else {
+    for (let a = 0; a < 360; a += 3) ring.push(destination(lon, lat, a, r));
   }
   ring.push(ring[0]);
   return { type: 'Polygon', coordinates: [ring] };
@@ -95,6 +97,13 @@ export class TyphoonLayer {
   visible = true;
   show_cone = true;
   circles = { now: true, fcst: true, past: false };   // 暴風圈:目前 / 各預報點 / 過去各定位
+  circleShape = 'quad';    // 暴風圈形狀:quad 四象限(沒有象限資料時用平均)| avg 平均半徑
+
+  /** 某點的 7 級 / 10 級暴風圈半徑:依形狀選四象限或平均 */
+  radii(p) {
+    const quad = this.circleShape === 'quad';
+    return [quad ? p.r15q ?? p.r15 : p.r15, quad ? p.r25q ?? p.r25 : p.r25];
+  }
   circleStyle = { nowWidth: 1.8, fcstWidth: 1, nowFill: 20, fcstFill: 4 };   // 線寬(px)、填色濃度(%):目前 / 預報(過去各點同預報)
   theme = 'light';
   show_names = true;       // 目前位置旁的颱風名稱
@@ -222,7 +231,7 @@ export class TyphoonLayer {
   setProbe(list, label = true) {
     const feats = [];
     for (const { q } of list) {
-      const r15 = q.r15q ?? q.r15, r25 = q.r25q ?? q.r25;
+      const [r15, r25] = this.radii(q);
       if (this.show_cone && q.r70 > 0) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, q.r70), properties: { k: 'c70' } });
       if (r15) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r15), properties: { k: 'c15' } });
       if (r25) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r25), properties: { k: 'c25' } });
@@ -311,7 +320,7 @@ export class TyphoonLayer {
       }
       // 暴風圈:過去各定位(有四象限就用四象限)、目前位置、各預報點
       const addCircles = (p, kind) => {
-        const r15 = p.r15q ?? p.r15, r25 = p.r25q ?? p.r25;
+        const [r15, r25] = this.radii(p);
         if (r15) c15.push({ type: 'Feature', geometry: windCircle(p.lon, p.lat, r15), properties: { kind } });
         if (r25) c25.push({ type: 'Feature', geometry: windCircle(p.lon, p.lat, r25), properties: { kind } });
       };

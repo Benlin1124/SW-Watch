@@ -846,6 +846,7 @@ function bindUI() {
   for (const c of document.querySelectorAll('[data-ty-circle]')) {
     c.onchange = () => { typhoon.circles[c.dataset.tyCircle] = c.checked; typhoon.draw(); };
   }
+  $('ty-circle-shape').onchange = (e) => { typhoon.circleShape = e.target.value; typhoon.draw(); };
   // 暴風圈:線寬、填色濃度,目前 / 預報分開設(過去各點同預報)
   const tyStyle = () => typhoon.setCircleStyle({
     nowWidth: +$('ty-w-now').value || 0, fcstWidth: +$('ty-w-fcst').value || 0,
