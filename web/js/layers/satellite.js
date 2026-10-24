@@ -64,9 +64,10 @@ export class SatelliteLayer {
   /** 換頻道 / 色階;回傳 true 表示時間列表換了(時間軸要重建) */
   async configure({ band = this.band, style = this.style }) {
     const changed = band !== this.band;
-    Object.assign(this, { band, style });
+    // 先等新頻道的 index 到了,再一起換 band 與 index:等待期間若有 render 呼叫 frame(),
+    // 不能出現「band 已是 B07、index 還是 B13」,否則會用 B13 的 offset(−100)解讀 B07(−90),整張偏冷 10 °C 並被快取
     if (!this.indexes[band]) this.indexes[band] = await this.bandIndex(band).catch(() => null);
-    this.index = this.indexes[band];
+    Object.assign(this, { band, style, index: this.indexes[band] });
     this.current = null;
     return changed;
   }
@@ -77,11 +78,12 @@ export class SatelliteLayer {
   }
 
   frame(stamp) {
-    const key = `${this.band}|${this.style}|${stamp}`;
+    const { band, style } = this, key = `${band}|${style}|${stamp}`;
     if (!this.cache.has(key)) {
-      const g = this.index.grid;
-      const p = SAT_BANDS[this.band].from ? this.fogFrame(stamp, g)
-        : getGrid(this.path, stamp, g).then(async (raw) => ({ raw, url: await renderPNG(raw, g, satLUT(g, this.band, this.style)) }));
+      const g = this.indexes[band]?.grid;              // 一定用這個頻道自己的 grid(scale / offset)
+      if (!g) return Promise.reject(new Error(`satellite ${band} index 尚未載入`));
+      const p = SAT_BANDS[band].from ? this.fogFrame(stamp, g)
+        : getGrid(`satellite/${band}`, stamp, g).then(async (raw) => ({ raw, url: await renderPNG(raw, g, satLUT(g, band, style)) }));
       p.catch(() => this.cache.delete(key));
       this.cache.set(key, p);
       const max = SAT_BANDS[this.band].cache;
