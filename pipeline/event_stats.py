@@ -1,8 +1,9 @@
 """事件統計圖:一段期間(例如颱風影響期間)各測站的總累積雨量、最大平均風、最大陣風 → PNG + CSV。
 色階、風級、底圖與網頁相同(雨量用網頁 ECMWF 長時累積的色階,風用蒲福風級)。
-  python -m pipeline.event_stats --start "2026-10-22 00:00" [--end "2026-10-25 12:00"] [--name 薔琵颱風] [--r2]
+  python -m pipeline.event_stats --start "2026-10-22 00:00" [--end "2026-10-25 12:00"] [--name 薔琵颱風] [--local]
 時間為台灣時間;--end 省略 = 最新一筆快照。輸出到 charts/{起}_{迄}/。
---r2:本機 data/stations 沒有的快照從 R2 下載(存在 pipeline/.cache/stations/)。
+本機 data/stations 沒有的快照自動從 R2 下載(存在 pipeline/.cache/stations/),任何一台電腦都能跑;
+--local 只用本機資料。
 
 總累積雨量:每站把期間切成首尾相接的幾段,每段用某一筆快照的累積雨量欄位
 (10 分鐘、1、3、6、12、24、48、72 小時、今日累積),段數最少的組合相加。
@@ -19,6 +20,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import requests
+import shapely
+from shapely.geometry import mapping, shape
 from matplotlib.collections import PatchCollection
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Polygon as MplPolygon
@@ -180,10 +183,26 @@ def load_geo(name):
     return json.loads((BASEMAP / f"{name}.json").read_text(encoding="utf-8"))
 
 
+def taiwan_land():
+    """陸地填色用的台灣縣市多邊形(NCDR,同 IDW 陸地遮罩;網頁的 taiwan.json 只有界線),第一次下載後快取。"""
+    path = config.CACHE_DIR / "taiwan_county.geojson"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(requests.get(config.TAIWAN_GEOJSON_URL, timeout=120).text, encoding="utf-8")
+    gj = json.loads(path.read_text(encoding="utf-8"))
+    for f in gj["features"]:
+        f["geometry"] = mapping(shapely.make_valid(shape(f["geometry"])).simplify(0.0005))
+    return gj
+
+
 def _rings(geom):
-    polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
-    for p in polys:
-        yield np.asarray(p[0])
+    """各多邊形的外圈(縣市界可能是 GeometryCollection,用 shapely 拆)。"""
+    g = shapely.make_valid(shape(geom))
+    for part in getattr(g, "geoms", [g]):
+        if part.geom_type == "Polygon":
+            yield np.asarray(part.exterior.coords)
+        elif part.geom_type in ("MultiPolygon", "GeometryCollection"):
+            yield from _rings(mapping(part))
 
 
 def _lines(geom):
@@ -201,7 +220,7 @@ def _lines(geom):
 
 
 def draw_base(ax, geo, extent):
-    """底圖:白色海洋、淺灰陸地(與網頁淺色主題相同)。"""
+    """底圖:白色海洋、淺灰陸地(與網頁淺色主題相同);陸地只用台灣縣市界(NCDR)。"""
     x0, x1, y0, y1 = extent
     ax.set_xlim(x0, x1)
     ax.set_ylim(y0, y1)
@@ -214,11 +233,10 @@ def draw_base(ax, geo, extent):
 
 
 def draw_overlay(ax, geo):
-    """海岸線、縣市界疊在資料上面(同網頁)。"""
-    for name, color, lw in (("coast", LIGHT["coast"], 0.7), ("taiwan", LIGHT["county"], 0.45)):
-        for f in geo[name]["features"]:
-            for c in _lines(f["geometry"]):
-                ax.plot(c[:, 0], c[:, 1], color=color, lw=lw, zorder=5)
+    """縣市界(含海岸)疊在資料上面;只用台灣的縣市界,不畫其他國家。"""
+    for f in geo["taiwan"]["features"]:
+        for c in _lines(f["geometry"]):
+            ax.plot(c[:, 0], c[:, 1], color=LIGHT["county"], lw=0.5, zorder=5)
 
 
 def beaufort(ms):
@@ -383,18 +401,18 @@ def main():
     ap.add_argument("--end", help="台灣時間;省略 = 最新一筆快照")
     ap.add_argument("--name", default="颱風影響期間", help="標題前綴,例如 薔琵颱風")
     ap.add_argument("--top", type=int, default=10, help="地圖上標數值的站數")
-    ap.add_argument("--r2", action="store_true", help="本機沒有的快照從 R2 下載")
+    ap.add_argument("--local", action="store_true", help="只用本機 data/stations,不從 R2 補(排程那台電腦可用)")
     a = ap.parse_args()
     from matplotlib import font_manager
     have = {f.name for f in font_manager.fontManager.ttflist}
     plt.rcParams["font.family"] = [f for f in FONT if f in have] or ["sans-serif"]
 
     start = to_stamp(parse_tw(a.start))
-    times = snapshot_times(a.r2)
+    times = snapshot_times(not a.local)
     end = to_stamp(parse_tw(a.end)) if a.end else times[-1]
     end = max([t for t in times if t <= end], default=end)
     print(f"期間 {tw(start)} – {tw(end)}(台灣)")
-    times, snaps, meta, col = collect(start, end, a.r2)
+    times, snaps, meta, col = collect(start, end, not a.local)
     print(f"快照 {len(snaps)} 筆(應有 {int((stamp_dt(end) - stamp_dt(start)).total_seconds() // 600)} 筆),測站 {len(col)}")
     stations = [None] * len(col)
     for sid, i in col.items():
@@ -404,7 +422,7 @@ def main():
     wind = max_wind(start, end, snaps, col)
     print(f"雨量:{int(np.isfinite(total).sum())} 站接得起來;最多 {np.nanmax(total):.1f} mm")
 
-    geo = {k: load_geo(k) for k in ("land", "coast", "taiwan")}
+    geo = {"land": taiwan_land(), "taiwan": load_geo("taiwan")}
     out = OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}"
     out.mkdir(parents=True, exist_ok=True)
     period = f"{tw(start)} – {tw(end)}（台灣時間）"
