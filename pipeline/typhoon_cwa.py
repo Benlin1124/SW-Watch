@@ -72,9 +72,15 @@ def _round_geom(g):
     return mapping(shapely.set_precision(g, 0.0001))
 
 
+def _fixes(data):
+    """AnalysisData / ForecastData 的 Fix:只有一筆時 CWA 給 dict 不是 list。"""
+    f = (data or {}).get("Fix") or []
+    return f if isinstance(f, list) else [f]
+
+
 def convert_tc(tc):
     past = []
-    for f in (tc.get("AnalysisData") or {}).get("Fix") or []:
+    for f in _fixes(tc.get("AnalysisData")):
         r15, q15 = _radii(f.get("Circle15ms"))
         r25, q25 = _radii(f.get("Circle25ms"))
         past.append(dict(
@@ -86,7 +92,7 @@ def convert_tc(tc):
     past.sort(key=lambda p: p["t"])
 
     fcst, init = [], None
-    for f in (tc.get("ForecastData") or {}).get("Fix") or []:
+    for f in _fixes(tc.get("ForecastData")):
         init = utc_stamp(f["InitialTime"])
         r15, _ = _radii(f.get("Circle15ms"))
         r25, _ = _radii(f.get("Circle25ms"))

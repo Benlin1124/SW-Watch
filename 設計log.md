@@ -746,3 +746,7 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 修正(`typhoon_cwa.carry_over`):存檔前和前一報(初始時間較早的最近一檔)比對,新一報沒有的颱風沿用前報內容,標 `carried: true`,保留它自己的 `fcst_init`(前端預報時間本來就以各颱風自己的 `fcst_init` 計算)。
 - 沿用上限 `CARRY_HOURS = 12`(以該颱風自己的預報初始時間算),超過就視為已不發布,避免消散的颱風一直留著。
 - 往回找 CARRY_HOURS 內的多檔(每個颱風取最近一次出現),不只前一檔:中間已存、漏掉煙花的 09Z 檔不影響之後的報,不需要重建;只有 09Z 那一檔本身維持原樣(要補可跑 `python -m pipeline.typhoon_cwa --rebuild`,非必要)。
+
+## 2026-10-24 修正:颱風只有一筆定位 / 預報時轉檔失敗
+- 新颱風剛編號(例如煙花)時 `AnalysisData.Fix` 只有一筆,CWA 給 dict 不是 list,`--rebuild` 迴圈拿到字串 → `AttributeError: 'str' object has no attribute 'get'`。
+- `_fixes()` 統一轉成 list(AnalysisData、ForecastData 都用)。
