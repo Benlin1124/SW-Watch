@@ -55,7 +55,8 @@ function ramp(anchors, n) {
   });
 }
 
-export const BEAUFORT = [0, 0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7, 37.0, 41.5, 46.2, 51.0, 56.1];
+// 最後的 61.3 = 17 級上界;61.3 以上(超過 17 級)另一色,標 >17
+export const BEAUFORT = [0, 0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7, 37.0, 41.5, 46.2, 51.0, 56.1, 61.3];
 
 /** 深色底用白字 */
 const isDark = (hex) => { const [r, g, b] = hexToRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b < 140; };
@@ -67,9 +68,12 @@ export function beaufort(ms) {
   return k;
 }
 
+/** 風級顯示文字:超過 17 級(61.3 以上)為 >17 */
+export const bfLabel = (ms) => { const k = beaufort(ms); return k > 17 ? '>17' : String(k); };
+
 /** 風級圖例:每級一格,上排級數、下排該級下界風速 */
 export function beaufortLegendHTML(title, colors) {
-  const cell = (c, k) => `<span style="background:${c};width:28px;height:20px;text-align:center;font-size:13px;font-weight:700;line-height:20px;color:${isDark(c) ? '#fff' : '#222'}">${k}</span>`;
+  const cell = (c, k) => `<span style="background:${c};width:28px;height:20px;text-align:center;font-size:${k > 17 ? 11 : 13}px;font-weight:700;line-height:20px;color:${isDark(c) ? '#fff' : '#222'}">${k > 17 ? '>17' : k}</span>`;
   const ms = BEAUFORT.map((v) => `<span style="width:28px;font-size:11px;transform:translateX(-8px)">${v}</span>`).join('');
   return `<div class="legend-title">${title}</div><div class="legend-bar">${colors.map(cell).join('')}</div>
     <div class="legend-labels">${ms}</div>`;
@@ -95,7 +99,7 @@ export const SCALES = {
   pres: { levels: [920, 930, 940, 950, 960, 970, 980, 985, 990, 995, 1000, 1004, 1008, 1012, 1016, 1020, 1024, 1028, 1032],
     colors: ramp(['#2d0a3e', '#7a0177', '#c51b8a', '#d7301f', '#f39a2d', '#f7e65a', '#9be27a', '#6ec6f0', '#2f6bd9'], 18) },
   // 蒲福風級(氣象署 0–17 級):levels[k] = 第 k 級的下界(m/s),一級一色
-  // 分組:0–4 藍、5–6 綠、7–9 黃、10–11 紅、12–13 紫、14–15 深紫、16 以上更深
+  // 分組:0–4 藍、5–6 綠、7–9 黃、10–11 紅、12–13 紫、14–15 深紫、16–17 更深、>17(61.3 以上)灰
   wind: { levels: BEAUFORT,
     colors: ['#eef5fb', '#c6dbef', '#9ecae1', '#6baed6', '#2171b5',
       '#74c476', '#238b45',
@@ -103,7 +107,8 @@ export const SCALES = {
       '#ef5350', '#b71c1c',
       '#ce93d8', '#9c27b0',
       '#6a1b9a', '#4a148c',
-      '#2a0a4a', '#14001f'] },
+      '#2a0a4a', '#14001f',
+      '#7a7a7a'] },   // >17(61.3 以上)
 };
 
 /** MapLibre step 運算式:值 → 顏色(低於第一級用第一色) */

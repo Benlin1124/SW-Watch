@@ -1,7 +1,7 @@
 // 測站資訊卡:點測站(或搜尋、排行榜)打開;顯示時間軸當下各變數,與近 72 小時折線圖(uPlot)
 // 時序資料:stations/recent/{縣市名 UTF-8 hex}.json.gz(pipeline/station_recent.py),一個縣市一個檔
 import { getJSON } from './data.js';
-import { beaufort } from './colormaps.js';
+import { bfLabel } from './colormaps.js';
 import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
@@ -11,7 +11,7 @@ const HOURS = [1, 3, 6, 12, 24, 48, 72];
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
 const countyKey = (c) => [...new TextEncoder().encode(c || '其他')].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fmt = (x, d = 1) => (x == null ? '—' : (+x).toFixed(d));
-const windTxt = (x) => (x == null ? '—' : `${fmt(x)} m/s（${beaufort(x)} 級）`);
+const windTxt = (x) => (x == null ? '—' : `${fmt(x)} m/s（${bfLabel(x)} 級）`);
 
 // 圖表分頁:x = 'h'(整點)或 '10'(10 分鐘);series 依序畫
 const TABS = {
@@ -165,7 +165,7 @@ export class StationCard {
         label: s.label, stroke: s.stroke, width: s.bars ? 0 : 1.6, fill: s.fill, scale: s.scale ?? 'y',
         paths: s.bars ? uPlot.paths.bars({ size: [0.9, 8] }) : undefined,
         points: { show: tab.x === 'h' || this.hours <= 6, size: 4 },
-        value: (u, v) => (v == null ? '—' : s.wind ? `${v.toFixed(1)}（${beaufort(v)}級）` : `${v} ${s.unit}`),
+        value: (u, v) => (v == null ? '—' : s.wind ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v} ${s.unit}`),
       });
       data.push(keep.map((i) => st[s.key][i]));
       if (!scales[s.scale ?? 'y']) scales[s.scale ?? 'y'] = { auto: true, range: s.bars || s.scale === 'r1h' ? (u, lo, hi) => [0, Math.max(hi, 1)] : undefined };

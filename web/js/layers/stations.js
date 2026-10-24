@@ -1,7 +1,7 @@
 // 測站圖層:可切換變數;當前值,或過去 1–72 小時最大 / 最小(pipeline/station_agg.py 預先算好)
 // 圓點依色階上色;風速、陣風改畫箭頭(指向風吹去的方向);放大後在點旁標數值(HTML marker,不需字型檔)
 import { getIndex, getJSON } from '../data.js';
-import { beaufort, beaufortLegendHTML, legendHTML, SCALES, stepExpr } from '../colormaps.js';
+import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr } from '../colormaps.js';
 import { diffMin, fmtTW, latestLE } from '../time.js';
 import { customExtreme, customSum } from './station_custom.js';
 
@@ -347,7 +347,7 @@ export class StationLayer {
       if (++n > LABEL_MAX) break;
       const el = document.createElement('div');
       el.className = 'st-label';
-      el.textContent = this.fmt(ft.properties.v) + (this.v.scale === 'wind' ? `｜${beaufort(ft.properties.v)}級` : '')
+      el.textContent = this.fmt(ft.properties.v) + (this.v.scale === 'wind' ? `｜${bfLabel(ft.properties.v)}級` : '')
         + (ft.properties.gt ? ` @${this.fmtAt(ft.properties.gt)}` : '');
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'left', offset: [7, 0], opacity: String(this.opacity) }).setLngLat([lon, lat]).addTo(this.map));
     }
@@ -360,7 +360,7 @@ export class StationLayer {
     const alt = p.alt != null && p.alt !== 'null' ? `　${p.alt} m` : '';
     return `<div class="popup-title">${p.name}（${p.id}）</div>
       <div>${p.county}${p.town}${alt}</div>
-      <div>${what}：<b>${this.fmt(+p.v)}</b> ${v.unit}${v.scale === 'wind' ? `（<b>${beaufort(+p.v)} 級</b>）` : ''}</div>
+      <div>${what}：<b>${this.fmt(+p.v)}</b> ${v.unit}${v.scale === 'wind' ? `（<b>${bfLabel(+p.v)} 級</b>）` : ''}</div>
       ${p.gt ? `<div>發生時間：<b>${fmtTW(p.gt)}</b>（台灣）</div>` : ''}
       <div style="color:var(--muted)">${when}</div>`;
   }
