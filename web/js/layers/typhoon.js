@@ -34,8 +34,11 @@ function windCircle(lon, lat, r) {
 }
 
 // 氣象署強度分類(近中心最大風速 m/s)
-export function category(wind) {
-  if (wind == null) return { name: '—', color: '#bdbdbd' };
+// state(pipeline 由氣象署 StateTransfer 判斷):ext 溫帶氣旋、low 低氣壓、td 熱帶性低氣壓
+export function category(wind, state) {
+  if (state === 'ext') return { name: '溫帶氣旋', color: '#9e9e9e' };
+  if (state === 'low' || (wind == null && state !== 'td')) return { name: '低氣壓', color: '#ffffff' };
+  if (wind == null) return { name: '熱帶性低氣壓', color: '#4fc3f7' };
   if (wind >= 51.0) return { name: '強烈颱風', color: '#e53935' };
   if (wind >= 32.7) return { name: '中度颱風', color: '#fb8c00' };
   if (wind >= 17.2) return { name: '輕度颱風', color: '#fdd835' };
@@ -55,6 +58,7 @@ function between(a, b, f) {
   if (f >= 1) return { ...b, exact: true };
   const q = { ms: lerp(a.ms, b.ms, f), lon: lerp(a.lon, b.lon, f), lat: lerp(a.lat, b.lat, f), kind: b.kind, init: b.init, exact: false };
   for (const k of SCALAR) q[k] = lerp(a[k], b[k], f);
+  q.state = f < 0.5 ? a.state : b.state;
   for (const k of ['r15q', 'r25q']) if (a[k] && b[k]) q[k] = a[k].map((x, i) => lerp(x, b[k][i], f));
   q.t = toStamp(new Date(Math.round(q.ms / 60e3) * 60e3));
   if (q.kind === 'fcst') q.tau = Math.round(((q.ms - toDate(q.init).getTime()) / 36e5) * 10) / 10;
@@ -75,7 +79,7 @@ function popupHTML(name, p, kind) {
   if (p.exact === false) {
     p = { ...p, wind: round(p.wind), gust: round(p.gust), pres: round(p.pres), r15: round(p.r15), r25: round(p.r25), r70: round(p.r70) };
   }
-  const c = category(p.wind);
+  const c = category(p.wind, p.state);
   const ip = p.exact === false;
   const time = kind === 'past'
     ? `${fmtTW(p.t, 'full')}（${ip ? '實際路徑內插' : '實際位置'}）`
@@ -236,7 +240,7 @@ export class TyphoonLayer {
       if (cone && this.show_cone && q.r70 > 0) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, q.r70), properties: { k: 'c70' } });
       if (r15) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r15), properties: { k: 'c15' } });
       if (r25) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r25), properties: { k: 'c25' } });
-      feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [q.lon, q.lat] }, properties: { color: category(q.wind).color } });
+      feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [q.lon, q.lat] }, properties: { color: category(q.wind, q.state).color } });
     }
     this.map.getSource('ty-probe')?.setData({ type: 'FeatureCollection', features: feats });
     const shown = label ? list : [];
@@ -315,7 +319,7 @@ export class TyphoonLayer {
       if (pts.length > 1) past.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lon, p.lat]) }, properties: {} });
       pts.forEach((p, i) => past.push({
         type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-        properties: { name, now: i === pts.length - 1, color: category(p.wind).color, json: JSON.stringify(p) },
+        properties: { name, now: i === pts.length - 1, color: category(p.wind, p.state).color, json: JSON.stringify(p) },
       }));
 
       const now = pts[pts.length - 1];
@@ -341,7 +345,7 @@ export class TyphoonLayer {
 
       fp.forEach((p) => fcst.push({
         type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-        properties: { name, color: category(p.wind).color, json: JSON.stringify(p) },
+        properties: { name, color: category(p.wind, p.state).color, json: JSON.stringify(p) },
       }));
 
       if (!this.visible) continue;
@@ -394,7 +398,8 @@ export class TyphoonLayer {
       item(ring('#f9a825'), '7 級風暴風圈'),
       item(ring('#e53935'), '10 級風暴風圈'),
     ].join('');
-    const cats = [10, 20, 40, 55].map((w) => category(w)).map((c) => item(dot(c.color), c.name)).join('');
+    const cats = [[10], [20], [40], [55], [null, 'ext'], [null, 'low']].map(([w, s]) => category(w, s))
+      .map((c) => item(dot(c.color), c.name)).join('');
     return `<div class="legend-title">颱風路徑（氣象署）</div>
       <div style="display:flex;flex-wrap:wrap;row-gap:3px;font-size:12px;max-width:460px">${lines}</div>
       <div style="display:flex;flex-wrap:wrap;row-gap:3px;font-size:12px;margin-top:3px;max-width:460px">${cats}</div>`;

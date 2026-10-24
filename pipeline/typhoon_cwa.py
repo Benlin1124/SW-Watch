@@ -26,6 +26,29 @@ def _num(v):
     return None if x < 0 else x
 
 
+def _state(f):
+    """StateTransfer(例:「變性為溫帶氣旋」「減弱為熱帶性低氣壓」「減弱為低氣壓」)→ 'ext' / 'td' / 'low' / None。"""
+    st = f.get("StateTransfer") or []
+    st = st if isinstance(st, list) else [st]
+    zh = " ".join(x.get("#text", "") if isinstance(x, dict) else str(x) for x in st)
+    if "溫帶" in zh or "EXTRATROPICAL" in zh.upper():
+        return "ext"
+    if "熱帶性低氣壓" in zh or "TROPICAL DEPRESSION" in zh.upper():
+        return "td"
+    if "低氣壓" in zh or "LOW" in zh.upper():
+        return "low"
+    return None
+
+
+def _with_state(points):
+    """狀態轉變之後的點都沿用(例:48 小時變性為溫帶氣旋,72 小時也是)。"""
+    cur = None
+    for p in points:
+        cur = p.pop("_st") or cur
+        p["state"] = cur
+    return points
+
+
 def _radii(circle):
     """Circle15ms / Circle25ms → (平均半徑, [NE, SE, SW, NW] 或 None),單位 km。"""
     if not circle:
@@ -80,8 +103,9 @@ def convert_tc(tc):
             lat=float(f["CoordinateLatitude"]), wind=_num(f.get("MaxWindSpeed")),
             gust=_num(f.get("MaxGustSpeed")), pres=_num(f.get("Pressure")),
             mv_spd=_num(f.get("MovingSpeed")), mv_dir=f.get("MovingDirection"),
-            r15=r15, r25=r25, r15q=q15, r25q=q25))
+            r15=r15, r25=r25, r15q=q15, r25q=q25, _st=_state(f)))
     past.sort(key=lambda p: p["t"])
+    _with_state(past)
 
     fcst, init = [], None
     for f in (tc.get("ForecastData") or {}).get("Fix") or []:
@@ -92,8 +116,12 @@ def convert_tc(tc):
             tau=int(f["ForecastHour"]), lon=float(f["CoordinateLongitude"]),
             lat=float(f["CoordinateLatitude"]), wind=_num(f.get("MaxWindSpeed")),
             gust=_num(f.get("MaxGustSpeed")), pres=_num(f.get("Pressure")),
-            r15=r15, r25=r25, r70=_num(f.get("Radius70PercentProbability"))))
+            r15=r15, r25=r25, r70=_num(f.get("Radius70PercentProbability")), _st=_state(f)))
     fcst.sort(key=lambda p: p["tau"])
+    _with_state(fcst)
+    if past and past[-1]["state"]:                      # 目前已經是溫帶氣旋 / 低氣壓 → 預報點沿用
+        for p in fcst:
+            p["state"] = p["state"] or past[-1]["state"]
 
     now = past[-1] if past else None
     geo = {}
@@ -136,12 +164,16 @@ def save(od):
 
 
 def rebuild():
-    """清空後從原始歸檔全部重轉。"""
+    """清空後從原始歸檔全部重轉;單獨執行沒有排程 flush,最後自己上傳 R2。"""
+    from . import r2
     for old in (config.DATA_DIR / LAYER).glob("*.json"):
         old.unlink()
     for p in sorted((config.DATA_DIR / "typhoon" / "cwa").glob("*.json.gz")):
         out = save(json.load(gzip.open(p)))
         log.info("typhoon 初始 %s(發布 %s):%s", out["init"], out["issued"], [s["name_zh"] for s in out["storms"]])
+    up, _ = r2.flush()
+    if up:
+        log.info("typhoon 重建:R2 上傳 %d 檔", up)
 
 
 if __name__ == "__main__":

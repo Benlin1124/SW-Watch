@@ -219,7 +219,7 @@ function renderStorms() {
     const now = s.past[s.past.length - 1];
     const div = document.createElement('div');
     div.className = 'storm-item';
-    div.innerHTML = `<div>${s.name_zh ?? ''} ${s.name_en ?? ''}<br><small>${category(now?.wind).name}　${now?.pres ?? '—'} hPa</small></div>`;
+    div.innerHTML = `<div>${s.name_zh ?? ''} ${s.name_en ?? ''}<br><small>${category(now?.wind, now?.state).name}　${now?.pres ?? '—'} hPa</small></div>`;
     const btn = document.createElement('button');
     btn.textContent = '定位';
     btn.onclick = () => typhoon.fitStorm(s.id);
