@@ -1,6 +1,6 @@
 """事件統計圖:一段期間(例如颱風影響期間)各測站的總累積雨量、最大平均風、最大陣風 → PNG + CSV。
 色階、風級、底圖與網頁相同(雨量用網頁 ECMWF 長時累積的色階,風用蒲福風級)。
-  python -m pipeline.event_stats --start "2026-10-22 00:00" [--end "2026-10-25 12:00"] [--name 薔琵颱風] [--local]
+  python -m pipeline.event_stats --start "2026-10-22 00:00" [--end "2026-10-25 12:00"] [--local]
 時間為台灣時間;--end 省略 = 最新一筆快照。輸出到 charts/{起}_{迄}/。
 本機 data/stations 沒有的快照自動從 R2 下載(存在 pipeline/.cache/stations/),任何一台電腦都能跑;
 --local 只用本機資料。
@@ -24,6 +24,7 @@ import requests
 import shapely
 from shapely.geometry import mapping, shape
 from matplotlib.collections import PatchCollection
+from matplotlib.cm import ScalarMappable
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Polygon as MplPolygon
 
@@ -246,37 +247,13 @@ def beaufort(ms):
     return int(np.searchsorted(BEAUFORT, ms, side="right") - 1)
 
 
-def text_color(hex_):
-    r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
-    return "#fff" if 0.299 * r + 0.587 * g + 0.114 * b < 140 else "#222"
-
-
-def legend_blocks(fig, rect, colors, labels, title, cell_text=None, label_at_edges=True):
-    """網頁風格的色塊圖例:一格一色,標籤在格線上(雨量)或格子下方(風級)。"""
-    ax = fig.add_axes(rect)
-    n = len(colors)
-    for i, c in enumerate(colors):
-        ax.add_patch(plt.Rectangle((i, 0), 1, 1, facecolor=c, edgecolor="#555", lw=0.4))
-        if cell_text:
-            ax.text(i + 0.5, 0.5, cell_text[i], ha="center", va="center", fontsize=8, fontweight="bold",
-                    color=text_color(c))
-    for i, lab in enumerate(labels):
-        ax.text(i if label_at_edges else i + 0.5, -0.25, lab, ha="center", va="top", fontsize=7.5)
-    ax.text(0, 1.25, title, ha="left", va="bottom", fontsize=9.5, fontweight="bold")
-    ax.set_xlim(-0.6, n + 0.6)
-    ax.set_ylim(-1.2, 2.2)
-    ax.axis("off")
-
-
-def make_figure(geo, title, period, source):
-    """只有地圖(不放排行表);金門、馬祖小圖放在地圖框內左上的海面。"""
-    fig = plt.figure(figsize=(6.6, 10), dpi=200)
+def make_figure(geo):
+    """純地圖:沒有標題、文字、外框;金門、馬祖小圖放地圖左上海面;色階在右邊。"""
+    fig = plt.figure(figsize=(6.6, 8.4), dpi=200)
     fig.patch.set_facecolor("white")
-    ax = fig.add_axes([0.09, 0.12, 0.815, 0.78])
-    fig.text(0.09, 0.965, title, fontsize=17, fontweight="bold", va="top")
-    fig.text(0.09, 0.925, period, fontsize=10.5, va="top", color="#333")
-    fig.text(0.09, 0.012, source, fontsize=7, color="#666", va="bottom")
+    ax = fig.add_axes([0.01, 0.01, 0.80, 0.98])
     draw_base(ax, geo, MAIN)
+    ax.axis("off")
     insets = {}
     for name, rect in zip(INSETS, ([0.07, 0.80, 0.30, 0.17], [0.07, 0.585, 0.30, 0.20])):
         iax = ax.inset_axes(rect)
@@ -284,7 +261,6 @@ def make_figure(geo, title, period, source):
         iax.set_zorder(10)
         for sp in iax.spines.values():
             sp.set_edgecolor("#888")
-        iax.text(0.04, 0.95, name, transform=iax.transAxes, fontsize=8, va="top", zorder=9)
         insets[name] = iax
     return fig, ax, insets
 
@@ -294,34 +270,20 @@ def finish(ax, insets, geo):
         draw_overlay(a, geo)
 
 
-def label_top(axes, pts, fmt, n, gap=0.12):
-    """依數值由大到小標前 n 站;和已標的站距離小於 gap 度就跳過,避免疊字。"""
-    placed = []
-    for p in pts:
-        if len(placed) >= n:
-            break
-        a = axes(p)
-        if a is None or any(abs(p["lon"] - q["lon"]) < gap and abs(p["lat"] - q["lat"]) < gap * 0.6 for q in placed):
-            continue
-        placed.append(p)
-        a.annotate(fmt(p["v"]), (p["lon"], p["lat"]), xytext=(5, 4), textcoords="offset points", fontsize=7,
-                   fontweight="bold", zorder=8,
-                   bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="#444", lw=0.4, alpha=0.88))
+def colorbar(fig, levels, colors, unit):
+    """右側直式色階:一格一色、等間距,刻度 = 各級下界,上方只標單位。"""
+    cax = fig.add_axes([0.83, 0.12, 0.035, 0.76])
+    cmap = ListedColormap(colors)
+    norm = BoundaryNorm(levels, cmap.N, extend="max" if len(levels) == len(colors) else "neither")
+    cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax, ticks=levels, spacing="uniform")
+    cb.ax.tick_params(labelsize=8, length=0)
+    cb.ax.set_yticklabels([f"{x:g}" for x in levels])
+    cb.outline.set_linewidth(0.5)
+    cax.set_title(unit, fontsize=9, pad=6)
 
 
-def pick_axes(ax, insets):
-    def f(p):
-        if MAIN[0] <= p["lon"] <= MAIN[1] and MAIN[2] <= p["lat"] <= MAIN[3]:
-            return ax
-        for name, ext in INSETS.items():
-            if ext[0] <= p["lon"] <= ext[1] and ext[2] <= p["lat"] <= ext[3]:
-                return insets[name]
-        return None
-    return f
-
-
-def plot_rain(path, geo, stations, total, title, period, source, top):
-    fig, ax, insets = make_figure(geo, title, period, source)
+def plot_rain(path, geo, stations, total):
+    fig, ax, insets = make_figure(geo)
     ok = np.isfinite(total)
     lon = np.array([s["lon"] for s in stations])[ok]
     lat = np.array([s["lat"] for s in stations])[ok]
@@ -334,15 +296,13 @@ def plot_rain(path, geo, stations, total, title, period, source, top):
                    norm=norm, zorder=2)
         a.scatter(lon, lat, s=1.2, c="#333", lw=0, zorder=6)
     finish(ax, insets, geo)
-    pts = sorted(({**s, "v": v} for s, v in zip(stations, total) if np.isfinite(v)), key=lambda p: -p["v"])
-    label_top(pick_axes(ax, insets), pts, lambda v: f"{v:.0f}", top)
-    legend_blocks(fig, [0.09, 0.035, 0.815, 0.06], RAIN_COLORS, [str(x) for x in RAIN_LEVELS], "累積雨量 (mm)")
+    colorbar(fig, RAIN_LEVELS, RAIN_COLORS, "mm")
     fig.savefig(path, facecolor="white")
     plt.close(fig)
 
 
-def plot_wind(path, geo, stations, w, title, period, source, top, label):
-    fig, ax, insets = make_figure(geo, title, period, source)
+def plot_wind(path, geo, stations, w):
+    fig, ax, insets = make_figure(geo)
     v = w["val"]
     ok = np.isfinite(v)
     order = np.argsort(np.where(ok, v, -1))            # 風級高的畫在上面
@@ -356,12 +316,7 @@ def plot_wind(path, geo, stations, w, title, period, source, top, label):
             a.scatter(s["lon"], s["lat"], s=(2 * r) ** 2, c=WIND_COLORS[bf[i]], zorder=6 + bf[i] * 0.01,
                       edgecolors="#fff" if strong else "#333", linewidths=1.2 if strong else 0.35)
     finish(ax, insets, geo)
-    pts = sorted(({**s, "v": x, "at": tw(w["at"][i], "%m/%d %H:%M") if w["at"][i] else ""}
-                  for i, (s, x) in enumerate(zip(stations, v)) if np.isfinite(x)), key=lambda p: -p["v"])
-    label_top(pick_axes(ax, insets), pts, lambda x: f"{x:.1f}", top)
-    legend_blocks(fig, [0.09, 0.035, 0.815, 0.06], WIND_COLORS, [f"{x:g}" for x in BEAUFORT],
-                  f"{label}  蒲福風級 / 下界風速 (m/s)", cell_text=[str(k) for k in range(len(WIND_COLORS))],
-                  label_at_edges=True)
+    colorbar(fig, BEAUFORT, WIND_COLORS, "m/s")
     fig.savefig(path, facecolor="white")
     plt.close(fig)
 
@@ -380,8 +335,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--start", required=True, help='台灣時間,例如 "2026-10-22 00:00"')
     ap.add_argument("--end", help="台灣時間;省略 = 最新一筆快照")
-    ap.add_argument("--name", default="颱風影響期間", help="標題前綴,例如 薔琵颱風")
-    ap.add_argument("--top", type=int, default=10, help="地圖上標數值的站數")
     ap.add_argument("--local", action="store_true", help="只用本機 data/stations,不從 R2 補(排程那台電腦可用)")
     a = ap.parse_args()
     from matplotlib import font_manager
@@ -406,14 +359,9 @@ def main():
     geo = {"land": taiwan_land(), "taiwan": load_geo("taiwan")}
     out = OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}"
     out.mkdir(parents=True, exist_ok=True)
-    period = f"{tw(start)} – {tw(end)}（台灣時間）"
-    source = "資料：中央氣象署 自動氣象站、雨量站（10 分鐘觀測）　製圖：SW-Watch"
-    plot_rain(out / "rain_total.png", geo, stations, total, f"{a.name} 總累積雨量", period,
-              source + "　｜ 測站雨量 IDW 內插，只畫陸地", a.top)
-    plot_wind(out / "wind_max.png", geo, stations, wind["ws"], f"{a.name} 最大平均風", period,
-              source + "　｜ 10 分鐘平均風速", a.top, "最大平均風")
-    plot_wind(out / "gust_max.png", geo, stations, wind["gust"], f"{a.name} 最大陣風", period,
-              source, a.top, "最大陣風")
+    plot_rain(out / "rain_total.png", geo, stations, total)
+    plot_wind(out / "wind_max.png", geo, stations, wind["ws"])
+    plot_wind(out / "gust_max.png", geo, stations, wind["gust"])
     fmt_at = lambda ts: [tw(t, "%m/%d %H:%M") if t else "" for t in ts]
     write_csv(out / "rain_total.csv", stations, {"總累積雨量(mm)": [round(x, 1) if np.isfinite(x) else "" for x in total],
                                                   "使用段數": [int(x) if np.isfinite(x) else "" for x in seg]})
