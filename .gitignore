@@ -15,3 +15,6 @@ __pycache__/
 *金鑰*
 *.key
 *secret*
+
+# 事件統計圖輸出(pipeline.event_stats)
+charts/
