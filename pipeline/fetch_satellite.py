@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from . import config
+from . import config, r2
 from .common import grid_spec, log, read_index, record_status, save_grid, stamp_dt
 
 LAYER = "satellite"
@@ -231,6 +231,8 @@ def run(now=None):
 
 
 def backfill(start, end, bands):
+    """補抓舊時次。單獨執行時沒有排程幫忙 flush,每個時次處理完自己上傳 R2
+    (否則 index 會被排程傳上去、檔案卻留在本機,網頁讀到 404)。"""
     t, end_dt = stamp_dt(start), stamp_dt(end)
     while t <= end_dt:
         stamp = t.strftime("%Y%m%d%H%M")
@@ -243,6 +245,9 @@ def backfill(start, end, bands):
                     process(stamp, b, avail[b])
                 else:
                     log.warning("satellite %s %s:AWS 上沒有完整檔案", b, stamp)
+            up, _ = r2.flush()
+            if up:
+                log.info("satellite 補抓 %s:R2 上傳 %d 檔", stamp, up)
         t += timedelta(minutes=10)
 
 
