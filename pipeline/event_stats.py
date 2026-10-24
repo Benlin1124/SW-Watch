@@ -389,8 +389,9 @@ def region(s):
     return s["county"] or "其他"
 
 
-def write_region_csv(path, stations, vals, label, unit, at=None, alt_max=None, wind=False):
-    """各地區(縣市 + 獨立離島)的最大值與測站;alt_max:只取海拔低於此值的站(海拔不明的不算)。"""
+def region_table(stations, vals, label, unit, at=None, alt_max=None, wind=False):
+    """各地區(縣市 + 獨立離島)的最大值與測站;alt_max:只取海拔低於此值的站(海拔不明的不算)。
+    回傳 (表頭, 各列, 各列的最大值或 None)。"""
     best = {}
     for i, s in enumerate(stations):
         v = vals[i]
@@ -402,20 +403,66 @@ def write_region_csv(path, stations, vals, label, unit, at=None, alt_max=None, w
         if r not in best or v > vals[best[r]]:
             best[r] = i
     order = REGION_ORDER + sorted(set(best) - set(REGION_ORDER))
+    head = ["地區", "鄉鎮", "站名", f"{label}({unit})"] + (["風級"] if wind else []) + (["發生時間"] if at else [])         + ["站號", "海拔(m)"]
+    rows, values = [], []
+    for r in order:
+        if r not in best:
+            if r in REGION_ORDER:                          # 沒有站的地區留空列
+                rows.append([r] + [""] * (len(head) - 1))
+                values.append(None)
+            continue
+        i = best[r]
+        s, v = stations[i], vals[i]
+        rows.append([r, s["town"], s["name"], round(float(v), 1)] + ([bf_label(v)] if wind else [])
+                    + ([tw(at[i], "%m/%d %H:%M") if at[i] else ""] if at else [])
+                    + [s["id"], fmt_alt(s["alt"])])
+        values.append(float(v))
+    return head, rows, values
+
+
+def write_table_csv(path, head, rows):
     with open(path, "w", newline="", encoding="utf-8-sig") as fp:
         wr = csv.writer(fp)
-        head = ["地區", "鄉鎮", f"{label}({unit})"] + (["風級"] if wind else []) + (["發生時間"] if at else []) +             ["站名", "站號", "海拔(m)"]
         wr.writerow(head)
-        for r in order:
-            if r not in best:
-                if r in REGION_ORDER:
-                    wr.writerow([r] + [""] * (len(head) - 1))
+        wr.writerows(rows)
+
+
+def write_xlsx(path, sheets):
+    """地區表 Excel(每個表一個工作表);風的最大值、風級兩欄依蒲福風級色階上色,雨量最大值依雨量色階。
+    sheets:[(工作表名, 表頭, 各列, 各列數值, 色階 'wind' | 'rain')]"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    wb = Workbook()
+    wb.remove(wb.active)
+    for name, head, rows, values, kind in sheets:
+        ws = wb.create_sheet(name)
+        ws.append(head)
+        for c in ws[1]:
+            c.font = Font(bold=True)
+        for row in rows:
+            ws.append(row)
+        levels, colors = (BEAUFORT, WIND_COLORS + [WIND_OVER]) if kind == "wind" else (RAIN_LEVELS, RAIN_COLORS)
+        cols = [3] + ([4] if kind == "wind" else [])      # 0 起算:最大值、風級
+        for k, v in enumerate(values):
+            if v is None:
                 continue
-            i = best[r]
-            s, v = stations[i], vals[i]
-            wr.writerow([r, s["town"], round(float(v), 1)] + ([bf_label(v)] if wind else [])
-                        + ([tw(at[i], "%m/%d %H:%M") if at[i] else ""] if at else [])
-                        + [s["name"], s["id"], fmt_alt(s["alt"])])
+            j = min(max(int(np.searchsorted(levels, v, side="right") - 1), 0), len(colors) - 1)
+            hexc = colors[j]
+            for c in cols:
+                cell = ws.cell(row=k + 2, column=c + 1)
+                cell.fill = PatternFill("solid", fgColor=hexc[1:].upper())
+                cell.font = Font(bold=True, color="FFFFFF" if text_color(hexc) == "#fff" else "222222")
+                cell.alignment = Alignment(horizontal="center")
+        for col in ws.columns:                             # 欄寬依內容(中文算兩格)
+            w = max(sum(2 if ord(ch) > 255 else 1 for ch in str(c.value or "")) for c in col)
+            ws.column_dimensions[col[0].column_letter].width = w + 2
+        ws.freeze_panes = "A2"
+    try:
+        wb.save(path)
+    except OSError:
+        alt = path.with_name(path.stem + "_new" + path.suffix)
+        wb.save(alt)
+        print(f"  {path.name} 被其他程式開著,改存 {alt.name}")
 
 
 def bf_label(ms):
@@ -466,11 +513,16 @@ def main():
         "最大陣風(m/s)": [x if np.isfinite(x) else "" for x in wind["gust"]["val"]],
         "陣風風向(°)": [x if np.isfinite(x) else "" for x in wind["gust"]["dir"]],
         "陣風時間": fmt_at(wind["gust"]["at"])})
-    write_region_csv(out / "county_rain_total.csv", stations, total, "總累積雨量", "mm")
-    write_region_csv(out / "county_wind_max.csv", stations, wind["ws"]["val"], "最大平均風", "m/s",
-                     at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True)
-    write_region_csv(out / "county_gust_max.csv", stations, wind["gust"]["val"], "最大陣風", "m/s",
-                     at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True)
+    tables = [
+        ("總累積雨量", "county_rain_total", region_table(stations, total, "總累積雨量", "mm"), "rain"),
+        ("最大平均風", "county_wind_max", region_table(stations, wind["ws"]["val"], "最大平均風", "m/s",
+                                                   at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True), "wind"),
+        ("最大陣風", "county_gust_max", region_table(stations, wind["gust"]["val"], "最大陣風", "m/s",
+                                                 at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True), "wind"),
+    ]
+    for _, fname, (head, rows, _), _ in tables:
+        write_table_csv(out / f"{fname}.csv", head, rows)
+    write_xlsx(out / "county_stats.xlsx", [(name, *t, kind) for name, _, t, kind in tables])
     print(f"輸出:{out}")
 
 
