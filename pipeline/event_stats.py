@@ -404,7 +404,7 @@ def write_region_csv(path, stations, vals, label, unit, at=None, alt_max=None, w
     order = REGION_ORDER + sorted(set(best) - set(REGION_ORDER))
     with open(path, "w", newline="", encoding="utf-8-sig") as fp:
         wr = csv.writer(fp)
-        head = ["地區", "鄉鎮", f"{label}({unit})"] + (["風級"] if wind else []) + (["發生時間"] if at else []) +             ["站號", "站名", "海拔(m)"]
+        head = ["地區", "鄉鎮", f"{label}({unit})"] + (["風級"] if wind else []) + (["發生時間"] if at else []) +             ["站名", "站號", "海拔(m)"]
         wr.writerow(head)
         for r in order:
             if r not in best:
@@ -415,7 +415,7 @@ def write_region_csv(path, stations, vals, label, unit, at=None, alt_max=None, w
             s, v = stations[i], vals[i]
             wr.writerow([r, s["town"], round(float(v), 1)] + ([bf_label(v)] if wind else [])
                         + ([tw(at[i], "%m/%d %H:%M") if at[i] else ""] if at else [])
-                        + [s["id"], s["name"], fmt_alt(s["alt"])])
+                        + [s["name"], s["id"], fmt_alt(s["alt"])])
 
 
 def bf_label(ms):
