@@ -370,6 +370,8 @@ REGION_ORDER = ["基隆市", "臺北市", "新北市", "桃園市", "新竹市",
                 "雲林縣", "嘉義市", "嘉義縣", "臺南市", "高雄市", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣",
                 "澎湖縣", "金門縣", "連江縣", "基隆嶼", "龜山島", "綠島", "蘭嶼"]
 WIND_ALT_MAX = 500                                      # 縣市風的統計只取海拔低於這個高度的站
+# 縣市風的統計另外排除的山區鄉鎮(海拔雖低於 500 m,但屬山區,例如陽明山周邊)
+WIND_EXCLUDE_TOWNS = {("臺北市", "士林區"), ("臺北市", "北投區")}
 
 
 def fmt_alt(a):
@@ -389,7 +391,7 @@ def region(s):
     return s["county"] or "其他"
 
 
-def region_table(stations, vals, label, unit, at=None, alt_max=None, wind=False):
+def region_table(stations, vals, label, unit, at=None, alt_max=None, wind=False, exclude=()):
     """各地區(縣市 + 獨立離島)的最大值與測站;alt_max:只取海拔低於此值的站(海拔不明的不算)。
     回傳 (表頭, 各列, 各列的最大值或 None)。"""
     best = {}
@@ -398,6 +400,8 @@ def region_table(stations, vals, label, unit, at=None, alt_max=None, wind=False)
         if not np.isfinite(v):
             continue
         if alt_max is not None and (s["alt"] is None or s["alt"] >= alt_max):
+            continue
+        if (s["county"], s["town"]) in exclude:
             continue
         r = region(s)
         if r not in best or v > vals[best[r]]:
@@ -516,9 +520,9 @@ def main():
     tables = [
         ("總累積雨量", "county_rain_total", region_table(stations, total, "總累積雨量", "mm"), "rain"),
         ("最大平均風", "county_wind_max", region_table(stations, wind["ws"]["val"], "最大平均風", "m/s",
-                                                   at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True), "wind"),
+                                                   at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True, exclude=WIND_EXCLUDE_TOWNS), "wind"),
         ("最大陣風", "county_gust_max", region_table(stations, wind["gust"]["val"], "最大陣風", "m/s",
-                                                 at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True), "wind"),
+                                                 at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True, exclude=WIND_EXCLUDE_TOWNS), "wind"),
     ]
     for _, fname, (head, rows, _), _ in tables:
         write_table_csv(out / f"{fname}.csv", head, rows)
