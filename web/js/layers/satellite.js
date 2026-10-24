@@ -7,7 +7,7 @@ import { EMPTY_PNG, renderPNG } from './radar.js';
 
 export const SAT_BANDS = {
   B13: { name: 'B13 紅外線', cache: 60, legend: ['亮溫 (°C)', [-85, 30], [-80, -60, -40, -20, 0, 20]] },
-  B07: { name: 'B07 短波紅外', cache: 60, legend: ['亮溫 (°C)', [-60, 40], [-60, -40, -20, 0, 20, 40]] },
+  B07: { name: 'B07 短波紅外', cache: 60, legend: ['亮溫 (°C)', [-20, 30], [-20, -10, 0, 10, 20, 30]] },
   B08: { name: 'B08 水氣', cache: 60, legend: ['亮溫 (°C)', [-90, 0], [-80, -60, -40, -20, 0]] },
   B03: { name: 'B03 可見光', cache: 24, legend: ['反照率 (%)', [0, 100], [0, 20, 40, 60, 80, 100]] },
 };

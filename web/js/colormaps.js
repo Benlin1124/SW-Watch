@@ -143,8 +143,8 @@ function anchorColor(anchors, v) {
 /** 衛星值 → 顏色函式(回傳 packed ABGR);style:B13 'bd' | 'gray' */
 function satColorFn(band, style) {
   if (band === 'B03') return (v) => gray(Math.pow(clamp01(v / 100), 0.6));
-  // B07 短波紅外(夜間低雲、霧):灰階,冷白暖黑;範圍比 B13 窄,低雲和地表 / 海面的差異較明顯
-  if (band === 'B07') return (v) => gray((40 - v) / 100);
+  // B07 短波紅外(夜間低雲、霧):灰階,冷白暖黑;範圍只取 −20 ~ 30 °C 拉開低雲(約 5–20 °C)和海面(約 25 °C)的對比,高雲一律白
+  if (band === 'B07') return (v) => gray((30 - v) / 50);
   if (band === 'B08') return (v) => packHex(anchorColor(WV_ANCHORS, v));
   // 比照 notebook:gray_r,vmin=190 K(−83.15 °C)白 → vmax=300 K(26.85 °C)黑,線性
   if (style === 'gray') return (v) => gray((26.85 - v) / 110);
