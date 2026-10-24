@@ -55,7 +55,7 @@ RAIN_DAYS = {"rain_today": 0, "rain_48h": 1, "rain_72h": 2}
 WX = ["ws", "wd", "gust", "gust_dir"]
 
 MAIN = (119.25, 122.15, 21.85, 25.7)           # 本島 + 澎湖、蘭嶼、綠島、彭佳嶼
-INSETS = {"金門": (118.18, 118.52, 24.36, 24.55), "馬祖": (119.88, 120.55, 25.92, 26.42)}
+INSETS = {"馬祖": (119.88, 120.55, 25.92, 26.42), "金門": (118.18, 118.52, 24.36, 24.55)}   # 小圖由上而下
 REGION = (118.0, 122.3, 21.8, 26.5)            # 納入統計的範圍(排除日本氣象廳站等)
 
 
@@ -243,7 +243,7 @@ def make_figure(geo):
     draw_base(ax, geo, MAIN)
     ax.axis("off")
     insets = {}
-    for name, rect in zip(INSETS, ([0.07, 0.80, 0.30, 0.17], [0.07, 0.585, 0.30, 0.20])):
+    for name, rect in zip(INSETS, ([0.07, 0.77, 0.30, 0.20], [0.07, 0.585, 0.30, 0.17])):
         iax = ax.inset_axes(rect)
         draw_base(iax, geo, INSETS[name])
         iax.set_zorder(10)
@@ -258,16 +258,44 @@ def finish(ax, insets, geo):
         draw_overlay(a, geo)
 
 
-def colorbar(fig, levels, colors, unit):
-    """右側直式色階:一格一色、等間距,刻度 = 各級下界,上方只標單位。"""
+def colorbar(fig, levels, colors, unit, cell_text=None):
+    """右側直式色階:一格一色、等間距,刻度 = 各級下界,上方只標單位;cell_text = 格子裡的字(風級)。"""
     cax = fig.add_axes([0.83, 0.12, 0.035, 0.76])
     cmap = ListedColormap(colors)
-    norm = BoundaryNorm(levels, cmap.N, extend="max" if len(levels) == len(colors) else "neither")
+    extend = len(levels) == len(colors)                   # 顏色和級數一樣多 → 最後一色畫成上方三角
+    norm = BoundaryNorm(levels, cmap.N, extend="max" if extend else "neither")
     cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax, ticks=levels, spacing="uniform")
     cb.ax.tick_params(labelsize=8, length=0)
     cb.ax.set_yticklabels([f"{x:g}" for x in levels])
     cb.outline.set_linewidth(0.5)
-    cax.set_title(unit, fontsize=9, pad=6)
+    cax.set_title(unit, fontsize=9, pad=14 if extend else 6)
+    if cell_text:
+        n = len(levels) - 1                                # 格子數(不含三角)
+        for i, t in enumerate(cell_text):
+            y = (i + 0.5) / n if i < n else 1.018          # 最後一級在上方三角(預設高 5%)偏下的位置
+            cax.text(0.5, y, t, transform=cax.transAxes, ha="center", va="center", fontsize=7,
+                     fontweight="bold", color=text_color(colors[i]), clip_on=False)
+
+
+def text_color(hex_):
+    r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
+    return "#fff" if 0.299 * r + 0.587 * g + 0.114 * b < 140 else "#222"
+
+
+def save(fig, path):
+    """存檔;檔案被看圖軟體開著(Windows 會鎖住)時重試,還是不行就改存成 _new 檔名。"""
+    import time
+    for _ in range(3):
+        try:
+            fig.savefig(path, facecolor="white")
+            break
+        except OSError:
+            time.sleep(1)
+    else:
+        alt = path.with_name(path.stem + "_new" + path.suffix)
+        fig.savefig(alt, facecolor="white")
+        print(f"  {path.name} 被其他程式開著,改存 {alt.name}")
+    plt.close(fig)
 
 
 def plot_rain(path, geo, stations, total):
@@ -285,8 +313,7 @@ def plot_rain(path, geo, stations, total):
         a.scatter(lon, lat, s=1.2, c="#333", lw=0, zorder=6)
     finish(ax, insets, geo)
     colorbar(fig, RAIN_LEVELS, RAIN_COLORS, "mm")
-    fig.savefig(path, facecolor="white")
-    plt.close(fig)
+    save(fig, path)
 
 
 def plot_wind(path, geo, stations, w):
@@ -304,9 +331,8 @@ def plot_wind(path, geo, stations, w):
             a.scatter(s["lon"], s["lat"], s=(2 * r) ** 2, c=WIND_COLORS[bf[i]], zorder=6 + bf[i] * 0.01,
                       edgecolors="#fff" if strong else "#333", linewidths=1.2 if strong else 0.35)
     finish(ax, insets, geo)
-    colorbar(fig, BEAUFORT, WIND_COLORS, "m/s")
-    fig.savefig(path, facecolor="white")
-    plt.close(fig)
+    colorbar(fig, BEAUFORT, WIND_COLORS, "m/s", cell_text=[str(k) for k in range(len(WIND_COLORS))])
+    save(fig, path)
 
 
 def write_csv(path, stations, cols):
