@@ -229,11 +229,11 @@ export class TyphoonLayer {
   }
 
   /** 動畫 / 點選位置:圓點、暴風圈、時間標示;list = [{ name, q }] */
-  setProbe(list, label = true) {
+  setProbe(list, label = true, cone = true) {
     const feats = [];
     for (const { q } of list) {
       const [r15, r25] = this.radii(q);
-      if (this.show_cone && q.r70 > 0) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, q.r70), properties: { k: 'c70' } });
+      if (cone && this.show_cone && q.r70 > 0) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, q.r70), properties: { k: 'c70' } });
       if (r15) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r15), properties: { k: 'c15' } });
       if (r25) feats.push({ type: 'Feature', geometry: windCircle(q.lon, q.lat, r25), properties: { k: 'c25' } });
       feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [q.lon, q.lat] }, properties: { color: category(q.wind).color } });
@@ -253,7 +253,7 @@ export class TyphoonLayer {
     });
   }
 
-  /** 路徑動畫:各颱風從目前位置走到最後的預報點(帶 70% 機率圓與暴風圈),速度固定(animSpeed 小時 / 秒);
+  /** 路徑動畫:各颱風從目前位置走到最後的預報點(帶暴風圈;不畫 70% 潛勢圓),速度固定(animSpeed 小時 / 秒);
    *  起點停 animHold → 移動 → 終點停 animHold → 回起點重來。每個颱風各自循環,路徑短的不用等路徑長的 */
   animate(on) {
     cancelAnimationFrame(this.raf);
@@ -275,7 +275,7 @@ export class TyphoonLayer {
         const e = elapsed % (hold + move + hold);
         const f = e < hold ? 0 : Math.min(1, (e - hold) / move);
         return { name: k.name, q: at(k, k.nowMs + f * span) };
-      }));
+      }), true, false);                                                // 動畫不畫 70% 潛勢圓
       this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
