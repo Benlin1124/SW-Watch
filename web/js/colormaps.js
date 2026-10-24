@@ -126,6 +126,17 @@ const BD_TICKS = [-86, -81, -76, -70, -64, -54, -42, -31, 9, 25];
 const WV_ANCHORS = [[-85, '#ffffff'], [-65, '#9ecae1'], [-50, '#2166ac'], [-40, '#1a1a2e'], [-30, '#7f4f24'], [-18, '#e0a050'], [-5, '#fff1c1']];
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
+// B07 灰階錨點 [°C, 灰階 0 黑 – 1 白]
+const B07_GRAY = [[30, 0], [20, 0.18], [10, 0.38], [0, 0.55], [-20, 0.7], [-50, 0.85], [-80, 1]];
+/** 錨點(依值遞減排列)之間線性內插,範圍外取端點 */
+function piecewise(anchors, v) {
+  if (v >= anchors[0][0]) return anchors[0][1];
+  for (let i = 1; i < anchors.length; i++) {
+    const [v1, g1] = anchors[i], [v0, g0] = anchors[i - 1];
+    if (v >= v1) return g0 + ((g1 - g0) * (v0 - v)) / (v0 - v1);
+  }
+  return anchors[anchors.length - 1][1];
+}
 const gray = (g) => { const v = Math.round(clamp01(g) * 255); return ((255 << 24) | (v << 16) | (v << 8) | v) >>> 0; };
 
 function anchorColor(anchors, v) {
@@ -143,8 +154,9 @@ function anchorColor(anchors, v) {
 /** 衛星值 → 顏色函式(回傳 packed ABGR);style:B13 'bd' | 'gray' */
 function satColorFn(band, style) {
   if (band === 'B03') return (v) => gray(Math.pow(clamp01(v / 100), 0.6));
-  // B07 短波紅外(夜間低雲、霧):灰階,冷白暖黑;範圍只取 −20 ~ 30 °C 拉開低雲(約 5–20 °C)和海面(約 25 °C)的對比,高雲一律白
-  if (band === 'B07') return (v) => gray((30 - v) / 50);
+  // B07 短波紅外(夜間低雲、霧):分段灰階,冷白暖黑。暖段(30 → 0 °C)拉開低雲(約 5–20 °C)和海面(約 25 °C)的對比;
+  // 冷段(0 → −80 °C)壓縮但保留層次,高雲不會整片死白
+  if (band === 'B07') return (v) => gray(piecewise(B07_GRAY, v));
   if (band === 'B08') return (v) => packHex(anchorColor(WV_ANCHORS, v));
   // 比照 notebook:gray_r,vmin=190 K(−83.15 °C)白 → vmax=300 K(26.85 °C)黑,線性
   if (style === 'gray') return (v) => gray((26.85 - v) / 110);
