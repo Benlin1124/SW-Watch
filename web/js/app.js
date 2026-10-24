@@ -861,8 +861,8 @@ function bindUI() {
     if (typhoon.raf) typhoon.animate(false);
     else if (!typhoon.animate(true)) toast(typhoon.visible ? '目前沒有颱風路徑' : '請先開啟颱風路徑', 2000);
   };
-  typhoon.animSec = +$('ty-anim-sec').value;
-  $('ty-anim-sec').onchange = (e) => { typhoon.animSec = +e.target.value; if (typhoon.raf) typhoon.animate(true); };
+  typhoon.animSpeed = +$('ty-anim-speed').value;
+  $('ty-anim-speed').onchange = (e) => { typhoon.animSpeed = +e.target.value; if (typhoon.raf) typhoon.animate(true); };
   $('ty-names').onchange = (e) => { typhoon.show_names = e.target.checked; typhoon.draw(); };
   $('ty-labels').onchange = (e) => { typhoon.show_labels = e.target.checked; typhoon.draw(); };
   $('basemap').onchange = (e) => setTheme(e.target.value);

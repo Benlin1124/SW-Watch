@@ -165,9 +165,10 @@
           </div>
           <div class="ty-toggles">
             <button type="button" class="toggle" id="ty-anim" title="颱風沿路徑移動並顯示當時的暴風圈；點路徑線可看任一時間的位置與暴風圈">▶ 路徑動畫</button>
-            <label>一輪
-              <select id="ty-anim-sec">
-                <option value="60">60 秒</option><option value="40">40 秒</option><option value="25" selected>25 秒</option><option value="15">15 秒</option>
+            <label title="從目前位置走到最後預報點的速度（每秒走幾小時的預報），不受路徑長短影響">速度
+              <select id="ty-anim-speed">
+                <option value="3">每秒 3 小時</option><option value="6" selected>每秒 6 小時</option>
+                <option value="12">每秒 12 小時</option><option value="24">每秒 24 小時</option>
               </select>
             </label>
           </div>

@@ -116,7 +116,8 @@ export class TyphoonLayer {
   tracks = [];             // 各颱風的時間序列(過去定位 + 預報),draw() 重建
   probeMarkers = [];       // 動畫 / 點選位置旁的時間標示
   raf = 0;                 // 動畫 requestAnimationFrame
-  animSec = 25;            // 動畫一輪秒數
+  animSpeed = 6;           // 動畫速度:每秒走幾小時的預報(不受路徑長短影響)
+  animHold = 1500;         // 起點、終點各停留(毫秒)
   onAnim = null;           // 動畫開始 / 停止時呼叫(true / false)
 
   constructor(map) { this.map = map; }
@@ -252,7 +253,8 @@ export class TyphoonLayer {
     });
   }
 
-  /** 路徑動畫:所有颱風一起從目前位置走到最後的預報點(帶 70% 機率圓與暴風圈),到底停 1 秒再重來 */
+  /** 路徑動畫:各颱風從目前位置走到最後的預報點(帶 70% 機率圓與暴風圈),速度固定(animSpeed 小時 / 秒);
+   *  起點停 animHold → 移動 → 終點停 animHold → 回起點重來。每個颱風各自循環,路徑短的不用等路徑長的 */
   animate(on) {
     cancelAnimationFrame(this.raf);
     const was = !!this.raf;
@@ -266,11 +268,14 @@ export class TyphoonLayer {
     const step = (now) => {
       const tr = this.tracks.filter((k) => k.pts[k.pts.length - 1].ms > k.nowMs);   // 有預報的才動
       if (!tr.length) { this.animate(false); return; }
-      const t0 = Math.min(...tr.map((k) => k.nowMs)), t1 = Math.max(...tr.map((k) => k.pts[k.pts.length - 1].ms));
-      const dur = this.animSec * 1000;
-      const f = Math.min(1, ((now - start) % (dur + 1000)) / dur);
-      const ms = t0 + f * (t1 - t0);
-      this.setProbe(tr.map((k) => ({ name: k.name, q: ms >= k.nowMs ? at(k, ms) : null })).filter((x) => x.q));
+      const hold = this.animHold, elapsed = now - start;
+      this.setProbe(tr.map((k) => {
+        const span = k.pts[k.pts.length - 1].ms - k.nowMs;
+        const move = (span / 36e5 / this.animSpeed) * 1000;           // 這個颱風走完要幾毫秒
+        const e = elapsed % (hold + move + hold);
+        const f = e < hold ? 0 : Math.min(1, (e - hold) / move);
+        return { name: k.name, q: at(k, k.nowMs + f * span) };
+      }));
       this.raf = requestAnimationFrame(step);
     };
     this.raf = requestAnimationFrame(step);
