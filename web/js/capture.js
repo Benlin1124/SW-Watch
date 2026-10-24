@@ -211,7 +211,7 @@ export class Capture {
     if (c.title) lines.push({ text: 'SW-Watch 劇烈天氣監控', size: 18, weight: 700, color: '#fff' });
     if (c.time) {
       lines.push({ text: $('clock-main').textContent, size: 14, weight: 700, color: '#fff' });
-      const utc = $('clock-sub').textContent.split('　')[0];
+      const utc = $('clock-utc').textContent;
       if (utc) lines.push({ text: utc, size: 11, weight: 400, color: '#aab' });
       // 各圖層實際資料時間(不一定剛好是時間軸那一格)
       for (const layer of document.querySelectorAll('#panel .layer')) {

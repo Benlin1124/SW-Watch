@@ -203,10 +203,10 @@ function updateLayerTime(l, stamp, sync) {
 function updateClock() {
   if (state.sync || state.playing) {
     $('clock-main').textContent = state.T ? `${fmtTW(state.T, 'full')}（台灣）` : '--';
-    $('clock-sub').textContent = state.T ? `${fmtUTC(state.T)}　${state.playing ? '播放中（對齊）' : '同步模式'}` : '';
+    $('clock-utc').textContent = state.T ? fmtUTC(state.T) : '';
   } else {
     $('clock-main').textContent = '各圖層最新資料';
-    $('clock-sub').textContent = '不同步模式：時間見左側各圖層';
+    $('clock-utc').textContent = '時間見左側各圖層';
   }
   const i = state.slots.indexOf(state.T);
   if (i >= 0) $('slider').value = i;

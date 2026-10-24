@@ -736,3 +736,7 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 現象:打開網頁(預設 B13,還原設定切到 B07)或切頻道時,當下顯示的那一張 B07 灰白、對比低;前後時次正常。使用者截圖反推:海面、陸地、雲都比前後一張冷約 10 °C,剛好是 B07(offset −90)與 B13(−100)的差。
 - 原因:`configure()` 先改 `band` 再 `await` 新頻道 index,等待期間 render 呼叫 `frame()` → key 是 B07,但 `this.index` 還是 B13 → 用 B13 的 offset 解讀 B07、做出的 PNG 被快取在 B07 的 key 下,之後一直錯。
 - 修正:`configure()` 等 index 到了才一起換 band / style / index;`frame()` 一律用 `this.indexes[band].grid`(該頻道自己的 scale / offset),還沒載入就不畫。
+
+## 2026-10-24 版本號移到時間下方,拿掉「同步模式」字樣
+- 右上時間第二行:UTC 時間 + 版本號(`#clock-utc` + `#app-ver`);原本的「同步模式 / 播放中(對齊)」拿掉,不同步時第二行為「時間見左側各圖層」。
+- 版本號元素從圖層選單底部移到這裡;部署時 pages.yml 的 sed 仍以 `id="app-ver"…>dev<` 替換。擷取圖的 UTC 改讀 `#clock-utc`。
