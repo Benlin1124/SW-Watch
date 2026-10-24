@@ -6,9 +6,10 @@
 --local 只用本機資料。
 
 總累積雨量:每站把期間切成首尾相接的幾段,每段用某一筆快照的累積雨量欄位
-(10 分鐘、1、3、6、12、24、48、72 小時、今日累積),段數最少的組合相加。
+(10 分鐘、1、3、6、12、24 小時滾動累積;今日、近 2 日、近 3 日的日曆日累積),段數最少的組合相加。
 快照缺漏時會改用較長的累積時段跨過去;接不起來的站不畫(log 會列出數量)。
-雨量欄位的時間 = 快照時間(與網頁、station_agg 相同);今日累積從台灣時間 00 時起算。
+雨量欄位的時間 = 快照時間(與網頁、station_agg 相同)。
+注意 CWA 的 Past2days / Past3days(rain_48h / rain_72h)是日曆日(昨天起 / 前天起,台灣 00 時),不是滾動 48 / 72 小時。
 最大平均風 / 最大陣風:觀測時間落在期間內的各筆取最大;陣風時間用 gust_at(有的話)。"""
 import argparse
 import csv
@@ -45,9 +46,11 @@ WIND_COLORS = ["#eef5fb", "#c6dbef", "#9ecae1", "#6baed6", "#2171b5", "#74c476",
                "#6a1b9a", "#4a148c", "#2a0a4a", "#14001f"]
 LIGHT = {"bg": "#ffffff", "land": "#f5f5f5", "coast": "#000000", "county": "#1a1a1a"}
 
-# 雨量欄位 → 累積分鐘數;rain_today 另外處理(台灣時間 00 時起算)
-RAIN_WIN = {"rain_10m": 10, "rain_1h": 60, "rain_3h": 180, "rain_6h": 360, "rain_12h": 720,
-            "rain_24h": 1440, "rain_48h": 2880, "rain_72h": 4320}
+# 滾動累積的雨量欄位 → 分鐘數
+RAIN_WIN = {"rain_10m": 10, "rain_1h": 60, "rain_3h": 180, "rain_6h": 360, "rain_12h": 720, "rain_24h": 1440}
+# 日曆日累積(台灣時間 00 時起算)→ 往前幾天:今日 0、Past2days 昨天起、Past3days 前天起。
+# 實測 Past2days 在 00:00 從 640 掉到 558(同時 24 小時 559→558),不是滾動 48 小時。
+RAIN_DAYS = {"rain_today": 0, "rain_48h": 1, "rain_72h": 2}
 WX = ["ws", "wd", "gust", "gust_dir"]
 
 MAIN = (119.25, 122.15, 21.85, 25.7)           # 本島 + 澎湖、蘭嶼、綠島、彭佳嶼
@@ -135,8 +138,8 @@ def total_rain(start, end, snaps, col):
         tdt = stamp_dt(t)
         mid = tdt.astimezone(TW).replace(hour=0, minute=0)
         wins = [(k, to_stamp(tdt - timedelta(minutes=m))) for k, m in RAIN_WIN.items() if k in f]
-        if "rain_today" in f and mid != tdt.astimezone(TW):   # 00:00 那筆不確定是歸零還是前一天整天,不用
-            wins.append(("rain_today", to_stamp(mid)))
+        if mid != tdt.astimezone(TW):          # 00:00 那筆的日累積還是前一天的(今日 = 前一天整天),不用
+            wins += [(k, to_stamp(mid - timedelta(days=d))) for k, d in RAIN_DAYS.items() if k in f]
         for k, origin in wins:
             if origin < start or origin not in done:
                 continue
