@@ -131,16 +131,21 @@ def _hours(a, b):
 
 def carry_over(out):
     """颱風警報期間每小時的報只含發警報的那個颱風,其他颱風仍照平常時段更新。
-    新一報沒有的颱風從前一報(初始時間較早的最近一檔)沿用,標 carried,保留它自己的預報初始時間;
+    新一報沒有的颱風,從前面各報(初始時間較早、CARRY_HOURS 內)找它最近一次的內容沿用,標 carried,
+    保留它自己的預報初始時間;往回找多檔,所以中間有一檔漏掉也接得回來。
     超過 CARRY_HOURS 沒再出現就視為已不發布。"""
-    prev = sorted(p for p in (config.DATA_DIR / LAYER).glob("*.json") if p.stem < out["init"])
-    if not prev:
-        return out
     have = {s["id"] for s in out["storms"]}
-    for s in json.loads(prev[-1].read_text(encoding="utf-8")).get("storms", []):
-        t = s.get("fcst_init") or (s["past"][-1]["t"] if s.get("past") else None)
-        if s["id"] not in have and t and _hours(t, out["init"]) <= CARRY_HOURS:
-            out["storms"].append({**s, "carried": True})
+    found = {}
+    for p in sorted((config.DATA_DIR / LAYER).glob("*.json"), reverse=True):
+        if p.stem >= out["init"]:
+            continue
+        if _hours(p.stem, out["init"]) > CARRY_HOURS:
+            break
+        for s in json.loads(p.read_text(encoding="utf-8")).get("storms", []):
+            t = s.get("fcst_init") or (s["past"][-1]["t"] if s.get("past") else None)
+            if s["id"] not in have and s["id"] not in found and t and _hours(t, out["init"]) <= CARRY_HOURS:
+                found[s["id"]] = {**s, "carried": True}
+    out["storms"] += found.values()
     return out
 
 
