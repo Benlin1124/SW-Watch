@@ -38,7 +38,7 @@ OUT_DIR = config.ROOT / "charts"
 FONT = ["Microsoft JhengHei", "Noto Sans CJK TC", "PingFang TC"]
 
 # 與網頁 web/js/colormaps.js、layers/ecmwf.js 相同
-RAIN_LEVELS = [10, 20, 60, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000]
+RAIN_LEVELS = [0,10, 20, 60, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000]
 RAIN_COLORS = ["#c1c2c2", "#9bffff", "#00cfff", "#0198ff", "#0165ff", "#309901", "#32ff00", "#f8ff00",
                "#ffcb00", "#ff9a00", "#fa0300", "#cc0003", "#a00000", "#98009a", "#c304cc", "#f805f3", "#fecbff"]
 BEAUFORT = [0, 0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7, 37.0, 41.5, 46.2, 51.0, 56.1]
@@ -260,20 +260,20 @@ def finish(ax, insets, geo):
 
 def colorbar(fig, levels, colors, unit, cell_text=None):
     """右側直式色階:一格一色、等間距,刻度 = 各級下界,上方只標單位;cell_text = 格子裡的字(風級)。"""
-    cax = fig.add_axes([0.83, 0.12, 0.035, 0.76])
+    cax = fig.add_axes([0.855, 0.04, 0.035, 0.74])
     cmap = ListedColormap(colors)
     extend = len(levels) == len(colors)                   # 顏色和級數一樣多 → 最後一色畫成上方三角
     norm = BoundaryNorm(levels, cmap.N, extend="max" if extend else "neither")
     cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax, ticks=levels, spacing="uniform")
-    cb.ax.tick_params(labelsize=8, length=0)
+    cb.ax.tick_params(labelsize=10, length=0)
     cb.ax.set_yticklabels([f"{x:g}" for x in levels])
     cb.outline.set_linewidth(0.5)
-    cax.set_title(unit, fontsize=9, pad=14 if extend else 6)
+    cax.set_title(unit, fontsize=12, pad=16 if extend else 8)
     if cell_text:
         n = len(levels) - 1                                # 格子數(不含三角)
         for i, t in enumerate(cell_text):
             y = (i + 0.5) / n if i < n else 1.018          # 最後一級在上方三角(預設高 5%)偏下的位置
-            cax.text(0.5, y, t, transform=cax.transAxes, ha="center", va="center", fontsize=7,
+            cax.text(0.5, y, t, transform=cax.transAxes, ha="center", va="center", fontsize=8.5,
                      fontweight="bold", color=text_color(colors[i]), clip_on=False)
 
 
@@ -316,23 +316,35 @@ def plot_rain(path, geo, stations, total):
     save(fig, path)
 
 
-def plot_wind(path, geo, stations, w):
+def plot_dots(path, geo, stations, v, levels, colors, unit, cell_text=None, white_from=None, min_level=None):
+    """測站圓點圖(同網頁測站圖層):依色階上色,級數越高點越大、畫在越上面;white_from 級以上加白邊;
+    min_level:低於這個值畫小灰點(雨量)。"""
     fig, ax, insets = make_figure(geo)
-    v = w["val"]
     ok = np.isfinite(v)
-    order = np.argsort(np.where(ok, v, -1))            # 風級高的畫在上面
+    order = np.argsort(np.where(ok, v, -1))
     order = order[ok[order]]
-    bf = np.array([beaufort(x) if np.isfinite(x) else 0 for x in v])
+    lv = np.array([max(int(np.searchsorted(levels, x, side="right") - 1), 0) if np.isfinite(x) else 0 for x in v])
+    lv = np.minimum(lv, len(colors) - 1)
+    scale = 17 / max(len(colors) - 1, 1)                  # 大小比照風級 0–17
     for a in [ax, *insets.values()]:
         for i in order:
             s = stations[i]
-            strong = bf[i] >= 14
-            r = 1.4 + 0.25 * bf[i]
-            a.scatter(s["lon"], s["lat"], s=(2 * r) ** 2, c=WIND_COLORS[bf[i]], zorder=6 + bf[i] * 0.01,
+            if min_level is not None and v[i] < min_level:
+                a.scatter(s["lon"], s["lat"], s=4, c="#9e9e9e", lw=0, alpha=0.7, zorder=6)
+                continue
+            k = lv[i]
+            strong = white_from is not None and k >= white_from
+            r = 1.4 + 0.25 * k * scale
+            a.scatter(s["lon"], s["lat"], s=(2 * r) ** 2, c=colors[k], zorder=6 + k * 0.01,
                       edgecolors="#fff" if strong else "#333", linewidths=1.2 if strong else 0.35)
     finish(ax, insets, geo)
-    colorbar(fig, BEAUFORT, WIND_COLORS, "m/s", cell_text=[str(k) for k in range(len(WIND_COLORS))])
+    colorbar(fig, levels, colors, unit, cell_text=cell_text)
     save(fig, path)
+
+
+def plot_wind(path, geo, stations, w):
+    plot_dots(path, geo, stations, w["val"], BEAUFORT, WIND_COLORS, "m/s",
+              cell_text=[str(k) for k in range(len(WIND_COLORS))], white_from=14)
 
 
 def write_csv(path, stations, cols):
@@ -375,6 +387,8 @@ def main():
     out = OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}"
     out.mkdir(parents=True, exist_ok=True)
     plot_rain(out / "rain_total.png", geo, stations, total)
+    plot_dots(out / "rain_total_station.png", geo, stations, total, RAIN_LEVELS, RAIN_COLORS, "mm",
+              min_level=RAIN_LEVELS[0])
     plot_wind(out / "wind_max.png", geo, stations, wind["ws"])
     plot_wind(out / "gust_max.png", geo, stations, wind["gust"])
     fmt_at = lambda ts: [tw(t, "%m/%d %H:%M") if t else "" for t in ts]
