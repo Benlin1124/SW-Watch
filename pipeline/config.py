@@ -67,6 +67,7 @@ SAT_EXTENT = (105.0, 5.0, 155.0, 35.0)     # lon_min, lat_min, lon_max, lat_max
 # 頻道 → (輸出解析度 °, 校正方式, 量化 scale, offset, 單位)
 SAT_BANDS = {
     "B13": (0.02, "brightness_temperature", 0.6, -100.0, "°C"),
+    "B07": (0.02, "brightness_temperature", 0.6, -90.0, "°C"),    # 3.9 µm 短波紅外:夜間低雲、霧(白天含太陽反射,地表可到 50 °C 以上)
     "B08": (0.02, "brightness_temperature", 0.6, -100.0, "°C"),
     "B03": (0.01, "reflectance", 0.5, 0.0, "%"),
 }

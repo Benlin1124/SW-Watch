@@ -1,12 +1,12 @@
 """衛星雲圖:Himawari-9 全盤 HSD(AWS noaa-himawari9,免金鑰)→ 裁切 SAT_EXTENT
-  data/satellite/{B13,B08,B03}/{stamp}.bin.gz(uint8;stamp = 掃描開始時間 UTC)
+  data/satellite/{B13,B07,B08,B03}/{stamp}.bin.gz(uint8;stamp = 掃描開始時間 UTC)
 輸出格點在 Web Mercator 上等間距(列在麥卡托 y 等距、行在經度等距),
 MapLibre image source 用四角定位就不會有緯度方向的偏移(5–35N 用經緯度等距格點會差到約 0.8°)。
 只下載涵蓋範圍的分段(全盤 10 段中的第 2–5 段)。
 重投影用最近鄰:目標格點 → 原始掃描行列的對照表只算一次,存在 pipeline/.cache。
 B03 可見光只在範圍內有白天時處理(夜間不存檔,前端顯示無資料)。
 
-補抓:python -m pipeline.fetch_satellite --start 202610210000 --end 202610211200 [--bands B13,B08]"""
+補抓:python -m pipeline.fetch_satellite --start 202610210000 --end 202610211200 [--bands B13,B07,B08]"""
 import argparse
 import gc
 import hashlib
@@ -171,7 +171,7 @@ def wanted(stamp, band, have):
 def run(now=None):
     """最近 SAT_WAIT_MIN 分鐘內的時次,還沒有的頻道上架了就處理。回傳處理的 [(stamp, band)]。
     每輪只處理一個時次就結束(B03 一筆要 1–2 分鐘),下一分鐘重新從最新的找起,
-    新上架的時次才不會被舊時次卡住。順序:B13/B08 由新到舊 → 都齊了才做 B03。"""
+    新上架的時次才不會被舊時次卡住。順序:B13/B07/B08 由新到舊 → 都齊了才做 B03。"""
     global _since
     now = now or datetime.now(timezone.utc)
     have = {b: set(read_index(f"{LAYER}/{b}")["times"]) for b in config.SAT_BANDS}

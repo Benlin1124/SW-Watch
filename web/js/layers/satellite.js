@@ -1,4 +1,4 @@
-// 衛星雲圖:Himawari-9 B13 紅外線 / B08 水氣 / B03 可見光(pipeline/fetch_satellite.py)
+// 衛星雲圖:Himawari-9 B13 紅外線 / B07 短波紅外 / B08 水氣 / B03 可見光(pipeline/fetch_satellite.py)
 // 格點在 Web Mercator 上等間距,image source 四角定位即可;畫法同雷達(uint8 → 查色表 → PNG)
 import { getGrid, getIndex } from '../data.js';
 import { satLegendHTML, satLUT } from '../colormaps.js';
@@ -7,6 +7,7 @@ import { EMPTY_PNG, renderPNG } from './radar.js';
 
 export const SAT_BANDS = {
   B13: { name: 'B13 紅外線', cache: 60, legend: ['亮溫 (°C)', [-85, 30], [-80, -60, -40, -20, 0, 20]] },
+  B07: { name: 'B07 短波紅外', cache: 60, legend: ['亮溫 (°C)', [-60, 40], [-60, -40, -20, 0, 20, 40]] },
   B08: { name: 'B08 水氣', cache: 60, legend: ['亮溫 (°C)', [-90, 0], [-80, -60, -40, -20, 0]] },
   B03: { name: 'B03 可見光', cache: 24, legend: ['反照率 (%)', [0, 100], [0, 20, 40, 60, 80, 100]] },
 };
