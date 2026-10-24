@@ -4,6 +4,7 @@
 import argparse
 import gzip
 import json
+from datetime import datetime
 
 import numpy as np
 import shapely
@@ -16,6 +17,7 @@ from .common import log, save_json, update_index, utc_stamp
 LAYER = "typhoon/cwa_track"
 GEOD = Geod(ellps="WGS84")
 QUADS = ("NE", "SE", "SW", "NW")      # 方位角 0–90、90–180、180–270、270–360
+CARRY_HOURS = 12                      # 新一報沒有的颱風,沿用前報最多幾小時(以該颱風自己的預報初始時間算)
 
 
 def _num(v):
@@ -123,9 +125,28 @@ def convert(od):
             "source": "CWA W-C0034-005", "storms": storms}
 
 
+def _hours(a, b):
+    return (datetime.strptime(b, "%Y%m%d%H%M") - datetime.strptime(a, "%Y%m%d%H%M")).total_seconds() / 3600
+
+
+def carry_over(out):
+    """颱風警報期間每小時的報只含發警報的那個颱風,其他颱風仍照平常時段更新。
+    新一報沒有的颱風從前一報(初始時間較早的最近一檔)沿用,標 carried,保留它自己的預報初始時間;
+    超過 CARRY_HOURS 沒再出現就視為已不發布。"""
+    prev = sorted(p for p in (config.DATA_DIR / LAYER).glob("*.json") if p.stem < out["init"])
+    if not prev:
+        return out
+    have = {s["id"] for s in out["storms"]}
+    for s in json.loads(prev[-1].read_text(encoding="utf-8")).get("storms", []):
+        t = s.get("fcst_init") or (s["past"][-1]["t"] if s.get("past") else None)
+        if s["id"] not in have and t and _hours(t, out["init"]) <= CARRY_HOURS:
+            out["storms"].append({**s, "carried": True})
+    return out
+
+
 def save(od):
     """同一個初始時間若重複發布(例如更正),以較晚發布的為準。"""
-    out = convert(od)
+    out = carry_over(convert(od))
     path = config.DATA_DIR / LAYER / f'{out["init"]}.json'
     if path.exists() and json.loads(path.read_text(encoding="utf-8")).get("issued", "") > out["issued"]:
         return out
