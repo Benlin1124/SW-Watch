@@ -164,6 +164,42 @@ export function satLUT(spec, band, style = 'bd') {
 
 const cssOf = (p) => `rgb(${p & 255},${(p >> 8) & 255},${(p >>> 16) & 255})`;
 
+// ── 夜間低雲 / 霧(B13 − B07 亮溫差)──
+// 夜間水雲(低雲、霧)在 3.9 µm 放射率較低 → B07 比 B13 冷,差值約 +1.5 ~ +5 °C;晴空約 0,高層冰雲多為負值。
+// 底圖 B13 灰階(同 notebook,冷白暖黑),差值 ≥ 1 °C 且 B13 > −20 °C(排除高雲)的地方疊青色,差越大越濃。
+// 白天 B07 含太陽反射,差值變成大負值,這個產品不適用(白天看低雲用 B03 可見光)。
+// 編碼:code = 差值等級 bi(0–9)× 25 + B13 灰階等級 gi(0–24),255 = 缺值
+export const FOG = { gray: 25, levels: 10, step: 0.5, min: 1, color: [0, 229, 255] };
+
+export function fogCode(t13, t07) {
+  const gi = Math.max(0, Math.min(24, Math.round(((26.85 - t13) / 110) * 24)));
+  const d = t13 - t07;
+  const bi = t13 <= -20 || d < FOG.min ? 0 : Math.min(FOG.levels - 1, 1 + Math.floor((d - FOG.min) / FOG.step));
+  return bi * FOG.gray + gi;
+}
+
+const fogColor = (bi, gi) => {
+  const g = (gi / 24) * 255, a = (bi / (FOG.levels - 1)) * 0.85;
+  const [r, gg, b] = FOG.color.map((c) => Math.round(g + (c - g) * a));
+  return ((255 << 24) | (b << 16) | (gg << 8) | r) >>> 0;
+};
+
+export function fogLUT() {
+  const lut = new Uint32Array(256);
+  for (let bi = 0; bi < FOG.levels; bi++) for (let gi = 0; gi < FOG.gray; gi++) lut[bi * FOG.gray + gi] = fogColor(bi, gi);
+  return lut;               // 255 → 0(透明)
+}
+
+export function fogLegendHTML(title) {
+  const n = FOG.levels - 1, w = 40;
+  const cells = Array.from({ length: n }, (_, i) => `<span style="width:${w}px;background:${cssOf(fogColor(i + 1, 6))}"></span>`).join('');
+  const labels = Array.from({ length: n }, (_, i) => FOG.min + i * FOG.step)
+    .map((v, i) => (i % 2 ? '' : `<span style="left:${i * w}px">${v}</span>`)).join('');
+  return `<div class="legend-title">${title}</div><div class="legend-bar">${cells}</div>
+    <div class="legend-labels abs" style="width:${n * w}px">${labels}<span style="left:${n * w}px">°C</span></div>
+    <div class="legend-labels" style="margin-top:4px">底圖 B13 灰階；青色 = 低雲／霧（夜間適用，白天請看 B03）</div>`;
+}
+
 /** B13 增強色階圖例:比照 notebook 的 BoundaryNorm 色條,每格等寬,刻度標在格界;太擠的刻度排到第二列 */
 function bdLegendHTML(title, ticks) {
   const W = 420, n = BD_COLORS.length;
