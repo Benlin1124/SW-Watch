@@ -545,7 +545,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [satellite, ecmwf, radar, stations].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, ecmwf, radar, stations, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
 }
@@ -840,9 +840,9 @@ function bindUI() {
     render();
   };
   $('op-radar').oninput = (e) => radar.setOpacity(e.target.value / 100);
-  $('chk-typhoon').onchange = (e) => typhoon.setVisible(e.target.checked);
+  $('chk-typhoon').onchange = (e) => { typhoon.setVisible(e.target.checked); updateLegend(); };
   $('ty-issue').onchange = (e) => { typhoon.fixedIssue = e.target.value; render(); };
-  $('ty-cone').onchange = (e) => { typhoon.show_cone = e.target.checked; typhoon.draw(); };
+  $('ty-cone').onchange = (e) => { typhoon.show_cone = e.target.checked; typhoon.draw(); updateLegend(); };
   for (const c of document.querySelectorAll('[data-ty-circle]')) {
     c.onchange = () => { typhoon.circles[c.dataset.tyCircle] = c.checked; typhoon.draw(); };
   }

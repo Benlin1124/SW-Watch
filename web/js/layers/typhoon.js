@@ -380,6 +380,26 @@ export class TyphoonLayer {
 
   storms() { return this.data?.storms ?? []; }
 
+  /** 圖例:路徑線、潛勢區、暴風圈、強度分級(色階框是深色底,線條用深色底圖的顏色) */
+  legend() {
+    const th = THEME.dark;
+    const item = (svg, text) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;white-space:nowrap">
+      <svg width="30" height="14" viewBox="0 0 30 14">${svg}</svg>${text}</span>`;
+    const dot = (c) => `<circle cx="15" cy="7" r="4.5" fill="${c}" stroke="#000" stroke-width="0.8"/>`;
+    const ring = (c) => `<circle cx="15" cy="7" r="6" fill="${c}" fill-opacity="0.25" stroke="${c}" stroke-width="1.5"/>`;
+    const lines = [
+      item(`<line x1="1" y1="7" x2="29" y2="7" stroke="${th.track}" stroke-width="2"/><circle cx="15" cy="7" r="3" fill="#fb8c00" stroke="#000" stroke-width="0.6"/>`, '過去路徑'),
+      item(`<line x1="1" y1="7" x2="29" y2="7" stroke="${th.fcst}" stroke-width="2" stroke-dasharray="4 3"/>`, '預報路徑'),
+      this.show_cone ? item(`<rect x="2" y="2" width="26" height="10" rx="5" fill="${th.cone}" fill-opacity="0.15" stroke="${th.cone}" stroke-width="1" stroke-dasharray="3 2"/>`, '70% 潛勢區') : '',
+      item(ring('#f9a825'), '7 級風暴風圈'),
+      item(ring('#e53935'), '10 級風暴風圈'),
+    ].join('');
+    const cats = [10, 20, 40, 55].map((w) => category(w)).map((c) => item(dot(c.color), c.name)).join('');
+    return `<div class="legend-title">颱風路徑（氣象署）</div>
+      <div style="display:flex;flex-wrap:wrap;row-gap:3px;font-size:12px;max-width:460px">${lines}</div>
+      <div style="display:flex;flex-wrap:wrap;row-gap:3px;font-size:12px;margin-top:3px;max-width:460px">${cats}</div>`;
+  }
+
   setTheme(theme) {
     this.theme = theme;
     const th = THEME[theme], m = this.map;
