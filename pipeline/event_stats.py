@@ -120,7 +120,8 @@ def collect(start, end, use_r2):
                 continue
             sid = r[f["id"]]
             meta[sid] = {"id": sid, "name": r[f["name"]], "county": r[f.get("county")] if "county" in f else "",
-                         "town": r[f["town"]] if "town" in f else "", "lon": lon, "lat": lat}
+                         "town": r[f["town"]] if "town" in f else "", "lon": lon, "lat": lat,
+                         "alt": r[f["alt"]] if "alt" in f else None}
             col.setdefault(sid, len(col))
             rows.append(r)
         snaps.append((t, f, rows))
@@ -354,13 +355,72 @@ def plot_wind(path, geo, stations, w):
 
 
 def write_csv(path, stations, cols):
+    """各站表(依第一個數值欄由大到小)。"""
     with open(path, "w", newline="", encoding="utf-8-sig") as fp:
         wr = csv.writer(fp)
-        wr.writerow(["站號", "站名", "縣市", "鄉鎮", "經度", "緯度", *cols.keys()])
-        rows = [[s["id"], s["name"], s["county"], s["town"], s["lon"], s["lat"], *[c[i] for c in cols.values()]]
-                for i, s in enumerate(stations)]
-        rows.sort(key=lambda r: -(r[6] if isinstance(r[6], (int, float)) and r[6] == r[6] else -1))
+        wr.writerow(["站號", "站名", "縣市", "鄉鎮", "海拔(m)", "經度", "緯度", *cols.keys()])
+        rows = [[s["id"], s["name"], s["county"], s["town"], fmt_alt(s["alt"]), s["lon"], s["lat"],
+                 *[c[i] for c in cols.values()]] for i, s in enumerate(stations)]
+        rows.sort(key=lambda r: -(r[7] if isinstance(r[7], (int, float)) and r[7] == r[7] else -1))
         wr.writerows(rows)
+
+
+# 縣市表的地區:蘭嶼、綠島、基隆嶼、龜山島獨立,不併入原縣市;順序由北到南、離島最後
+REGION_ORDER = ["基隆市", "臺北市", "新北市", "桃園市", "新竹市", "新竹縣", "苗栗縣", "臺中市", "彰化縣", "南投縣",
+                "雲林縣", "嘉義市", "嘉義縣", "臺南市", "高雄市", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣",
+                "澎湖縣", "金門縣", "連江縣", "基隆嶼", "龜山島", "綠島", "蘭嶼"]
+WIND_ALT_MAX = 500                                      # 縣市風的統計只取海拔低於這個高度的站
+
+
+def fmt_alt(a):
+    return "" if a is None else (int(a) if float(a).is_integer() else a)
+
+
+def region(s):
+    name, town = s["name"] or "", s["town"] or ""
+    if town == "蘭嶼鄉":
+        return "蘭嶼"
+    if town == "綠島鄉":
+        return "綠島"
+    if name.startswith("龜山島"):
+        return "龜山島"
+    if name.startswith("基隆嶼"):
+        return "基隆嶼"
+    return s["county"] or "其他"
+
+
+def write_region_csv(path, stations, vals, label, unit, at=None, alt_max=None, wind=False):
+    """各地區(縣市 + 獨立離島)的最大值與測站;alt_max:只取海拔低於此值的站(海拔不明的不算)。"""
+    best = {}
+    for i, s in enumerate(stations):
+        v = vals[i]
+        if not np.isfinite(v):
+            continue
+        if alt_max is not None and (s["alt"] is None or s["alt"] >= alt_max):
+            continue
+        r = region(s)
+        if r not in best or v > vals[best[r]]:
+            best[r] = i
+    order = REGION_ORDER + sorted(set(best) - set(REGION_ORDER))
+    with open(path, "w", newline="", encoding="utf-8-sig") as fp:
+        wr = csv.writer(fp)
+        head = ["地區", f"{label}({unit})"] + (["風級"] if wind else []) + (["發生時間"] if at else []) +             ["站號", "站名", "鄉鎮", "海拔(m)"]
+        wr.writerow(head)
+        for r in order:
+            if r not in best:
+                if r in REGION_ORDER:
+                    wr.writerow([r] + [""] * (len(head) - 1))
+                continue
+            i = best[r]
+            s, v = stations[i], vals[i]
+            wr.writerow([r, round(float(v), 1)] + ([bf_label(v)] if wind else [])
+                        + ([tw(at[i], "%m/%d %H:%M") if at[i] else ""] if at else [])
+                        + [s["id"], s["name"], s["town"], fmt_alt(s["alt"])])
+
+
+def bf_label(ms):
+    k = beaufort(ms)
+    return ">17" if k > 17 else str(k)
 
 
 def main():
@@ -406,6 +466,11 @@ def main():
         "最大陣風(m/s)": [x if np.isfinite(x) else "" for x in wind["gust"]["val"]],
         "陣風風向(°)": [x if np.isfinite(x) else "" for x in wind["gust"]["dir"]],
         "陣風時間": fmt_at(wind["gust"]["at"])})
+    write_region_csv(out / "county_rain_total.csv", stations, total, "總累積雨量", "mm")
+    write_region_csv(out / "county_wind_max.csv", stations, wind["ws"]["val"], "最大平均風", "m/s",
+                     at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True)
+    write_region_csv(out / "county_gust_max.csv", stations, wind["gust"]["val"], "最大陣風", "m/s",
+                     at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True)
     print(f"輸出:{out}")
 
 
