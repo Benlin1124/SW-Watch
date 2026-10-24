@@ -42,10 +42,11 @@ RAIN_LEVELS = [0,10, 20, 60, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1
 RAIN_COLORS = ["#c1c2c2", "#9bffff", "#00cfff", "#0198ff", "#0165ff", "#309901", "#32ff00", "#f8ff00",
                "#ffcb00", "#ff9a00", "#fa0300", "#cc0003", "#a00000", "#98009a", "#c304cc", "#f805f3", "#fecbff"]
 BEAUFORT = [0, 0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7, 37.0, 41.5, 46.2, 51.0, 56.1, 61.3]
-# 最後一個 61.3 = 17 級上界(色階封頂;61.3 以上仍畫 17 級的顏色)
+# 最後一個 61.3 = 17 級上界;61.3 以上另用 WIND_OVER,色階標 >17
 WIND_COLORS = ["#eef5fb", "#c6dbef", "#9ecae1", "#6baed6", "#2171b5", "#74c476", "#238b45",
                "#fff59d", "#ffe03a", "#f5b700", "#ef5350", "#b71c1c", "#ce93d8", "#9c27b0",
                "#6a1b9a", "#4a148c", "#2a0a4a", "#14001f"]
+WIND_OVER = "#7a7a7a"                           # 61.3 m/s 以上(超過 17 級)
 LIGHT = {"bg": "#ffffff", "land": "#f5f5f5", "coast": "#000000", "county": "#1a1a1a"}
 
 # 滾動累積的雨量欄位 → 分鐘數
@@ -260,21 +261,25 @@ def finish(ax, insets, geo):
 
 
 def colorbar(fig, levels, colors, unit, cell_text=None):
-    """右側直式色階:一格一色、等間距,刻度 = 各級下界,上方只標單位;cell_text = 格子裡的字(風級)。"""
-    cax = fig.add_axes([0.855, 0.04, 0.035, 0.74])
+    """右側直式色階:一格一色、等間距,刻度 = 各級下界,上方只標單位;cell_text = 格子裡的字(風級)。
+    顏色比級數多一個 → 最後一色是「最後一個刻度以上」,畫成上方同樣大小的方格(例如 61.3 以上的 >17)。"""
+    extend = len(levels) == len(colors)
+    n = len(levels) - 1                                    # 刻度之間的格子數
+    H = 0.74
+    h = H * n / (n + 1) if extend else H                   # 加了上方格子,總高度不變
+    cax = fig.add_axes([0.855, 0.04, 0.035, h])
     cmap = ListedColormap(colors)
-    extend = len(levels) == len(colors)                   # 顏色和級數一樣多 → 最後一色畫成上方三角
     norm = BoundaryNorm(levels, cmap.N, extend="max" if extend else "neither")
-    cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax, ticks=levels, spacing="uniform")
+    cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax, ticks=levels, spacing="uniform",
+                      extendrect=True, extendfrac=1 / n if extend else None)
     cb.ax.tick_params(labelsize=10, length=0)
     cb.ax.set_yticklabels([f"{x:g}" for x in levels])
     cb.outline.set_linewidth(0.5)
-    cax.set_title(unit, fontsize=12, pad=16 if extend else 8)
+    cell_pt = (H - h) * fig.get_figheight() * 72          # 上方格子高度(點)
+    cax.set_title(unit, fontsize=12, pad=8 + cell_pt)
     if cell_text:
-        n = len(levels) - 1                                # 格子數(不含三角)
         for i, t in enumerate(cell_text):
-            y = (i + 0.5) / n if i < n else 1.018          # 最後一級在上方三角(預設高 5%)偏下的位置
-            cax.text(0.5, y, t, transform=cax.transAxes, ha="center", va="center", fontsize=8.5,
+            cax.text(0.5, (i + 0.5) / n, t, transform=cax.transAxes, ha="center", va="center", fontsize=8.5,
                      fontweight="bold", color=text_color(colors[i]), clip_on=False)
 
 
@@ -344,8 +349,8 @@ def plot_dots(path, geo, stations, v, levels, colors, unit, cell_text=None, whit
 
 
 def plot_wind(path, geo, stations, w):
-    plot_dots(path, geo, stations, w["val"], BEAUFORT, WIND_COLORS, "m/s",
-              cell_text=[str(k) for k in range(len(WIND_COLORS))], white_from=14)
+    plot_dots(path, geo, stations, w["val"], BEAUFORT, WIND_COLORS + [WIND_OVER], "m/s",
+              cell_text=[str(k) for k in range(len(WIND_COLORS))] + [">17"], white_from=14)
 
 
 def write_csv(path, stations, cols):
