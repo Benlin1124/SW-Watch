@@ -15,6 +15,7 @@ import argparse
 import gzip
 import json
 import logging
+import threading
 from datetime import timedelta
 from pathlib import Path
 
@@ -77,7 +78,9 @@ def load_bin(layer, stamp, g, use_r2):
             if r.status_code != 200:
                 return None
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(r.content)
+            tmp = path.with_name(f"{name}.{threading.get_ident()}.tmp")   # 背景執行緒同時下載,中斷也不留半個檔
+            tmp.write_bytes(r.content)
+            tmp.replace(path)
     return np.frombuffer(gzip.decompress(path.read_bytes()), dtype=np.uint8).reshape(g["ny"], g["nx"])
 
 
@@ -428,6 +431,22 @@ def wind_colorbar(fig):
     fig.text(x0 - 0.008, y0 + h / 2, "m/s", ha="right", va="center", fontsize=9, zorder=20)
 
 
+def prefetched(fn, items, ahead=8, workers=4):
+    """依序 yield (item, fn(item)),後面 ahead 筆先在背景執行緒做(下載 R2、解壓、組衛星影像),畫圖時不用等。"""
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    items = list(items)
+    with ThreadPoolExecutor(workers) as ex:
+        q = deque((x, ex.submit(fn, x)) for x in items[:ahead])
+        for nxt in items[ahead:] + [None] * ahead:
+            if not q:
+                break
+            x, fut = q.popleft()
+            if nxt is not None:
+                q.append((nxt, ex.submit(fn, nxt)))
+            yield x, fut.result()
+
+
 def set_frame(im, when, raw, table, stamp, overlays=()):
     im.set_data(raw if table is None else table[raw])      # 衛星日夜已經是 RGBA
     for o in overlays:
@@ -496,8 +515,9 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
                                          pix_fmt_out="yuv420p", macro_block_size=8)
     writer.send(None)
     frames, missing, gif_frames = [], 0, []
-    for i, t in enumerate(sel):
-        raw = load(t)
+    import time
+    t0 = time.time()
+    for i, (t, raw) in enumerate(prefetched(load, sel)):
         if raw is None:
             missing += 1
             continue
@@ -509,7 +529,8 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
         if gif:
             gif_frames.append(frame[::2, ::2].copy())
         if (i + 1) % 50 == 0:
-            print(f"  {i + 1}/{len(sel)}")
+            el = time.time() - t0
+            print(f"  {i + 1}/{len(sel)}  已 {el / 60:.1f} 分,約再 {el / (i + 1) * (len(sel) - i - 1) / 60:.1f} 分")
     writer.close()
     plt.close(fig)
     gaps = [(a, b) for a, b in zip(frames, frames[1:]) if stamp_dt(b) - stamp_dt(a) > timedelta(minutes=10)]
