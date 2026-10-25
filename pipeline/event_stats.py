@@ -10,7 +10,9 @@
 快照缺漏時會改用較長的累積時段跨過去;接不起來的站不畫(log 會列出數量)。
 雨量欄位的時間 = 快照時間(與網頁、station_agg 相同)。
 注意 CWA 的 Past2days / Past3days(rain_48h / rain_72h)是日曆日(昨天起 / 前天起,台灣 00 時),不是滾動 48 / 72 小時。
-最大平均風 / 最大陣風:觀測時間落在期間內的各筆取最大;陣風時間用 gust_at(有的話)。"""
+最大平均風 / 最大陣風:觀測時間落在期間內的各筆取最大;陣風時間用 gust_at(有的話)。
+最大時雨量 / 3 小時 / 24 小時雨量(rain_max.csv、縣市表):各快照的滾動累積取最大,只算整段都在期間內的。
+颱風、豪雨事件一次產統計 + 影片 + 摘要:用 pipeline.event_report。"""
 import argparse
 from pathlib import Path
 import csv
@@ -182,6 +184,30 @@ def max_wind(start, end, snaps, col):
                 if np.isnan(cur) or x > cur or (x == cur and at < (o["at"][i] or "")):
                     o["val"][i], o["at"][i] = x, at
                     o["dir"][i] = r[f[d]] if d in f and r[f[d]] is not None else np.nan
+    return out
+
+
+# ── 最大短時雨量(豪雨事件用)──
+RAIN_MAX = {"rain_1h": "最大時雨量", "rain_3h": "最大3小時雨量", "rain_24h": "最大24小時雨量"}
+
+
+def max_rain(start, end, snaps, col):
+    """各站滾動 1 / 3 / 24 小時累積雨量的最大值;只算整段累積時間都在期間內的(起點 ≥ start),
+    時間 = 快照時間(累積的結束時間)。"""
+    n = len(col)
+    out = {k: {"val": np.full(n, np.nan), "at": [None] * n} for k in RAIN_MAX}
+    for t, f, rows in snaps:
+        for k in RAIN_MAX:
+            if k not in f or to_stamp(stamp_dt(t) - timedelta(minutes=RAIN_WIN[k])) < start:
+                continue
+            o = out[k]
+            for r in rows:
+                x = r[f[k]]
+                if x is None:
+                    continue
+                i = col[r[f["id"]]]
+                if np.isnan(o["val"][i]) or x > o["val"][i]:
+                    o["val"][i], o["at"][i] = x, t
     return out
 
 
@@ -481,16 +507,31 @@ def main():
     ap.add_argument("--shp", default=str(config.ROOT / "shp"), help="底圖 shapefile 資料夾(含 TWN_CITY)")
     ap.add_argument("--local", action="store_true", help="只用本機 data/stations,不從 R2 補(排程那台電腦可用)")
     a = ap.parse_args()
+    start = to_stamp(parse_tw(a.start))
+    end = to_stamp(parse_tw(a.end)) if a.end else None
+    run(start, end, Path(a.shp), not a.local)
+
+
+def set_font():
     from matplotlib import font_manager
     have = {f.name for f in font_manager.fontManager.ttflist}
     plt.rcParams["font.family"] = [f for f in FONT if f in have] or ["sans-serif"]
 
-    start = to_stamp(parse_tw(a.start))
-    times = snapshot_times(not a.local)
-    end = to_stamp(parse_tw(a.end)) if a.end else times[-1]
-    end = max([t for t in times if t <= end], default=end)
+
+def resolve_end(end, use_r2):
+    """end(UTC stamp 或 None = 最新)→ 不晚於它的最後一筆測站快照。"""
+    times = snapshot_times(use_r2)
+    end = end or times[-1]
+    return max([t for t in times if t <= end], default=end)
+
+
+def run(start, end=None, shp=config.ROOT / "shp", use_r2=True, out=None):
+    """start / end:UTC stamp(end None = 最新快照);out 省略 = charts/{起}_{迄}/。
+    回傳 dict(out, start, end, stations, total, wind, rmax, geo)給 event_report 寫摘要。"""
+    set_font()
+    end = resolve_end(end, use_r2)
     print(f"期間 {tw(start)} – {tw(end)}(台灣)")
-    times, snaps, meta, col = collect(start, end, not a.local)
+    times, snaps, meta, col = collect(start, end, use_r2)
     print(f"快照 {len(snaps)} 筆(應有 {int((stamp_dt(end) - stamp_dt(start)).total_seconds() // 600)} 筆),測站 {len(col)}")
     stations = [None] * len(col)
     for sid, i in col.items():
@@ -498,10 +539,11 @@ def main():
 
     total, seg, _ = total_rain(start, end, snaps, col)
     wind = max_wind(start, end, snaps, col)
+    rmax = max_rain(start, end, snaps, col)
     print(f"雨量:{int(np.isfinite(total).sum())} 站接得起來;最多 {np.nanmax(total):.1f} mm")
 
-    geo = load_shp(Path(a.shp))
-    out = OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}"
+    geo = load_shp(Path(shp))
+    out = Path(out) if out else OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}"
     out.mkdir(parents=True, exist_ok=True)
     plot_rain(out / "rain_total.png", geo, stations, total)
     plot_dots(out / "rain_total_station.png", geo, stations, total, RAIN_LEVELS, RAIN_COLORS, "mm",
@@ -517,17 +559,28 @@ def main():
         "最大陣風(m/s)": [x if np.isfinite(x) else "" for x in wind["gust"]["val"]],
         "陣風風向(°)": [x if np.isfinite(x) else "" for x in wind["gust"]["dir"]],
         "陣風時間": fmt_at(wind["gust"]["at"])})
+    rcols = {}
+    for k, label in RAIN_MAX.items():
+        rcols[f"{label}(mm)"] = [x if np.isfinite(x) else "" for x in rmax[k]["val"]]
+        rcols[f"{label}時間"] = fmt_at(rmax[k]["at"])
+    write_csv(out / "rain_max.csv", stations, rcols)
     tables = [
         ("總累積雨量", "county_rain_total", region_table(stations, total, "總累積雨量", "mm"), "rain"),
         ("最大平均風", "county_wind_max", region_table(stations, wind["ws"]["val"], "最大平均風", "m/s",
                                                    at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True, exclude=WIND_EXCLUDE_TOWNS), "wind"),
         ("最大陣風", "county_gust_max", region_table(stations, wind["gust"]["val"], "最大陣風", "m/s",
                                                  at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True, exclude=WIND_EXCLUDE_TOWNS), "wind"),
+        ("最大時雨量", "county_rain_1h_max", region_table(stations, rmax["rain_1h"]["val"], "最大時雨量", "mm",
+                                                       at=rmax["rain_1h"]["at"]), "rain"),
+        ("最大24小時雨量", "county_rain_24h_max", region_table(stations, rmax["rain_24h"]["val"], "最大24小時雨量", "mm",
+                                                             at=rmax["rain_24h"]["at"]), "rain"),
     ]
     for _, fname, (head, rows, _), _ in tables:
         write_table_csv(out / f"{fname}.csv", head, rows)
     write_xlsx(out / "county_stats.xlsx", [(name, *t, kind) for name, _, t, kind in tables])
     print(f"輸出:{out}")
+    return {"out": out, "start": start, "end": end, "stations": stations, "total": total, "wind": wind,
+            "rmax": rmax, "geo": geo}
 
 
 if __name__ == "__main__":

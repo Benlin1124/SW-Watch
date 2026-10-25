@@ -824,3 +824,13 @@ Phase 0 + Phase 1 完成，已實際跑通：
 
 ## 2026-10-25 README 加 radar_video 說明
 - README 新增「雷達／颱風／測站風動畫」一節:用法範例(單純雷達、+颱風、颱風+測站平均風/陣風、預覽 PNG)、參數表、颱風與測站風圖例規則、輸出檔名、前景執行(背景 WinError 6)。
+
+## 2026-10-25 事件一鍵產出 pipeline.event_report
+- 目的:颱風 / 豪雨事件後一行指令產出統計圖表、影片、摘要與 YouTube 標題說明:`python -m pipeline.event_report --start "..." [--end ...] [--name ...]`,全部放 `charts/{起}_{迄}_{名稱}/`。
+- 事件種類 auto:期間內(往前多看一天)氣象署定位的颱風中心離本島海岸 ≤ 500 km → typhoon(影片 radar、radar_ty、gust、wind 四支,名稱預設「{颱風名}颱風」);否則 rain(只做 radar,摘要先列雨量)。`--kind`、`--videos`、`--no-video`、`--top` 可覆寫。
+- 颱風生命史:合併各報過去定位,依氣象署強度分級(17.2 / 32.7 / 51.0 m/s)列增強 / 減弱時間、巔峰、最接近本島(中心到 TWN_CITY 本島多邊形海岸的大圓距離;在陸地上只寫「定位在陸地上,是否登陸以氣象署認定為準」)、最後定位。
+- 摘要排行:最大陣風、最大平均風、總累積雨量、最大時雨量、最大 24 小時雨量;同名測站(例如兩個鳥嘴山)加海拔區分。達氣象署雨量分級站數:24 小時 80 / 200 / 350 / 500 mm、時雨量 40 mm、3 小時 100 mm。
+- youtube.txt:每支影片標題 + 說明(圖例、每格 10 分鐘、秒數、雷達缺漏時段)+ 事件總結;括號、冒號、逗號轉全形(時間 12:30、網址不轉)。
+- event_stats:main 拆成 `run()`(回傳站資料與數值給 event_report);新增 `max_rain`(滾動 1 / 3 / 24 小時累積取最大,只算整段在期間內的)→ `rain_max.csv`,縣市表 / xlsx 加「最大時雨量」「最大24小時雨量」兩頁。
+- radar_video:main 拆成 `render()`(可指定輸出資料夾、回傳幀數與缺漏時段;畫完 close figure,同一程序連做多支不累積記憶體);關掉 datalim 補 4:3 的「Ignoring fixed limits」log。
+- 驗證:薔琵期間 `--no-video` 結果與先前 event_stats 一致(最大陣風三貂角 65.1、雨量太平山 650.0);1 小時短期間跑過 typhoon 四支影片與 rain 模式、單獨的 radar_video --preview 與 event_stats。

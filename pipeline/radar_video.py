@@ -12,6 +12,7 @@ MP4 用 imageio-ffmpeg(pip install imageio-ffmpeg,內含 ffmpeg)。"""
 import argparse
 import gzip
 import json
+import logging
 from datetime import timedelta
 from pathlib import Path
 
@@ -312,8 +313,82 @@ def set_frame(im, when, raw, table, stamp, overlays=()):
     when.set_text(tw(stamp, "%Y/%m/%d %H:%M") + " (台灣時間)")
 
 
+def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_radar=False, use_r2=True,
+           fps=8, gif=False, shp=config.ROOT / "shp", out_dir=OUT_DIR, preview=None, title=None):
+    """start / end:UTC stamp(end None = 最新一筆);preview:UTC stamp 或 "latest" → 只輸出一張 PNG。
+    回傳 dict(path, frames, missing, gaps, seconds, first, last);gaps = 缺資料的 [(前一幀, 下一幀)]。"""
+    plt.rcParams["font.sans-serif"] = FONT + [f for f in plt.rcParams["font.sans-serif"] if f not in FONT]
+    logging.getLogger("matplotlib.axes._base").setLevel(logging.ERROR)   # datalim 補滿 4:3 的「Ignoring fixed limits」
+    times, g = radar_index(use_r2)
+    table = lut(g)
+    load = lambda t: load_raw(t, g, use_r2)
+    auto, prefix = "雷達整合回波", "radar"
+    if no_radar:                                         # 回波全畫成 raw 0(透明),時間用測站快照
+        times = snapshot_times(use_r2)
+        blank = np.zeros((g["ny"], g["nx"]), dtype=np.uint8)
+        load = lambda t: blank
+        wname = "測站陣風" if gust else "測站平均風"
+        auto, prefix = (f"颱風位置與{wname}" if typhoon else wname) if wind else "颱風路徑", "station"
+    geo, world = load_shp(Path(shp)), load_world()
+    fig, im, when = make_frame(geo, world, g, title or auto, EXTENT_TW if no_radar else EXTENT)
+    if wind:
+        wind_colorbar(fig)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suffix = ("_ty" if typhoon else "") + (("_gust" if gust else "_wind") if wind else "")
+    winds = [StationWind(use_r2, gust)] if wind else []
+
+    if preview:
+        stamp = times[-1] if preview == "latest" else max(t for t in times if t <= preview)
+        ty = [Typhoon(stamp, stamp, use_r2)] if typhoon else []
+        set_frame(im, when, load(stamp), table, stamp, winds + ty)
+        out = out_dir / f"{prefix}_{tw(stamp, '%Y%m%d%H%M')}{suffix}.png"
+        save(fig, out)                                   # 檔案被看圖軟體開著時改存 _new
+        print(f"預覽 {tw(stamp)} → {out}")
+        return {"path": out}
+
+    end = end or times[-1]
+    sel = [t for t in times if start <= t <= end]
+    if not sel:
+        plt.close(fig)
+        raise ValueError("期間內沒有資料")
+    import imageio_ffmpeg
+    ty = [Typhoon(sel[0], sel[-1], use_r2)] if typhoon else []
+    name = f"{prefix}_{tw(sel[0], '%Y%m%d%H%M')}_{tw(sel[-1], '%Y%m%d%H%M')}{suffix}"
+    path = out_dir / f"{name}.mp4"
+    fig.canvas.draw()
+    w, h = fig.canvas.get_width_height()
+    writer = imageio_ffmpeg.write_frames(str(path), (w, h), fps=fps, quality=8,
+                                         pix_fmt_out="yuv420p", macro_block_size=8)
+    writer.send(None)
+    frames, missing, gif_frames = [], 0, []
+    for i, t in enumerate(sel):
+        raw = load(t)
+        if raw is None:
+            missing += 1
+            continue
+        set_frame(im, when, raw, table, t, winds + ty)
+        fig.canvas.draw()
+        frame = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
+        writer.send(np.ascontiguousarray(frame))
+        frames.append(t)
+        if gif:
+            gif_frames.append(frame[::2, ::2].copy())
+        if (i + 1) % 50 == 0:
+            print(f"  {i + 1}/{len(sel)}")
+    writer.close()
+    plt.close(fig)
+    gaps = [(a, b) for a, b in zip(frames, frames[1:]) if stamp_dt(b) - stamp_dt(a) > timedelta(minutes=10)]
+    print(f"{tw(sel[0])} ~ {tw(sel[-1])}:{len(frames)} 幀(缺 {missing})→ {path}")
+    if gif:
+        import imageio.v2 as imageio
+        imageio.mimsave(out_dir / f"{name}.gif", gif_frames, duration=1 / fps, loop=0)
+        print(f"  GIF → {out_dir / (name + '.gif')}")
+    return {"path": path, "frames": len(frames), "missing": missing, "gaps": gaps, "seconds": len(frames) / fps,
+            "first": frames[0] if frames else None, "last": frames[-1] if frames else None}
+
+
 def main():
-    plt.rcParams["font.sans-serif"] = FONT + plt.rcParams["font.sans-serif"]
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--start", help="開始(台灣時間 YYYY-MM-DD HH:MM)")
     p.add_argument("--end", help="結束(台灣時間);省略 = 最新一筆")
@@ -327,72 +402,15 @@ def main():
     p.add_argument("--no-radar", action="store_true", help="不畫雷達(搭配 --wind / --typhoon;時間改用測站快照)")
     p.add_argument("--local", action="store_true", help="只用本機 data/radar")
     a = p.parse_args()
-    use_r2 = not a.local
-
-    times, g = radar_index(use_r2)
-    table = lut(g)
-    load = lambda t: load_raw(t, g, use_r2)
-    title, prefix = "雷達整合回波", "radar"
-    if a.no_radar:                                       # 回波全畫成 raw 0(透明),時間用測站快照
-        times = snapshot_times(use_r2)
-        blank = np.zeros((g["ny"], g["nx"]), dtype=np.uint8)
-        load = lambda t: blank
-        wname = "測站陣風" if a.gust else "測站平均風"
-        title, prefix = (f"颱風位置與{wname}" if a.typhoon else wname) if a.wind else "颱風路徑", "station"
-    geo, world = load_shp(Path(a.shp)), load_world()
-    fig, im, when = make_frame(geo, world, g, title, EXTENT_TW if a.no_radar else EXTENT)
-    if a.wind:
-        wind_colorbar(fig)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    suffix = ("_ty" if a.typhoon else "") + (("_gust" if a.gust else "_wind") if a.wind else "")
-    wind = [StationWind(use_r2, a.gust)] if a.wind else []
-
-    if a.preview:
-        stamp = times[-1] if a.preview == "latest" else max(t for t in times if t <= to_stamp(parse_tw(a.preview)))
-        ty = [Typhoon(stamp, stamp, use_r2)] if a.typhoon else []
-        set_frame(im, when, load(stamp), table, stamp, wind + ty)
-        out = OUT_DIR / f"{prefix}_{tw(stamp, '%Y%m%d%H%M')}{suffix}.png"
-        save(fig, out)                                   # 檔案被看圖軟體開著時改存 _new
-        print(f"預覽 {tw(stamp)} → {out}")
-        return
-
-    if not a.start:
+    if not a.start and not a.preview:
         p.error("要給 --start(或用 --preview)")
-    start = to_stamp(parse_tw(a.start))
-    end = to_stamp(parse_tw(a.end)) if a.end else times[-1]
-    sel = [t for t in times if start <= t <= end]
-    if not sel:
-        p.error("期間內沒有雷達資料")
-    import imageio_ffmpeg
-    ty = [Typhoon(sel[0], sel[-1], use_r2)] if a.typhoon else []
-    name = f"{prefix}_{tw(sel[0], '%Y%m%d%H%M')}_{tw(sel[-1], '%Y%m%d%H%M')}{suffix}"
-    fig.canvas.draw()
-    w, h = fig.canvas.get_width_height()
-    writer = imageio_ffmpeg.write_frames(str(OUT_DIR / f"{name}.mp4"), (w, h), fps=a.fps, quality=8,
-                                         pix_fmt_out="yuv420p", macro_block_size=8)
-    writer.send(None)
-    gif = []
-    missing = 0
-    for i, t in enumerate(sel):
-        raw = load(t)
-        if raw is None:
-            missing += 1
-            continue
-        set_frame(im, when, raw, table, t, wind + ty)
-        fig.canvas.draw()
-        frame = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
-        writer.send(np.ascontiguousarray(frame))
-        if a.gif:
-            gif.append(frame[::2, ::2].copy())
-        if (i + 1) % 50 == 0:
-            print(f"  {i + 1}/{len(sel)}")
-    writer.close()
-    print(f"{tw(sel[0])} ~ {tw(sel[-1])}:{len(sel) - missing} 幀(缺 {missing})→ {OUT_DIR / (name + '.mp4')}")
-    if a.gif:
-        import imageio.v2 as imageio
-        imageio.mimsave(OUT_DIR / f"{name}.gif", gif, duration=1 / a.fps, loop=0)
-        print(f"  GIF → {OUT_DIR / (name + '.gif')}")
+    preview = a.preview if a.preview in (None, "latest") else to_stamp(parse_tw(a.preview))
+    try:
+        render(to_stamp(parse_tw(a.start)) if a.start else None, to_stamp(parse_tw(a.end)) if a.end else None,
+               typhoon=a.typhoon, wind=a.wind, gust=a.gust, no_radar=a.no_radar, use_r2=not a.local,
+               fps=a.fps, gif=a.gif, shp=a.shp, preview=preview)
+    except ValueError as e:
+        p.error(str(e))
 
 
 if __name__ == "__main__":

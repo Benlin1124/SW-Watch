@@ -23,6 +23,46 @@ python -m http.server 8765
 # 瀏覽器開 http://127.0.0.1:8765/web/
 ```
 
+## 颱風／豪雨事件一鍵產出（`pipeline.event_report`）
+
+颱風或豪雨過後，執行一行指令，就會產生統計圖表、縮時影片和 YouTube 用的標題說明：
+
+```bash
+pip install matplotlib imageio-ffmpeg openpyxl pyshp
+python -m pipeline.event_report --start "2026-10-22 00:00" --end "2026-10-24 20:00"
+```
+
+- **時間**：都是台灣時間。`--end` 省略 = 最新一筆測站快照。
+- **事件種類**：自動判斷，可以用 `--kind typhoon|rain` 指定。
+  - 期間內颱風中心進入本島 500 km 內 → **颱風事件**：名稱預設「{颱風名}颱風」，做 4 支影片（雷達、雷達+颱風、颱風+測站陣風、颱風+測站平均風）。
+  - 否則 → **豪雨事件**：名稱預設「豪雨事件」，只做雷達影片，摘要以短時雨量為主。
+- **輸出**：全部放在 `charts/{起}_{迄}_{名稱}/`。
+
+| 檔案 | 內容 |
+|---|---|
+| `rain_total.png`、`rain_total_station.png` | 總累積雨量（內插圖、測站點） |
+| `wind_max.png`、`gust_max.png` | 最大平均風、最大陣風 |
+| `rain_total.csv`、`wind_max.csv`、`rain_max.csv` | 各站數值（`rain_max` 是最大時雨量、3 小時、24 小時雨量） |
+| `county_*.csv`、`county_stats.xlsx` | 各縣市最大值（雨量、風、時雨量、24 小時雨量） |
+| `*.mp4` | 縮時影片 |
+| `summary.txt` | 事件總結：颱風生命史與最接近台灣的時間、各項排行、達氣象署雨量分級的站數 |
+| `youtube.txt` | 每支影片的標題＋說明（含圖例、雷達缺漏時段、事件總結），可直接貼上 |
+
+其他參數：
+- `--name 名稱`：自訂事件名稱。
+- `--videos radar,radar_ty,gust,wind`：指定要做哪幾支影片。
+- `--no-video`：只做統計和摘要，幾分鐘就跑完。
+- `--top 6`：排行列幾名。
+- `--fps 8`、`--local`、`--shp`：同 `radar_video`。
+
+執行時要注意：
+- 4 支三天的影片要跑比較久，而且要在前景執行。
+- `summary.txt` 是自動整理的即時資料，數值異常的測站（例如陣風特別高）和是否登陸，請先對照氣象署的報告。
+
+只要其中一部分，也可以分開執行：
+- 統計圖表：`python -m pipeline.event_stats --start ... [--end ...]`，輸出到 `charts/{起}_{迄}/`。
+- 單支影片：用下面的 `radar_video`。
+
 ## 雷達／颱風／測站風動畫（`pipeline.radar_video`）
 
 把一段期間的雷達整合回波，或颱風路徑與測站風，做成縮時 MP4（每 10 分鐘一格）。
