@@ -144,6 +144,7 @@ def make_frame(geo, world, g, title="雷達整合回波", extent=EXTENT, source=
 # ── 衛星日夜(--sat)──
 B07_GRAY = [(30, 0), (20, 0.18), (10, 0.38), (0, 0.55), (-20, 0.7), (-50, 0.85), (-80, 1)]   # 同網頁 colormaps.js
 DN_NIGHT, DN_DAY = 0.0, 10.0                     # 太陽仰角 ≤ 0° 全用 B07、≥ 10° 全用 B03,之間漸變(同網頁)
+DN_COLD = (-30.0, -50.0)                         # 夜間依 B13:−30 °C 以上用 B07、−50 °C 以下用 B13,之間溫度混合(避開 B07 低溫雜訊)
 SAT_LINE = "#f2d16b"                             # 衛星底圖上的海岸、縣市界
 
 
@@ -175,18 +176,31 @@ class DayNight:
         self.use_r2 = use_r2
         self.times, self.g07 = grid_index("satellite/B07", use_r2)
         t03, self.g03 = grid_index("satellite/B03", use_r2)
-        self.t03 = set(t03)
+        t13, self.g13 = grid_index("satellite/B13", use_r2)
+        self.t03, self.t13 = set(t03), set(t13)
         x0, x1, y0, y1 = extent
         self.extent = (x0 - pad[0], x1 + pad[0], y0 - pad[1], y1 + pad[1])
         lon = np.arange(self.extent[0] + res / 2, self.extent[1], res)
         lat = np.arange(self.extent[2] + res / 2, self.extent[3], res)
         self.lon, self.lat = lon, lat
-        self.idx = {k: self._index(g, lon, lat) for k, g in (("07", self.g07), ("03", self.g03)) if g}
+        self.idx = {k: self._index(g, lon, lat) for k, g in (("07", self.g07), ("03", self.g03), ("13", self.g13)) if g}
         LON, LAT = np.meshgrid(lon, lat)
         self.LON, self.LAT = LON, LAT
-        v = np.arange(256) * self.g07["scale"] + self.g07["offset"]
+        self.night = self._night_lut()
+
+    def _night_lut(self):
+        """夜間灰階表 [B07 raw, B13 raw] → 灰階(NaN = 缺值);B13 缺就只用 B07,B07 缺就用 B13(同網頁 dnNightLUT)。"""
+        g07, g13 = self.g07, self.g13
+        a, b = np.meshgrid(np.arange(256), np.arange(256), indexing="ij")
+        t07 = np.where(a == g07["nodata"], np.nan, a * g07["scale"] + g07["offset"])
+        t13 = (np.where(b == g13["nodata"], np.nan, b * g13["scale"] + g13["offset"]) if g13
+               else np.full(a.shape, np.nan))
+        c = np.clip((DN_COLD[0] - t13) / (DN_COLD[0] - DN_COLD[1]), 0, 1)
+        c = np.where(np.isnan(t13), 0, np.where(np.isnan(t07), 1, c))
+        t = np.where(c == 0, t07, np.where(c == 1, t13, (1 - c) * t07 + c * t13))
         xs, gs = zip(*B07_GRAY[::-1])                                  # np.interp 要遞增
-        self.night = np.round(np.interp(v, xs, gs) * 255).clip(0, 254).astype(np.float32)
+        g = np.round(np.interp(np.nan_to_num(t), xs, gs) * 255).clip(0, 254)
+        return np.where(np.isnan(t), np.nan, g).astype(np.float32)
 
     @staticmethod
     def _index(g, lon, lat):
@@ -205,8 +219,11 @@ class DayNight:
         if r07 is None:
             return None
         a = self._crop(r07, "07")
-        n = self.night[a]
-        ok = a != self.g07["nodata"]
+        r13 = load_bin("satellite/B13", stamp, self.g13, self.use_r2) if self.g13 and stamp in self.t13 else None
+        b = self._crop(r13, "13") if r13 is not None else np.full_like(a, 255)
+        n = self.night[a, b]
+        ok = ~np.isnan(n)
+        n = np.nan_to_num(n)
         gray = n
         r03 = load_bin("satellite/B03", stamp, self.g03, self.use_r2) if self.g03 and stamp in self.t03 else None
         if r03 is not None:

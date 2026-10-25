@@ -11,6 +11,7 @@ export const SAT_BANDS = {
   // 組合產品:B13 − B07 亮溫差(需要 B13 和 B07 同一時次)
   FOG: { name: '夜間低雲／霧（B13−B07）', cache: 30, from: ['B13', 'B07'] },
   // 日夜:依每格太陽仰角,白天 B03 可見光、夜間 B07 短波紅外,晨昏之間漸變(時次跟 B07;夜間沒有 B03 就全用 B07)
+  // 夜間冷雲頂(B13 < −30 °C)漸變改用 B13,避開 B07 低溫雜訊
   DN: { name: '日夜（B03 白天／B07 夜間）', cache: 12, from: ['B07'] },
   B08: { name: 'B08 水氣', cache: 60, legend: ['亮溫 (°C)', [-90, 0], [-80, -60, -40, -20, 0]] },
   B03: { name: 'B03 可見光', cache: 24, legend: ['反照率 (%)', [0, 100], [0, 20, 40, 60, 80, 100]] },
@@ -19,7 +20,37 @@ export const SAT_BANDS = {
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 
 // 日夜漸變:太陽仰角 night 以下全用 B07、day 以上全用 B03(度)
-const DN = { night: 0, day: 10 };
+// 夜間冷雲頂:B07 在低溫訊號差(顆粒雜點)→ 依 B13 亮溫,cold[0] 以上用 B07、cold[1] 以下用 B13,之間溫度線性混合(°C)
+const DN = { night: 0, day: 10, cold: [-30, -50] };
+const B07_GRAY = [[30, 0], [20, 0.18], [10, 0.38], [0, 0.55], [-20, 0.7], [-50, 0.85], [-80, 1]];   // 同 colormaps.js
+
+function grayOf(t) {
+  if (t >= B07_GRAY[0][0]) return 0;
+  for (let i = 1; i < B07_GRAY.length; i++) {
+    const [t1, g1] = B07_GRAY[i], [t0, g0] = B07_GRAY[i - 1];
+    if (t >= t1) return Math.min(254, Math.round(255 * (g0 + ((g1 - g0) * (t0 - t)) / (t0 - t1))));
+  }
+  return 254;
+}
+
+/** 夜間灰階表:[B07 raw × 256 + B13 raw] → 灰階(255 = 缺值);B13 缺就只用 B07,B07 缺就用 B13 */
+const nightCache = new Map();
+function dnNightLUT(g07, g13) {
+  const key = JSON.stringify([g07.scale, g07.offset, g13?.scale, g13?.offset]);
+  if (nightCache.has(key)) return nightCache.get(key);
+  const lut = new Uint8Array(65536).fill(255);
+  for (let a = 0; a < 256; a++) {
+    for (let b = 0; b < 256; b++) {
+      const t07 = a === g07.nodata ? null : a * g07.scale + g07.offset;
+      const t13 = !g13 || b === g13.nodata ? null : b * g13.scale + g13.offset;
+      if (t07 === null && t13 === null) continue;
+      const c = t13 === null ? 0 : t07 === null ? 1 : Math.max(0, Math.min(1, (DN.cold[0] - t13) / (DN.cold[0] - DN.cold[1])));
+      lut[(a << 8) | b] = grayOf(c === 0 ? t07 : c === 1 ? t13 : (1 - c) * t07 + c * t13);
+    }
+  }
+  nightCache.set(key, lut);
+  return lut;
+}
 const GRAY_LUT = Uint32Array.from({ length: 256 }, (_, v) => (v === 255 ? 0 : (0xff000000 | (v << 16) | (v << 8) | v) >>> 0));
 
 /** 太陽赤緯與時間(NOAA 近似式,含均時差);時間取掃描開始 + 5 分(全盤掃到台灣附近約這時候) */
@@ -140,10 +171,13 @@ export class SatelliteLayer {
     const i07 = this.indexes.B07 ?? await getIndex('satellite/B07');
     const i03 = await getIndex('satellite/B03').catch(() => null);
     const g07 = i07.grid;
-    const r07 = await getGrid('satellite/B07', stamp, g07);
+    const i13 = this.indexes.B13 ?? await getIndex('satellite/B13').catch(() => null);
+    const [r07, r13] = await Promise.all([getGrid('satellite/B07', stamp, g07),
+      i13?.times.includes(stamp) ? getGrid('satellite/B13', stamp, i13.grid).catch(() => null) : null]);
     const r03 = i03?.times.includes(stamp) ? await getGrid('satellite/B03', stamp, i03.grid).catch(() => null) : null;
     const g = r03 ? i03.grid : g07, f = r03 ? 2 : 1;
-    const night = satLUT(g07, 'B07').map((p) => Math.min(254, p & 255));   // B07 灰階(同單頻道);255 留給缺值
+    const nightLUT = dnNightLUT(g07, i13?.grid);
+    const r13x = r13 ?? new Uint8Array(r07.length).fill(255);
     const sun = sunAt(stamp), ys = mercY(g.south), yn = mercY(g.north);
     const B = 16;                                                   // 太陽仰角每 16 格算一次
     const code = new Uint8Array(g.nx * g.ny);
@@ -157,7 +191,7 @@ export class SatelliteLayer {
         dayLUT.push(t);
       }
     }
-    const nd03 = g.nodata, nd07 = g07.nodata;
+    const nd03 = g.nodata;
     for (let y0 = 0; y0 < g.ny; y0 += B) {
       const lat = Math.atan(Math.sinh(ys + ((Math.min(y0 + B / 2, g.ny - 1) + 0.5) / g.ny) * (yn - ys))) * 180 / Math.PI;
       const y1 = Math.min(y0 + B, g.ny);
@@ -170,18 +204,17 @@ export class SatelliteLayer {
         for (let y = y0; y < y1; y++) {
           const row = y * g.nx, row07 = ((y / f) | 0) * g07.nx;
           for (let x = x0; x < x1; x++) {
-            const a = r07[row07 + ((x / f) | 0)];
-            const n = a === nd07 ? -1 : night[a];
-            if (!day) { code[row + x] = n < 0 ? 255 : n; continue; }
+            const j = row07 + ((x / f) | 0);
+            const n = nightLUT[(r07[j] << 8) | r13x[j]];             // 255 = 缺值
+            if (!day) { code[row + x] = n; continue; }
             const v = r03[row + x];
             const d = v === nd03 ? n : day[v];
-            if (d < 0) { code[row + x] = 255; continue; }
-            code[row + x] = w === 1 || n < 0 ? d : Math.round(w * d + (1 - w) * n);
+            code[row + x] = w === 1 || n === 255 || d === 255 ? d : Math.round(w * d + (1 - w) * n);
           }
         }
       }
     }
-    return { raw: { r07, r03, g07, g03: i03?.grid, sun }, url: await renderPNG(code, { ...g, nodata: 255 }, GRAY_LUT) };
+    return { raw: { r07, r13, r03, g07, g13: i13?.grid, g03: i03?.grid, sun }, url: await renderPNG(code, { ...g, nodata: 255 }, GRAY_LUT) };
   }
 
   async show(stamp) {
@@ -231,11 +264,12 @@ export class SatelliteLayer {
     const iy = Math.floor(((mercY(lat) - mercY(g.south)) / (mercY(g.north) - mercY(g.south))) * g.ny);
     if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
     if (this.band === 'DN') {
-      const { r07, r03, g07, g03, sun } = this.current.raw, i = iy * g.nx + ix;
+      const { r07, r13, r03, g07, g13, g03, sun } = this.current.raw, i = iy * g.nx + ix;
       const el = sunElevation(sun, lat, lng);
       const parts = [`太陽仰角 ${el.toFixed(0)}°`];
       if (r03 && r03[iy * 2 * g03.nx + ix * 2] !== g03.nodata) parts.push(`B03 ${(r03[iy * 2 * g03.nx + ix * 2] * g03.scale + g03.offset).toFixed(0)}%`);
       if (r07[i] !== g07.nodata) parts.push(`B07 ${(r07[i] * g07.scale + g07.offset).toFixed(1)} °C`);
+      if (r13 && r13[i] !== g13.nodata) parts.push(`B13 ${(r13[i] * g13.scale + g13.offset).toFixed(1)} °C`);
       return parts.join('、');
     }
     if (SAT_BANDS[this.band].from) {
@@ -256,7 +290,8 @@ export class SatelliteLayer {
       const [t03, r03, k03] = SAT_BANDS.B03.legend, [t07, r07, k07] = SAT_BANDS.B07.legend;
       return satLegendHTML(`衛星 日夜：白天 B03 可見光 ${t03}`, 'B03', this.style, r03, k03)
         + satLegendHTML(`夜間 B07 短波紅外 ${t07}`, 'B07', this.style, r07, k07)
-        + `<div class="legend-labels" style="margin-top:4px">太陽仰角 ${DN.night}° 以下全用 B07、${DN.day}° 以上全用 B03，之間漸變</div>`;
+        + `<div class="legend-labels" style="margin-top:4px">太陽仰角 ${DN.night}° 以下用夜間、${DN.day}° 以上全用 B03，之間漸變；`
+        + `夜間雲頂比 ${DN.cold[0]} °C 冷改用 B13（${DN.cold[1]} °C 以下全用 B13），避開 B07 低溫雜訊</div>`;
     }
     const [title, range, ticks] = SAT_BANDS[this.band].legend;
     const b13 = this.band === 'B13' ? (this.style === 'bd' ? '（增強）' : '（灰階）') : '';
