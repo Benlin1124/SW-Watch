@@ -242,7 +242,7 @@ class Typhoon:
 class StationWind:
     """當下(與雷達同一個 10 分鐘)測站快照的平均風(gust=True 改陣風 gust / gust_dir):箭頭指向風吹去的方向(同網頁 wd + 180),
     顏色依蒲福風級(同網頁 / 統計圖,>17 用 WIND_OVER),大小隨風級放大,級數高的畫在上面;
-    風速 0 或沒有風向畫小圓點。觀測時間比畫面時間早 60 分鐘以上的不畫。"""
+    風速 0 或沒有風向畫小圓點。觀測時間比畫面時間早超過 60 分鐘的不畫(整點那筆快照的風還是前一小時的觀測,要算進來)。"""
     MAX_AGE = 60
 
     def __init__(self, use_r2, gust=False):
@@ -264,7 +264,7 @@ class StationWind:
         arrows, dots = [], []
         for r in snap["rows"]:
             ws = r[f[self.var]]
-            if (f.get("type") is not None and r[f["type"]] == "jma") or ws is None or not (lo < (r[f["obs"]] or "") <= stamp):
+            if (f.get("type") is not None and r[f["type"]] == "jma") or ws is None or not (lo <= (r[f["obs"]] or "") <= stamp):
                 continue
             wd = r[f[self.dir]]
             (arrows if ws > 0 and wd is not None else dots).append((r[f["lon"]], r[f["lat"]], ws, wd))
