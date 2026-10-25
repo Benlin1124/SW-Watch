@@ -73,7 +73,7 @@ python -m pipeline.event_report --kind rain --name 1025豪雨 --start "2026-10-2
 
 ## 事件觀測資料歸檔（`pipeline.event_archive`）
 
-排程的清理規則會刪掉舊資料，本機和 R2 都一樣：10 分鐘一筆的資料 30 天後只留整點，衛星雲圖只留 `SAT_KEEP_DAYS` 天（預設 5 天）。要永久保留某個事件的觀測資料，請手動執行：
+排程的清理規則會刪掉舊資料，本機和 R2 都一樣：測站、雷達、雨量等資料只留 `KEEP_DAYS` 天（預設 10 天），超過就全部刪除；衛星雲圖只留 `SAT_KEEP_DAYS` 天（預設 5 天）。事件結束後要在期限內歸檔。要永久保留某個事件的觀測資料，請手動執行：
 
 ```bash
 python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" --end "2026-10-24 20:00" [--web] [--satellite]

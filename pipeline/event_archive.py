@@ -1,5 +1,5 @@
 """事件觀測資料歸檔(手動執行):把一段期間的原始觀測另存一份,不受 cleanup 保留策略影響
-(10 分鐘資料 30 天後只留整點、衛星只留 SAT_KEEP_DAYS 天)。
+(測站、雷達、雨量只留 KEEP_DAYS 天、衛星只留 SAT_KEEP_DAYS 天,超過全刪)→ 事件結束後要在期限內執行。
   python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" --end "2026-10-24 20:00" [--web] [--satellite]
 時間為台灣時間。存到 archive/{起}_{迄}_{名稱}/,目錄結構同 data/(每層一個 index.json,只含期間內的時間):
   預設(觀測):stations(測站 10 分鐘快照)、radar(雷達整合回波)、rain/cwa/1h、rain/cwa/today(氣象署雨量格點)、

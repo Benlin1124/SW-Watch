@@ -1,4 +1,5 @@
-"""保留策略:10 分鐘資料保留 KEEP_FULL_DAYS 天,更舊的只留整點;颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天;ECMWF 只留 ECMWF_KEEP_DAYS 天。"""
+"""保留策略:測站、雷達、雨量等資料保留 KEEP_DAYS 天(預設 10),更舊的全刪(事件要永久保留用 event_archive);
+颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天;ECMWF 只留 ECMWF_KEEP_DAYS 天;各站月 CSV(stations/series)永久保留。"""
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -12,13 +13,13 @@ SKIP = ("typhoon", "ecmwf")
 
 
 def run():
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=config.KEEP_FULL_DAYS)).strftime("%Y%m%d%H%M")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=config.KEEP_DAYS)).strftime("%Y%m%d%H%M")
     for idx_path in config.DATA_DIR.rglob("index.json"):
         rel = idx_path.parent.relative_to(config.DATA_DIR).as_posix()
         if rel.startswith(SKIP):
             continue
         idx = json.loads(idx_path.read_text(encoding="utf-8"))
-        drop = [t for t in idx["times"] if t < cutoff and not t.endswith("00")]
+        drop = [t for t in idx["times"] if t < cutoff]
         if not drop:
             continue
         for t in drop:

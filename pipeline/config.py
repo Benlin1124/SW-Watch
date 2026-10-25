@@ -37,7 +37,7 @@ TWD67_PROJ = ("+proj=longlat +ellps=aust_SA "
 CWA_RESOLVE_TTL_SEC = 6 * 3600
 
 # ── 保留策略 ──
-KEEP_FULL_DAYS = 30          # 10 分鐘資料保留天數;更舊只留整點
+KEEP_DAYS = int(os.environ.get("KEEP_DAYS", 10))   # 測站、雷達、雨量等資料保留天數,更舊的全刪(要永久保留用 event_archive);.env 可改
 
 # ── 自製 IDW 雨量格點 ──
 IDW_EXTENT = (118.0, 21.8, 122.2, 26.4)   # lon_min, lat_min, lon_max, lat_max

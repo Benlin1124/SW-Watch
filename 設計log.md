@@ -858,3 +858,9 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 使用者改成衛星保留 5 天:config.SAT_KEEP_DAYS 預設 7 → 5、.env.example、部署說明(約 5.5 GB)同步。
 - 事件歸檔原本原樣複製;格點 .bin.gz、agg .json.gz 本來就壓縮,但測站快照 .json(一筆約 283 KB)沒有 → 歸檔時沒壓縮的 .json 存成 .json.gz(gzip 6,測站快照約 66 KB,剩 1/4)。三天預設歸檔約 200 → 100 MB。
 - 讀回:event_archive.find 對 .json 也找 .json.gz;新增 load_json(.gz 先解壓),event_stats.load_snapshot、radar_video.Typhoon._load 改用它。實測 1 小時歸檔 3.2 → 1.6 MB,--local 從歸檔跑 event_stats、radar_video --preview 正常。
+
+## 2026-10-25 保留策略:10 分鐘資料 10 天後全刪(不再留整點)
+- 檢討:原本「30 天後只留整點、整點永久」每月多約 0.7 GB,但網頁時間軸只回 7 天用不到;測站長期資料另有 stations/series(永久,只在排程電腦);重要事件改用 event_archive。使用者選 C:不留整點。
+- config.KEEP_FULL_DAYS = 30 → `KEEP_DAYS = 10`(.env 可改);cleanup 對 data/ 下所有有 index.json 的圖層(颱風、ECMWF 除外)刪掉 KEEP_DAYS 天以前的全部時次。衛星仍由 SAT_KEEP_DAYS(5)另外清;series 永久。
+- 容量(本機與 R2):測站 / 雷達 / 雨量每天約 136 MB × 10 天 ≈ 1.4 GB + 衛星約 6 GB + 颱風與事件歸檔 → 約 7.5 GB 加歸檔,在 R2 免費 10 GB 內,不再隨時間成長。
+- 影響:事件要在 10 天內 event_archive(或 event_report),否則統計與影片做不出來;第一次以新設定 cleanup 會刪掉 10 天前的全部資料(含原本留下的整點)。
