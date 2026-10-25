@@ -909,3 +909,12 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 不在 worker 建 OffscreenCanvas:5000×3240 在 worker 出現 createImageData 記憶體不足。
 - 快取的 raw 改存 B03 縮成 B07 格點(滑鼠讀值本來就只取每 2×2 一格),一張從 24 MB 降到 12 MB;DN 快取 12 → 24 張(同 B03)。
 - 實測 8 格逐格切換(未快取):主執行緒長任務每次 50–210 ms(B03 單頻道 55–170 ms,原本日夜每張 1 秒以上),每格約 5 秒(下載);滑鼠讀值正常。
+## 2026-10-25 海象資料(O-B0075-001 浮標站與潮位站)
+- 使用者要加「海象監測資料-48 小時浮標站與潮位站海況監測資料 O-B0075-001」。
+- 這個產品 fileapi 回 404,只有 REST datastore(/api/v1/rest/datastore/O-B0075-001,整份約 1.8 MB、85 站 × 49 小時);只有站號,站名、座標、站種改用 O-B0076-001(fileapi,84 站:潮位站 47、浮標 31、岸邊氣象站 5、浮球式波浪站 1;11881 沒有基本資料,略過)。
+- common.fetch_cwa_rest():授權碼用 params 帶、錯誤只寫 HTTP 狀態碼(原本 fileapi 的錯誤訊息會把含授權碼的網址寫進 log)。config.CWA_REST。
+- pipeline/fetch_marine.py:平常 timeFrom = 上一筆 − 3 小時(只抓最近 4 小時);沒有資料或中斷 ≥ 3 小時抓整份 48 小時補齊。每小時一個快照 data/marine/{stamp}.json(fields + rows,同 stations;內容沒變不重寫,省 R2 上傳);data/marine/recent.json.gz = 近 48 小時各站時序(從本機快照組)。欄位:潮高、漲退潮、浪高 / 波向 / 週期、海溫、氣溫、氣壓、風速 / 風向 / 最大陣風、第 1 層海流流速 / 流向。
+- 排程:("marine", 每小時第 5–55 分每 5 分,週期 60、窗口到 55 分)。實測最新整點約延遲 20–40 分。REST 沒有條件式請求,一天約 100–200 次。cleanup 照 KEEP_DAYS(有 index.json 自動套用);event_archive 預設也存 marine。
+- 網頁 layers/marine.js:MarineLayer(cadence null,同步時取時間軸所在整點、1 小時內)+ MarineCard(#mr-card,樣式同測站資訊卡,近 48 小時 uPlot;只顯示這站有資料的分頁)。浪 / 風箭頭畫前進方向(資料是來向 +180°),海流照原值(流去方向)。新增色階 wave、period、tide(−2.5–2.5 m 每 0.25)、current。不同步時超過 90 分才標過時(staleMin)。
+- 使用者指定浪級:小浪 1–2 m、中浪 2–3 m、大浪 3–6 m、巨浪 6 m 以上 → 浪高色階依浪級分組(1 m 以下藍、小浪綠、中浪黃、大浪橘紅、巨浪紫);地圖數值、popup、資訊卡標浪級;浪高圖畫浪級分界虛線,y 軸從 0 起(至少到 3 m)。
+- 實測(本機暫存資料夾):第一次整份 48 小時 1.1 秒、之後 0.3 秒;快照約 10 KB、recent 約 30 KB;網頁浮標箭頭、浪級標示、點龍洞浮標開資訊卡(10/24 薔琵經過時浪高近 9 m)、切潮高色階都正常。

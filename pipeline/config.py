@@ -25,6 +25,7 @@ CWA_KEY = os.environ.get("CWA_KEY", "")
 
 CWA_FILEAPI = ("https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/{code}"
                "?Authorization={key}&downloadType=WEB&format=JSON")
+CWA_REST = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/{code}"   # 授權碼用 params 帶
 
 # TWD67 大地基準(GRS67 橢球 = aust_SA)+ 七參數 Helmert 轉 WGS84(同 EPSG:3828 的 towgs84 定義)。
 # 以 O-A0002-001 各站官方 TWD67/WGS84 雙座標驗證:差距中位數 2 m。

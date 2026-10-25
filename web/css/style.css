@@ -186,23 +186,26 @@ body[data-map-theme=dark] .st-label { color: #fff; text-shadow: 0 0 3px #000, 0 
 #st-rank li small { color: var(--muted); }
 
 /* 測站資訊卡 */
-#st-card { position: absolute; top: 64px; right: 56px; z-index: 6; width: 440px; max-width: calc(100vw - 80px);
+/* 海象資訊卡(#mr-card、#mc-*)同測站資訊卡 */
+#st-card, #mr-card { position: absolute; top: 64px; right: 56px; z-index: 6; width: 440px; max-width: calc(100vw - 80px);
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; color: var(--fg); }
+#st-card[hidden], #mr-card[hidden] { display: none; }
 .sc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-#sc-title { font-size: 15px; font-weight: 700; }
-#sc-sub { font-size: 12px; color: var(--muted); }
-#sc-close { padding: 2px 8px; }
-#sc-now { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; margin: 8px 0; font-size: 12px; }
-#sc-now div { display: flex; justify-content: space-between; gap: 6px; }
-#sc-now span { color: var(--muted); }
-#sc-now b { font-variant-numeric: tabular-nums; }
-#sc-now .sc-obs, .sc-nodata { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+#sc-title, #mc-title { font-size: 15px; font-weight: 700; }
+#sc-sub, #mc-sub { font-size: 12px; color: var(--muted); }
+#sc-close, #mc-close { padding: 2px 8px; }
+#sc-now, #mc-now { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; margin: 8px 0; font-size: 12px; }
+#sc-now div, #mc-now div { display: flex; justify-content: space-between; gap: 6px; }
+#sc-now span, #mc-now span { color: var(--muted); }
+#sc-now b, #mc-now b { font-variant-numeric: tabular-nums; }
+#sc-now .sc-obs, #mc-now .sc-obs, .sc-nodata { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
 .sc-tabs { display: flex; gap: 4px; margin-bottom: 4px; }
 .sc-tabs button { flex: 1; padding: 3px 0; }
+.sc-tabs button[hidden] { display: none; }
 .sc-tabs button.on { background: var(--accent); color: #000; }
-#sc-chart { min-height: 40px; }
-#sc-chart .u-legend { font-size: 11px; color: var(--fg); }
-#sc-note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+#sc-chart, #mc-chart { min-height: 40px; }
+#sc-chart .u-legend, #mc-chart .u-legend { font-size: 11px; color: var(--fg); }
+#sc-note, #mc-note { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 .reset-prefs { margin-top: 8px; font-size: 12px; }
 .sc-tabs select { flex: 0 0 auto; padding: 2px 4px; }

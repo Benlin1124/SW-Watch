@@ -6,6 +6,7 @@ import { SatelliteLayer } from './layers/satellite.js';
 import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
 import { category, TyphoonLayer } from './layers/typhoon.js';
 import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js';
+import { MARINE_VARS, MarineCard, MarineLayer } from './layers/marine.js';
 import { localToStamp, stampToLocal, twMidnight } from './layers/station_custom.js';
 import { StationCard } from './station_card.js';
 import { defaultCfg, EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
@@ -113,7 +114,10 @@ for (const [m, c] of Object.entries(prefs.get('ensCfg') ?? {})) ens.cfg[m] = { .
 const stations = new StationLayer(map);
 const card = new StationCard(stations);
 stations.onSelect = (id) => openStation(id, false);
-const LAYERS = [satellite, ecmwf, radar, stations, typhoon, ens];
+const marine = new MarineLayer(map);
+const mCard = new MarineCard(marine);
+marine.onSelect = (id) => { card.close(); mCard.open(id, state.T); };
+const LAYERS = [satellite, ecmwf, radar, stations, marine, typhoon, ens];
 
 // ── 狀態 ──
 const state = {
@@ -175,6 +179,7 @@ async function render() {
   if (!state.playing) { renderStorms(); refreshStationUI(); }
   if (ecmwf.visible) updateLegend();        // ECMWF 圖例跟著變數、時刻、雨量時段
   card.update(state.T);
+  mCard.update(state.T);
 }
 
 function updateLayerTime(l, stamp, sync) {
@@ -201,7 +206,7 @@ function updateLayerTime(l, stamp, sync) {
   }
   const age = Math.round(diffMin(nowStamp(), stamp));
   el.textContent = fmtTW(stamp);
-  if (!sync && age > 20) { el.textContent += `（${age} 分前）`; el.classList.add('stale'); }
+  if (!sync && age > (l.staleMin ?? 20)) { el.textContent += `（${age} 分前）`; el.classList.add('stale'); }
 }
 
 function updateClock() {
@@ -251,7 +256,7 @@ function drawCoverage() {
   ctx.clearRect(0, 0, w, h);
   const n = state.slots.length;
   if (!n) return;
-  const rows = [[{ times: [...(state.common ?? [])], cadence: 10 }, '#ffffff'], [satellite, '#b0bec5'], [radar, '#4fc3f7'], [stations, '#81c784'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
+  const rows = [[{ times: [...(state.common ?? [])], cadence: 10 }, '#ffffff'], [satellite, '#b0bec5'], [radar, '#4fc3f7'], [stations, '#81c784'], [marine, '#4dd0e1'], [typhoon, '#ffd54f'], [ens, '#ef5350']];
   const rh = h / rows.length;
   const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
   rows.forEach(([l, color], r) => {
@@ -549,7 +554,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [satellite, ecmwf, radar, stations, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, ecmwf, radar, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
 }
@@ -617,6 +622,17 @@ function bindStationUI() {
   $('st-hours').onchange = apply;
   $('op-stations').oninput = (e) => stations.setOpacity(e.target.value / 100);
   $('chk-stations').onchange = (e) => { stations.setVisible(e.target.checked); updateLegend(); };
+}
+
+function bindMarineUI() {
+  const vSel = $('mr-var');
+  vSel.innerHTML = Object.entries(MARINE_VARS).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('');
+  vSel.value = marine.variable;
+  vSel.onchange = async () => { await marine.configure({ variable: vSel.value }); updateLegend(); render(); };
+  $('op-marine').oninput = (e) => marine.setOpacity(e.target.value / 100);
+  $('chk-marine').onchange = (e) => { marine.setVisible(e.target.checked); if (!e.target.checked) mCard.close(); updateLegend(); };
+  marine.showLabels = $('mr-labels').checked;
+  $('mr-labels').onchange = (e) => { marine.showLabels = e.target.checked; marine.drawLabels(); };
 }
 
 /** 開關雷達 / 衛星或換頻道後,同步基準時間會變 → 重建時間軸 */
@@ -727,6 +743,7 @@ function openStation(id, fly = true) {
   const info = stations.all.get(id);
   if (!info) return;
   if (fly) map.flyTo({ center: [info.lon, info.lat], zoom: Math.max(map.getZoom(), 9) });
+  mCard.close();
   card.open(id, state.T);
 }
 
@@ -849,6 +866,7 @@ function bindUI() {
 
   $('chk-radar').onchange = (e) => { radar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); };
   bindStationUI();
+  bindMarineUI();
   bindLegendScale();
   new Capture(map, toast);
   bindStationTools();
@@ -932,6 +950,7 @@ map.on('load', async () => {
   ens.addTo('ty-cone-fill');
   addOverlays('ens-members');
   stations.addTo('ens-members');
+  marine.addTo('ens-members');
   setTheme('light');
   prefs.restoreControls();     // 上次的設定(重新整理後還原)
   prefs.watchControls();

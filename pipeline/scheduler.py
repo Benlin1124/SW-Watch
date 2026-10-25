@@ -15,8 +15,8 @@ from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import (cleanup, config, fetch_ecmwf, fetch_ensemble, fetch_radar, fetch_rain_grid, fetch_satellite, fetch_stations,
-               fetch_typhoon, r2)
+from . import (cleanup, config, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
+               fetch_stations, fetch_typhoon, r2)
 from .common import read_status, record_status, stamp_dt
 
 log = logging.getLogger("pipeline")
@@ -34,6 +34,8 @@ JOBS = [
     ("stations", fetch_stations.run, dict(minute=window(10, 1, 9)), 10, 9),
     ("qpe1h", fetch_rain_grid.run_qpe1h, dict(minute=window(10, 1, 9)), 10, 9),
     ("rain_today", fetch_rain_grid.run_daily, dict(minute=window(30, 1, 15)), 30, 15),
+    # 海象(每小時一筆,約整點後 20–40 分上架):REST 沒有條件式請求,每 5 分檢查一次,平常只抓最近 4 小時
+    ("marine", fetch_marine.run, dict(minute="5-55/5"), 60, 55),
     # 颱風消息:每分鐘觸發,由 typhoon_due() 決定這一分鐘要不要真的去抓(見下方說明)
     ("typhoon_cwa", fetch_typhoon.run, dict(minute="*"), None, None),
 ]

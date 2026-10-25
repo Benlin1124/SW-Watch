@@ -156,6 +156,20 @@
         </div>
       </div>
 
+      <div class="layer" data-layer="marine">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-marine" checked>
+          <span class="layer-name">海象（浮標／潮位）</span>
+          <span class="layer-time" id="time-marine">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>變數 <select id="mr-var"></select></label>
+          <label>透明度 <input type="range" id="op-marine" min="0" max="100" value="100"></label>
+          <label><input type="checkbox" id="mr-labels" checked> 地圖上顯示數值文字</label>
+          <div class="hint">每小時一筆；點站看近 48 小時變化</div>
+        </div>
+      </div>
+
       <div class="layer" data-layer="typhoon">
         <label class="layer-head">
           <input type="checkbox" id="chk-typhoon" checked>
@@ -265,6 +279,17 @@
     </div>
     <div id="sc-chart"></div>
     <div id="sc-note"></div>
+  </aside>
+
+  <aside id="mr-card" hidden>
+    <div class="sc-head">
+      <div><div id="mc-title"></div><div id="mc-sub"></div></div>
+      <button id="mc-close" title="關閉">✕</button>
+    </div>
+    <div id="mc-now"></div>
+    <div class="sc-tabs"></div>
+    <div id="mc-chart"></div>
+    <div id="mc-note"></div>
   </aside>
 
   <div id="readout"></div>

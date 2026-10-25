@@ -108,6 +108,19 @@ def fetch_cwa(code, timeout=90):
     return data
 
 
+def fetch_cwa_rest(code, timeout=90, **params):
+    """REST datastore(沒有 fileapi 檔案的產品,例如 O-B0075-001);每次都計入會員次數,沒有條件式請求。
+    回傳 records 外層的整個 JSON。錯誤訊息不帶網址(網址含授權碼,會寫進 log)。"""
+    if not config.CWA_KEY:
+        raise RuntimeError("未設定 CWA_KEY(請在專案根目錄 .env 加上 CWA_KEY=...)")
+    r = requests.get(config.CWA_REST.format(code=code), params={"Authorization": config.CWA_KEY, **params},
+                     timeout=timeout)
+    _count(api_requests=1, bytes=len(r.content))
+    if r.status_code != 200:
+        raise RuntimeError(f"{code} HTTP {r.status_code}")
+    return r.json()
+
+
 def parse_grid(text, nx, ny, invalid=()):
     """CWA 逗號分隔科學記號字串 → (ny, nx) float32;第 0 列為最南。invalid 內的值改 NaN。"""
     # 有的產品只用逗號分隔,O-A0040-004 同一列內用空白分隔 → 逗號或空白一律切開
