@@ -838,3 +838,12 @@ Phase 0 + Phase 1 完成，已實際跑通：
 ## 2026-10-25 event_report:種類、名稱自己給;短時雨量 1 / 3 / 6 / 12 / 24 小時
 - 使用者要求:不要自動判斷事件種類,名稱自己輸入 → `--kind typhoon|rain`、`--name` 改必填(拿掉 auto 與預設名稱)。typhoon 仍找期間內中心進入本島 500 km 內的颱風寫生命史,找不到就只印提示。
 - 最大時雨量、3、6、12、24 小時雨量颱風、豪雨都要有:event_stats.RAIN_MAX 加 rain_6h、rain_12h → rain_max.csv、縣市表 / xlsx 各一頁(共 8 頁);summary / youtube 兩種事件都列五種短時雨量排行(只算整段時間窗在期間內的,事件短於 24 小時就沒有 24 小時雨量)。
+
+## 2026-10-25 事件觀測資料歸檔 pipeline.event_archive(手動執行)
+- 原因:cleanup 會把 10 分鐘資料 30 天後只留整點(本機與 R2 都刪)、衛星只留 3 天 → 事件的觀測資料會消失。使用者要保留每一個事件的觀測資料,由自己手動執行。
+- `python -m pipeline.event_archive --name 名稱 --start ... --end ... [--web] [--satellite] [--no-upload] [--local]` → `archive/{起}_{迄}_{名稱}/`(gitignore),結構同 data/,每層 index.json 只含期間內時間(其他欄位如雷達 grid 保留),另有 event.json(名稱、起迄、各層筆數)。
+  - 預設:stations、radar、rain/cwa/1h、rain/cwa/today、typhoon/cwa_track、typhoon/cwa(颱風兩層往前多存 1 天)。--web:stations/agg_*、rain/idw/*。--satellite:B03/B08/B13。
+  - 來源:本機 data/ 複製,沒有就從 R2 公開網址下載;已存在跳過(可續傳),先寫 .tmp 再改名。
+  - .env 有 R2 金鑰 → 上傳到 R2 `events/{資料夾}/`(大小相同的跳過)並更新 `events/index.json`;r2.reconcile 只走 data/、cleanup 只刪 data/ 的檔,不會動到 events/。
+- 讀回:event_stats(snapshot_times、load_snapshot)、radar_video(radar_index 含 grid、load_raw、Typhoon)本機 data/ 沒有時找 archive/ → 原始資料清掉後仍可重做統計、影片(--local 也行)。
+- 實測:1 小時期間 --web --satellite 共 27 MB;刪掉 data 依賴後用 --local 從歸檔跑 event_stats 與 radar_video --preview 正常。3 天估計:預設約 200 MB、--web 再約 200 MB、衛星數 GB。

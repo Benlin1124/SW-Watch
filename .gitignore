@@ -20,3 +20,6 @@ __pycache__/
 charts/
 # 統計圖底圖 shapefile(使用者提供,約 24 MB,不進版控)
 shp/
+
+# 事件觀測資料歸檔(pipeline.event_archive)
+archive/

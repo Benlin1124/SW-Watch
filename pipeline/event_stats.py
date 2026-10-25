@@ -31,7 +31,7 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Polygon as MplPolygon
 
-from . import config, idw
+from . import config, event_archive, idw
 from .common import read_index
 
 TW = timezone(timedelta(hours=8))
@@ -81,7 +81,7 @@ def parse_tw(text):
 
 # ── 讀快照 ──
 def snapshot_times(use_r2):
-    local = set(read_index("stations").get("times", []))
+    local = set(read_index("stations").get("times", [])) | event_archive.times("stations")
     if use_r2:
         H = {"User-Agent": "Mozilla/5.0"}
         local |= set(requests.get(R2_URL + "stations/index.json", headers=H, timeout=60).json()["times"])
@@ -90,6 +90,8 @@ def snapshot_times(use_r2):
 
 def load_snapshot(stamp, use_r2):
     path = config.DATA_DIR / "stations" / f"{stamp}.json"
+    if not path.exists():
+        path = event_archive.find("stations", f"{stamp}.json") or path   # 原始資料被清掉 → 事件歸檔
     if not path.exists():
         if not use_r2:
             return None

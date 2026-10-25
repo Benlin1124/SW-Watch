@@ -71,6 +71,28 @@ python -m pipeline.event_report --kind rain --name 1025豪雨 --start "2026-10-2
 - 統計圖表：`python -m pipeline.event_stats --start ... [--end ...]`，輸出到 `charts/{起}_{迄}/`。
 - 單支影片：用下面的 `radar_video`。
 
+## 事件觀測資料歸檔（`pipeline.event_archive`）
+
+排程的清理規則會刪掉舊資料，本機和 R2 都一樣：10 分鐘一筆的資料 30 天後只留整點，衛星雲圖只留 3 天。要永久保留某個事件的觀測資料，請手動執行：
+
+```bash
+python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" --end "2026-10-24 20:00" [--web] [--satellite]
+```
+
+| 存什麼 | 內容 | 三天約多大 |
+|---|---|---|
+| 預設 | 測站 10 分鐘快照、雷達整合回波、氣象署雨量格點、颱風路徑與颱風消息（颱風往前多存一天） | 約 200 MB |
+| `--web` | 網頁圖層用的衍生資料：測站累積 `stations/agg_*`、雨量內插 `rain/idw/*` | 再加約 200 MB |
+| `--satellite` | 衛星雲圖 B03 / B08 / B13。只保留 3 天，事件結束後要盡快執行 | 數 GB |
+
+- **存放位置**：`archive/{起}_{迄}_{名稱}/`，目錄結構同 `data/`，每層有自己的 `index.json`，另有一個 `event.json` 記錄事件資訊。
+  - 這個資料夾不進 git，`cleanup` 也不會動到。
+- **資料來源**：本機 `data/` 有的直接複製，沒有的從 R2 下載。已經存過的檔會跳過，中斷後重跑會接著做。
+- **上傳 R2**：`.env` 有 R2 金鑰時，會另外上傳到 R2 的 `events/{起}_{迄}_{名稱}/`，並更新 `events/index.json`。
+  - 加 `--no-upload` 就不上傳。
+  - 沒有金鑰的電腦只會存在本機。到排程電腦再執行一次同樣的指令，就會補上傳。
+- **事後重做**：`event_stats`、`radar_video`、`event_report` 都會自動讀 `archive/`。原始資料被清掉後，還是能重做統計和影片，可以加 `--local` 只用本機資料。
+
 ## 雷達／颱風／測站風動畫（`pipeline.radar_video`）
 
 把一段期間的雷達整合回波，或颱風路徑與測站風，做成縮時 MP4（每 10 分鐘一格）。

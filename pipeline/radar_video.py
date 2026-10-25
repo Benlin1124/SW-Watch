@@ -27,7 +27,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import shape
 
-from . import config
+from . import config, event_archive
 from .common import read_index
 from .event_stats import BEAUFORT, FONT, LIGHT, R2_URL, WIND_COLORS, WIND_OVER, _polys, load_shp, load_snapshot, save, text_color, snapshot_times, parse_tw, stamp_dt, to_stamp, tw
 
@@ -44,7 +44,9 @@ BASEMAP = config.ROOT / "web" / "assets" / "basemap"
 
 def radar_index(use_r2):
     idx = read_index("radar")
-    times = set(idx.get("times", []))
+    times = set(idx.get("times", [])) | event_archive.times("radar")
+    if "grid" in event_archive.meta("radar"):
+        idx.setdefault("grid", event_archive.meta("radar")["grid"])
     if use_r2:
         r2 = requests.get(R2_URL + "radar/index.json", headers=H, timeout=60).json()
         times |= set(r2["times"])
@@ -54,6 +56,8 @@ def radar_index(use_r2):
 
 def load_raw(stamp, g, use_r2):
     path = config.DATA_DIR / "radar" / f"{stamp}.bin.gz"
+    if not path.exists():
+        path = event_archive.find("radar", f"{stamp}.bin.gz") or path    # 原始資料被清掉 → 事件歸檔
     if not path.exists():
         if not use_r2:
             return None
@@ -158,7 +162,7 @@ class Typhoon:
     目前位置與半徑:實際定位之間內插,最後一個定位之後沿當下最新一報(初始時間 ≤ 該時間)的預報內插。"""
 
     def __init__(self, start, end, use_r2):
-        idx = read_index("typhoon/cwa_track").get("times", [])
+        idx = sorted(set(read_index("typhoon/cwa_track").get("times", [])) | event_archive.times("typhoon/cwa_track"))
         if use_r2:
             idx = sorted(set(idx) | set(requests.get(R2_URL + "typhoon/cwa_track/index.json", headers=H, timeout=60).json()["times"]))
         lo = to_stamp(stamp_dt(start) - timedelta(days=1))
@@ -177,6 +181,8 @@ class Typhoon:
     @staticmethod
     def _load(stamp, use_r2):
         path = config.DATA_DIR / "typhoon" / "cwa_track" / f"{stamp}.json"
+        if not path.exists():
+            path = event_archive.find("typhoon/cwa_track", f"{stamp}.json") or path
         if not path.exists():
             if not use_r2:
                 return None
