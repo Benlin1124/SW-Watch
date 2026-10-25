@@ -821,3 +821,6 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 來源 NCDR `https://watch.ncdr.nat.gov.tw/00_Wxmap/json/area/100KM.json`(台灣周圍 100 公里範圍的多邊形,颱風暴風圈接近的參考線)。
 - `build_basemap.py` 加 `km100`(只取外框線、簡化 0.002°、4 位小數 → `web/assets/basemap/km100.json` 2 KB),新增 `--only` 只重產指定的底圖:`python -m pipeline.build_basemap --only km100`。來源要 User-Agent,檔案有 BOM(utf-8-sig)。
 - 網頁:疊在資料上面的邊界線多一條 `km100`(虛線 [4, 2],有襯邊),顏色隨底圖(淺 #1565c0、深 #64b5f6、衛星 #90caf9);底圖區塊加「100 公里線」勾選(預設開)。
+
+## 2026-10-25 README 加 radar_video 說明
+- README 新增「雷達／颱風／測站風動畫」一節:用法範例(單純雷達、+颱風、颱風+測站平均風/陣風、預覽 PNG)、參數表、颱風與測站風圖例規則、輸出檔名、前景執行(背景 WinError 6)。
