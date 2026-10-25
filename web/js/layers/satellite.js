@@ -71,6 +71,62 @@ function sunElevation({ decl, min }, lat, lon) {
   return (Math.asin(Math.sin(p) * Math.sin(decl) + Math.cos(p) * Math.cos(decl) * Math.cos(ha)) * 180) / Math.PI;
 }
 
+/** 範圍內有沒有地方太陽仰角超過 DN.night(粗略取 9×9 點) */
+function hasDaylight(sun, g) {
+  for (let i = 0; i <= 8; i++) {
+    for (let j = 0; j <= 8; j++) {
+      if (sunElevation(sun, g.south + ((g.north - g.south) * i) / 8, g.west + ((g.east - g.west) * j) / 8) > DN.night) return true;
+    }
+  }
+  return false;
+}
+
+/** 日夜合成:B03(0.01°)與 B07(0.02°)範圍相同、格點剛好兩倍 → 有 B03 時用 B03 解析度,B07 每格放大成 2×2。
+ *  權重 w = 太陽仰角在 DN.night → DN.day 之間線性漸變;可見光除以 sin(仰角)補償晨昏變暗(仰角 < DN.day 時不再放大) */
+async function dnCompose({ r07, r13, g07, g13 }, vis, sun) {
+  const r03 = vis?.r03 ?? null, g03 = vis?.g03;
+  const g = r03 ? g03 : g07, f = r03 ? 2 : 1;
+  const nightLUT = dnNightLUT(g07, g13);
+  const r13x = r13 ?? new Uint8Array(r07.length).fill(255);
+  const ys = mercY(g.south), yn = mercY(g.north);
+  const B = 16;                                                   // 太陽仰角每 16 格算一次
+  const code = new Uint8Array(g.nx * g.ny);
+  const sMax = Math.sin((DN.day * Math.PI) / 180);
+  // 可見光灰階查表:補償倍率 k(1 ~ 1/sin(DN.day))量化成 KQ 級,每級一張 raw → 灰階表(不用每格算次方)
+  const KQ = 48, kMax = 1 / sMax, dayLUT = [];
+  if (r03) {
+    for (let q = 0; q < KQ; q++) {
+      const k = 1 + ((kMax - 1) * q) / (KQ - 1), t = new Uint8Array(256);
+      for (let v = 0; v < 255; v++) t[v] = Math.min(254, Math.round(255 * Math.pow(Math.min(1, ((v * g.scale + g.offset) * k) / 100), 0.6)));
+      dayLUT.push(t);
+    }
+  }
+  const nd03 = g.nodata;
+  for (let y0 = 0; y0 < g.ny; y0 += B) {
+    const lat = Math.atan(Math.sinh(ys + ((Math.min(y0 + B / 2, g.ny - 1) + 0.5) / g.ny) * (yn - ys))) * 180 / Math.PI;
+    const y1 = Math.min(y0 + B, g.ny);
+    for (let x0 = 0; x0 < g.nx; x0 += B) {
+      const lon = g.west + ((Math.min(x0 + B / 2, g.nx - 1) + 0.5) / g.nx) * (g.east - g.west);
+      const el = sunElevation(sun, lat, lon);
+      const w = r03 ? Math.max(0, Math.min(1, (el - DN.night) / (DN.day - DN.night))) : 0;
+      const x1 = Math.min(x0 + B, g.nx);
+      const day = w > 0 ? dayLUT[Math.round(((1 / Math.max(Math.sin((el * Math.PI) / 180), sMax) - 1) / (kMax - 1)) * (KQ - 1))] : null;
+      for (let y = y0; y < y1; y++) {
+        const row = y * g.nx, row07 = ((y / f) | 0) * g07.nx;
+        for (let x = x0; x < x1; x++) {
+          const j = row07 + ((x / f) | 0);
+          const n = nightLUT[(r07[j] << 8) | r13x[j]];             // 255 = 缺值
+          if (!day) { code[row + x] = n; continue; }
+          const v = r03[row + x];
+          const d = v === nd03 ? n : day[v];
+          code[row + x] = w === 1 || n === 255 || d === 255 ? d : Math.round(w * d + (1 - w) * n);
+        }
+      }
+    }
+  }
+  return { raw: { r07, r13, r03, g07, g13, g03, sun }, url: await renderPNG(code, { ...g, nodata: 255 }, GRAY_LUT) };
+}
+
 export class SatelliteLayer {
   key = 'satellite';
   name = '衛星雲圖';
@@ -82,7 +138,8 @@ export class SatelliteLayer {
   index = null;
   indexes = {};              // band → index
   current = null;            // { key, stamp, raw }
-  cache = new Map();         // `${band}|${style}|${stamp}` → Promise<{ raw, url }>
+  cache = new Map();         // `${band}|${style}|${stamp}` → Promise<{ raw, url }>(做完的 .done = true)
+  dnSrc = new Map();         // 日夜下載中的來源格點:stamp → { sun, night, vis }
 
   constructor(map) { this.map = map; }
 
@@ -140,7 +197,7 @@ export class SatelliteLayer {
       const p = band === 'DN' ? this.dnFrame(stamp)
         : SAT_BANDS[band].from ? this.fogFrame(stamp, g)
         : getGrid(`satellite/${band}`, stamp, g).then(async (raw) => ({ raw, url: await renderPNG(raw, g, satLUT(g, band, style)) }));
-      p.catch(() => this.cache.delete(key));
+      p.then(() => { p.done = true; }, () => this.cache.delete(key));
       this.cache.set(key, p);
       const max = SAT_BANDS[this.band].cache;
       while (this.cache.size > max) {
@@ -165,61 +222,44 @@ export class SatelliteLayer {
     return { raw: { r13, r07, g13, g07 }, url: await renderPNG(code, { ...g, nodata: 255 }, fogLUT()) };
   }
 
-  /** 日夜:B03(0.01°)與 B07(0.02°)範圍相同、格點剛好兩倍 → 有 B03 時用 B03 解析度,B07 每格放大成 2×2。
-   *  權重 w = 太陽仰角在 DN.night → DN.day 之間線性漸變;可見光除以 sin(仰角)補償晨昏變暗(仰角 < DN.day 時不再放大) */
+  /** 日夜的來源格點:B07 + B13 一組、B03 一組,同時下載(同一時次只抓一次,完整版做完就放掉);
+   *  整個範圍太陽仰角都在 DN.night 以下就不抓 B03 */
+  dnSources(stamp) {
+    if (this.dnSrc.has(stamp)) return this.dnSrc.get(stamp);
+    const idx = (b) => (this.indexes[b] ? Promise.resolve(this.indexes[b]) : getIndex(`satellite/${b}`).catch(() => null));
+    const sun = sunAt(stamp);
+    const night = Promise.all([idx('B07'), idx('B13')]).then(async ([i07, i13]) => {
+      const [r07, r13] = await Promise.all([getGrid('satellite/B07', stamp, i07.grid),
+        i13?.times.includes(stamp) ? getGrid('satellite/B13', stamp, i13.grid).catch(() => null) : null]);
+      return { r07, r13, g07: i07.grid, g13: i13?.grid };
+    });
+    const vis = idx('B03').then((i03) => (i03?.times.includes(stamp) && hasDaylight(sun, i03.grid)
+      ? getGrid('satellite/B03', stamp, i03.grid).then((r03) => ({ r03, g03: i03.grid })).catch(() => null) : null));
+    const s = { sun, night, vis };
+    this.dnSrc.set(stamp, s);
+    return s;
+  }
+
+  /** 日夜完整版 */
   async dnFrame(stamp) {
-    const i07 = this.indexes.B07 ?? await getIndex('satellite/B07');
-    const i03 = await getIndex('satellite/B03').catch(() => null);
-    const g07 = i07.grid;
-    const i13 = this.indexes.B13 ?? await getIndex('satellite/B13').catch(() => null);
-    const [r07, r13] = await Promise.all([getGrid('satellite/B07', stamp, g07),
-      i13?.times.includes(stamp) ? getGrid('satellite/B13', stamp, i13.grid).catch(() => null) : null]);
-    const r03 = i03?.times.includes(stamp) ? await getGrid('satellite/B03', stamp, i03.grid).catch(() => null) : null;
-    const g = r03 ? i03.grid : g07, f = r03 ? 2 : 1;
-    const nightLUT = dnNightLUT(g07, i13?.grid);
-    const r13x = r13 ?? new Uint8Array(r07.length).fill(255);
-    const sun = sunAt(stamp), ys = mercY(g.south), yn = mercY(g.north);
-    const B = 16;                                                   // 太陽仰角每 16 格算一次
-    const code = new Uint8Array(g.nx * g.ny);
-    const sMax = Math.sin((DN.day * Math.PI) / 180);
-    // 可見光灰階查表:補償倍率 k(1 ~ 1/sin(DN.day))量化成 KQ 級,每級一張 raw → 灰階表(不用每格算次方)
-    const KQ = 48, kMax = 1 / sMax, dayLUT = [];
-    if (r03) {
-      for (let q = 0; q < KQ; q++) {
-        const k = 1 + ((kMax - 1) * q) / (KQ - 1), t = new Uint8Array(256);
-        for (let v = 0; v < 255; v++) t[v] = Math.min(254, Math.round(255 * Math.pow(Math.min(1, ((v * g.scale + g.offset) * k) / 100), 0.6)));
-        dayLUT.push(t);
-      }
+    const s = this.dnSources(stamp);
+    try {
+      const [n, v] = await Promise.all([s.night, s.vis]);
+      return await dnCompose(n, v, s.sun);
+    } finally {
+      this.dnSrc.delete(stamp);
     }
-    const nd03 = g.nodata;
-    for (let y0 = 0; y0 < g.ny; y0 += B) {
-      const lat = Math.atan(Math.sinh(ys + ((Math.min(y0 + B / 2, g.ny - 1) + 0.5) / g.ny) * (yn - ys))) * 180 / Math.PI;
-      const y1 = Math.min(y0 + B, g.ny);
-      for (let x0 = 0; x0 < g.nx; x0 += B) {
-        const lon = g.west + ((Math.min(x0 + B / 2, g.nx - 1) + 0.5) / g.nx) * (g.east - g.west);
-        const el = sunElevation(sun, lat, lon);
-        const w = r03 ? Math.max(0, Math.min(1, (el - DN.night) / (DN.day - DN.night))) : 0;
-        const x1 = Math.min(x0 + B, g.nx);
-        const day = w > 0 ? dayLUT[Math.round(((1 / Math.max(Math.sin((el * Math.PI) / 180), sMax) - 1) / (kMax - 1)) * (KQ - 1))] : null;
-        for (let y = y0; y < y1; y++) {
-          const row = y * g.nx, row07 = ((y / f) | 0) * g07.nx;
-          for (let x = x0; x < x1; x++) {
-            const j = row07 + ((x / f) | 0);
-            const n = nightLUT[(r07[j] << 8) | r13x[j]];             // 255 = 缺值
-            if (!day) { code[row + x] = n; continue; }
-            const v = r03[row + x];
-            const d = v === nd03 ? n : day[v];
-            code[row + x] = w === 1 || n === 255 || d === 255 ? d : Math.round(w * d + (1 - w) * n);
-          }
-        }
-      }
-    }
-    return { raw: { r07, r13, r03, g07, g13: i13?.grid, g03: i03?.grid, sun }, url: await renderPNG(code, { ...g, nodata: 255 }, GRAY_LUT) };
+  }
+
+  /** 日夜快速版:只用 B07 / B13(約 4 MB),B03 還沒到之前先顯示 */
+  async dnQuick(stamp) {
+    const s = this.dnSources(stamp);
+    return dnCompose(await s.night, null, s.sun);
   }
 
   async show(stamp) {
     const key = `${this.band}|${this.style}|${stamp}`;
-    if (stamp && this.current?.key === key) return;
+    if (stamp && this.current?.key === key && !this.current.quick) return;
     this.wanted = key;
     const src = this.map.getSource('satellite');
     if (!stamp) {
@@ -228,10 +268,23 @@ export class SatelliteLayer {
       this.current = null;
       return;
     }
-    const f = await this.frame(stamp);
+    const full = this.frame(stamp);
+    // 日夜:完整版還沒好(B03 約 10 MB 下載中)→ 先放 B07 / B13 快速版
+    if (this.band === 'DN' && !full.done && this.current?.key !== key) {
+      const q = await this.dnQuick(stamp).catch(() => null);
+      if (q && this.wanted === key && !full.done) {
+        const prev = this.current?.quick;
+        src.updateImage({ url: q.url, coordinates: this.index.grid.corners });
+        this.current = { key, stamp, raw: q.raw, quick: q.url };
+        if (prev) URL.revokeObjectURL(prev);
+      } else if (q) URL.revokeObjectURL(q.url);
+    }
+    const f = await full;
     if (this.wanted !== key) return;
+    const quick = this.current?.quick;
     src.updateImage({ url: f.url, coordinates: this.index.grid.corners });
     this.current = { key, stamp, raw: f.raw };
+    if (quick) URL.revokeObjectURL(quick);
   }
 
   async prefetch(stamps, onProgress) {
