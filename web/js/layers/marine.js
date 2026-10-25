@@ -2,7 +2,7 @@
 // 符號見下方「符號」說明(藍框 = 海上觀測,和地面測站區隔);點站打開資訊卡,看近 48 小時折線圖(marine/recent.json.gz)
 import { getIndex, getJSON } from '../data.js';
 import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr } from '../colormaps.js';
-import { diffMin, fmtTW, latestLE } from '../time.js';
+import { addMin, diffMin, fmtTW, latestLE } from '../time.js';
 import { arrowImage } from './stations.js';
 
 // dir:方向欄位;flip:資料是「來的方向」(浪、風)→ 箭頭畫成去的方向;海流本來就是流去的方向
@@ -27,7 +27,7 @@ export const waveClass = (h) => [...WAVE_CLASSES].reverse().find(([lo]) => h >= 
 export const MARINE_GROUPS = { buoy: '資料浮標', tide: '潮位站', coast: '岸邊氣象站' };
 const groupOf = (type) => (type === 'wave' ? 'buoy' : type);
 
-const CACHE_MAX = 60;
+const CACHE_MAX = 260;        // 快照(一個約 10 KB);自訂區段最多約 10 天 = 240 筆
 const LABEL_ZOOM = 7;
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const IDS = ['mr-sym', 'mr-sel'];
@@ -92,6 +92,10 @@ export class MarineLayer {
   opacity = 1;
   variable = 'wave_h';
   types = new Set(Object.keys(MARINE_GROUPS));   // 顯示的站種(MARINE_GROUPS)
+  stat = 'now';              // now | max | min
+  hours = 24;                // 過去幾小時,或 'custom' 自訂區段
+  custom = { start: '', end: '' };   // 自訂區段(UTC stamp);end 空白 = 跟著時間軸
+  extCache = new Map();      // 區段最大 / 最小的計算結果
   staleMin = 90;             // 不同步時,最新資料超過幾分鐘標成過時(每小時一筆,上架約晚 20–40 分)
   index = null;
   current = null;
@@ -142,10 +146,48 @@ export class MarineLayer {
     this.map.setPaintProperty('mr-sym', 'icon-color', stepExpr(SCALES[this.v.scale]));
   }
 
-  async configure({ variable = this.variable, types = this.types }) {
-    Object.assign(this, { variable, types: new Set(types) });
+  async configure({ variable = this.variable, types = this.types, stat = this.stat, hours = this.hours, custom = this.custom }) {
+    Object.assign(this, { variable, types: new Set(types), stat, hours, custom: { ...custom } });
     this.applyStyle();
     this.current = null;
+  }
+
+  get aggMode() { return this.stat !== 'now'; }
+  get statName() { return this.stat === 'max' ? '最大' : '最小'; }
+
+  /** 最大 / 最小的區段 (start, end];stamp = 時間軸所在整點 */
+  range(stamp) {
+    if (this.hours !== 'custom') return { start: addMin(stamp, -this.hours * 60), end: stamp };
+    const end = this.custom.end && this.custom.end < stamp ? this.custom.end : stamp;
+    return { start: this.custom.start, end };
+  }
+
+  /** 區段內每小時快照取最大 / 最小 → { values: Map(站號 → { x, at, dir }), expected, found } */
+  extremes(start, end) {
+    const key = `${this.variable}|${this.stat}|${start}|${end}`;
+    if (!this.extCache.has(key)) {
+      const p = (async () => {
+        const stamps = this.times.filter((t) => t > start && t <= end);
+        const snaps = await Promise.all(stamps.map((t) => this.fetch(`${this.path}/${t}.json`).catch(() => null)));
+        const values = new Map(), better = this.stat === 'max' ? (a, b) => a > b : (a, b) => a < b;
+        const dirKey = this.v.dir;
+        snaps.forEach((snap, i) => {
+          if (!snap) return;
+          const f = Object.fromEntries(snap.fields.map((k, j) => [k, j]));
+          for (const r of snap.rows) {
+            const x = r[f[this.variable]];
+            if (x == null) continue;
+            const c = values.get(r[f.id]);
+            if (!c || better(x, c.x)) values.set(r[f.id], { x, at: stamps[i], dir: dirKey ? r[f[dirKey]] : null });
+          }
+        });
+        return { values, expected: Math.round(diffMin(end, start) / 60), found: snaps.filter(Boolean).length };
+      })();
+      p.catch(() => this.extCache.delete(key));
+      this.extCache.set(key, p);
+      if (this.extCache.size > 30) this.extCache.delete(this.extCache.keys().next().value);
+    }
+    return this.extCache.get(key);
   }
 
   /** 圖示名稱、角度、大小 */
@@ -192,22 +234,57 @@ export class MarineLayer {
     const f = Object.fromEntries(snap.fields.map((k, i) => [k, i]));
     const v = this.v, out = [];
     this.snap = { time: snap.time, f, rows: new Map(snap.rows.map((r) => [r[f.id], r])) };
+    // 最大 / 最小:區段內每小時快照(箭頭方向取發生那一小時的;潮高不畫漲退潮)
+    let agg = null;
+    if (this.aggMode) {
+      const { start, end } = this.range(stamp);
+      if (!start || !end || end <= start) {
+        agg = { start, end, note: !start ? '請設定起點' : '起點要早於終點', missing: 0, values: new Map() };
+      } else {
+        const e = await this.extremes(start, end);
+        agg = { start, end, note: '', missing: e.expected - e.found, values: e.values };
+      }
+    }
     for (const r of snap.rows) {
       const base = { id: r[f.id], name: r[f.name], type: r[f.type], county: r[f.county] ?? '', area: r[f.area] ?? '',
         lon: r[f.lon], lat: r[f.lat] };
       this.all.set(base.id, base);
-      const x = r[f[this.variable]];
-      if (x == null || !this.types.has(groupOf(base.type))) continue;
-      const s = this.symbol(base.type, x, v.dir ? r[f[v.dir]] : null, r[f.tide_lv]);
-      const props = { id: base.id, v: x, icon: s.icon, size: s.size };
+    }
+    const rows = agg ? [...agg.values].map(([id, e]) => [this.all.get(id), e]).filter(([b]) => b)
+      : snap.rows.map((r) => [this.all.get(r[f.id]), { x: r[f[this.variable]], dir: v.dir ? r[f[v.dir]] : null, lv: r[f.tide_lv] }]);
+    for (const [base, e] of rows) {
+      if (e.x == null || !this.types.has(groupOf(base.type))) continue;
+      const s = this.symbol(base.type, e.x, e.dir, e.lv);
+      const props = { id: base.id, v: e.x, icon: s.icon, size: s.size };
       if (s.dir != null) props.dir = s.dir;
+      if (e.at) props.gt = e.at;
       out.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [base.lon, base.lat] } });
     }
-    return { stamp, features: out };
+    return { stamp, agg, features: out };
+  }
+
+  /** 圖層時間欄:最大 / 最小顯示區段,缺快照就標出來 */
+  timeLabel(stamp) {
+    const a = this.current?.agg;
+    if (!this.aggMode || !a || this.current.stamp !== stamp) return null;
+    const bad = a.note || a.missing > 0;
+    return { text: `${a.start ? fmtTW(a.start) : '--'}–${a.end ? fmtTW(a.end, a.end.slice(0, 8) === (a.start ?? '').slice(0, 8) ? 'hm' : 'md') : '--'}`
+      + (a.note ? `（${a.note}）` : a.missing > 0 ? `（缺 ${a.missing} 筆）` : ''), stale: !!bad };
+  }
+
+  /** 發生時間:區段 24 小時以上帶日期 */
+  fmtAt(t) {
+    const a = this.current?.agg;
+    return fmtTW(t, a && a.start && diffMin(a.end, a.start) >= 1440 ? 'md' : 'hm');
+  }
+
+  title() {
+    if (!this.aggMode) return this.v.name;
+    return this.hours === 'custom' ? `區段${this.statName}${this.v.name}` : `過去 ${this.hours} 小時${this.statName}${this.v.name}`;
   }
 
   async show(stamp) {
-    const key = `${stamp}|${this.variable}|${[...this.types].sort()}`;
+    const key = `${stamp}|${this.variable}|${[...this.types].sort()}|${this.stat}|${this.hours}|${this.custom.start}|${this.custom.end}`;
     if (stamp && this.current?.key === key) return;
     this.wanted = key;
     const src = this.map.getSource('marine');
@@ -248,7 +325,8 @@ export class MarineLayer {
       el.className = 'st-label mr-label';
       const x = ft.properties.v;
       el.textContent = fmt(x, this.v.d) + (this.v.scale === 'wind' ? `｜${bfLabel(x)}級`
-        : this.variable === 'wave_h' && waveClass(x) ? `｜${waveClass(x)}` : '');
+        : this.variable === 'wave_h' && waveClass(x) ? `｜${waveClass(x)}` : '')
+        + (ft.properties.gt ? ` @${this.fmtAt(ft.properties.gt)}` : '');
       this.markers.push(new maplibregl.Marker({ element: el, anchor: 'left', offset: [9, 0], opacity: String(this.opacity) }).setLngLat([lon, lat]).addTo(this.map));
     }
   }
@@ -277,8 +355,13 @@ export class MarineLayer {
 
   popupHTML(id) {
     const s = this.all.get(id), rows = this.readings(id) ?? [];
+    const a = this.current?.agg, e = a?.values.get(id);
+    const ext = a ? `<div>${this.title()}：<b>${e ? this.valText(e.x) : '—'}</b>${e?.x != null && this.variable === 'wave_h' && waveClass(e.x) ? `（${waveClass(e.x)}）` : ''}</div>`
+      + (e ? `<div>發生時間：<b>${fmtTW(e.at)}</b>（台灣）</div>` : '')
+      + `<div style="color:var(--muted)">${fmtTW(a.start)}–${fmtTW(a.end)}；以下為 ${fmtTW(this.snap.time, 'hm')} 當下</div>` : '';
     return `<div class="popup-title">${s.name}（${s.id}）</div>
       <div>海上觀測・${MARINE_TYPES[s.type] ?? ''}　${s.area}</div>
+      ${ext}
       ${rows.map(([k, x]) => `<div>${k}：<b>${x}</b></div>`).join('')}
       <div style="color:var(--muted)">觀測 ${fmtTW(this.snap.time)}（每小時）</div>`;
   }
@@ -299,13 +382,13 @@ export class MarineLayer {
 
   legend() {
     const s = SCALES[this.v.scale];
-    const html = this.v.scale === 'wind' ? beaufortLegendHTML(`海象 ${this.v.name}（蒲福風級）`, s.colors)
-      : legendHTML(`海象 ${this.v.name} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks);
+    const html = this.v.scale === 'wind' ? beaufortLegendHTML(`海象 ${this.title()}（蒲福風級）`, s.colors)
+      : legendHTML(`海象 ${this.title()} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks);
     // 符號說明:站種形狀 + 這個變數的專用符號
     const item = (svg, text) => `<span style="white-space:nowrap;margin-right:10px">${svg} ${text}</span>`;
     const keys = [item(svgShape('mr-diamond'), '浮標'), item(svgShape('mr-square'), '潮位站'), item(svgShape('mr-hex'), '岸邊氣象站')];
     if (this.variable === 'wave_h') keys.push(item(svgShape('mr-wave'), '浪前進方向，越大浪越高'));
-    if (this.variable === 'tide') keys.push(item(svgShape('mr-tide-up') + svgShape('mr-tide-down'), '漲潮／退潮'));
+    if (this.variable === 'tide' && !this.aggMode) keys.push(item(svgShape('mr-tide-up') + svgShape('mr-tide-down'), '漲潮／退潮'));
     if (this.variable === 'cur_spd') keys.push(item(svgShape('mr-flow'), '海流流去方向，越大流越快'));
     if (this.variable === 'ws') keys.push(item('', '箭頭 = 風吹去的方向'));
     let extra = `<div style="margin-top:6px;font-size:11px;line-height:20px">${keys.join('')}<span style="white-space:nowrap">藍框、藍字 = 海上觀測</span></div>`;

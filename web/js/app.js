@@ -630,13 +630,28 @@ function bindMarineUI() {
   vSel.innerHTML = `<optgroup label="海況">${opts(['wave_h', 'wave_per', 'tide', 'cur_spd', 'sst'])}</optgroup>`
     + `<optgroup label="海上氣象">${opts(['ws', 'gust', 'temp', 'pres'])}</optgroup>`;
   vSel.value = marine.variable;
+  const custom = prefs.get('mrCustom') ?? {};
+  $('mr-cstart').value = stampToLocal(custom.start ?? '');
+  $('mr-cend').value = stampToLocal(custom.end ?? '');
   const apply = async () => {
     const types = [...document.querySelectorAll('#mr-types input:checked')].map((x) => x.value);
-    await marine.configure({ variable: vSel.value, types });
+    const stat = $('mr-stat').value, hSel = $('mr-hours');
+    hSel.disabled = stat === 'now';
+    const isCustom = stat !== 'now' && hSel.value === 'custom';
+    $('mr-custom').hidden = !isCustom;
+    if (isCustom && !$('mr-cstart').value) {   // 預設起點:最新資料那天(台灣)00:00
+      $('mr-cstart').value = stampToLocal(twMidnight(marine.index?.latest ?? nowStamp()));
+    }
+    const range = { start: localToStamp($('mr-cstart').value), end: localToStamp($('mr-cend').value) };
+    prefs.set('mrCustom', range);
+    await marine.configure({ variable: vSel.value, types, stat,
+      hours: hSel.value === 'custom' ? 'custom' : +hSel.value, custom: range });
     updateLegend();
     render();
   };
   vSel.onchange = apply;
+  for (const id of ['mr-stat', 'mr-hours', 'mr-cstart', 'mr-cend']) $(id).onchange = apply;
+  $('mr-cend-clear').onclick = () => { $('mr-cend').value = ''; apply(); };
   for (const c of document.querySelectorAll('#mr-types input')) c.onchange = apply;
   $('op-marine').oninput = (e) => marine.setOpacity(e.target.value / 100);
   $('chk-marine').onchange = (e) => { marine.setVisible(e.target.checked); if (!e.target.checked) mCard.close(); updateLegend(); };

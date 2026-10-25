@@ -164,6 +164,25 @@
         </label>
         <div class="layer-opts">
           <label>變數 <select id="mr-var"></select></label>
+          <label>顯示
+            <select id="mr-stat">
+              <option value="now">當下值</option>
+              <option value="max">過去最大</option>
+              <option value="min">過去最小</option>
+            </select>
+            <select id="mr-hours" disabled>
+              <option value="1">1 小時</option><option value="3">3 小時</option>
+              <option value="6">6 小時</option><option value="12">12 小時</option>
+              <option value="24" selected>24 小時</option><option value="48">48 小時</option>
+              <option value="72">72 小時</option>
+              <option value="custom">自訂區段</option>
+            </select>
+          </label>
+          <div id="mr-custom" hidden>
+            <label>起 <input type="datetime-local" id="mr-cstart" step="3600"></label>
+            <label>迄 <input type="datetime-local" id="mr-cend" step="3600"> <button type="button" id="mr-cend-clear" title="迄留空 = 跟著時間軸">清除</button></label>
+            <div class="hint">台灣時間，每小時一筆；迄留空 = 時間軸目前時間</div>
+          </div>
           <label>透明度 <input type="range" id="op-marine" min="0" max="100" value="100"></label>
           <label><input type="checkbox" id="mr-labels" checked> 地圖上顯示數值文字</label>
           <div class="ty-toggles" id="mr-types">
