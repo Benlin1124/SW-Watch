@@ -29,27 +29,35 @@ python -m http.server 8765
 
 ```bash
 pip install matplotlib imageio-ffmpeg openpyxl pyshp
-python -m pipeline.event_report --start "2026-10-22 00:00" --end "2026-10-24 20:00"
+# 颱風
+python -m pipeline.event_report --kind typhoon --name 薔琵颱風 --start "2026-10-22 00:00" --end "2026-10-24 20:00"
+# 豪雨
+python -m pipeline.event_report --kind rain --name 1025豪雨 --start "2026-10-25 00:00" --end "2026-10-26 12:00"
 ```
 
 - **時間**：都是台灣時間。`--end` 省略 = 最新一筆測站快照。
-- **事件種類**：自動判斷，可以用 `--kind typhoon|rain` 指定。
-  - 期間內颱風中心進入本島 500 km 內 → **颱風事件**：名稱預設「{颱風名}颱風」，做 4 支影片（雷達、雷達+颱風、颱風+測站陣風、颱風+測站平均風）。
-  - 否則 → **豪雨事件**：名稱預設「豪雨事件」，只做雷達影片，摘要以短時雨量為主。
+- **`--kind`、`--name` 必填**：事件種類和名稱自己給，名稱會用在標題和資料夾名稱。
+  - `typhoon`：做 4 支影片（雷達、雷達+颱風、颱風+測站陣風、颱風+測站平均風）。總結先列風，再附上期間內中心進入本島 500 km 內的颱風生命史。
+  - `rain`：只做雷達影片，總結先列雨量。
+- **兩種事件的總結都有**：
+  - 最大陣風、最大平均風。
+  - 總累積雨量。
+  - 最大時雨量，以及 3、6、12、24 小時雨量。
+  - 達到氣象署雨量分級的站數。
+- **短時雨量的時間窗**：只算整段都在期間內的時間窗。所以事件期間短於 24 小時，就沒有 24 小時雨量。
 - **輸出**：全部放在 `charts/{起}_{迄}_{名稱}/`。
 
 | 檔案 | 內容 |
 |---|---|
 | `rain_total.png`、`rain_total_station.png` | 總累積雨量（內插圖、測站點） |
 | `wind_max.png`、`gust_max.png` | 最大平均風、最大陣風 |
-| `rain_total.csv`、`wind_max.csv`、`rain_max.csv` | 各站數值（`rain_max` 是最大時雨量、3 小時、24 小時雨量） |
-| `county_*.csv`、`county_stats.xlsx` | 各縣市最大值（雨量、風、時雨量、24 小時雨量） |
+| `rain_total.csv`、`wind_max.csv`、`rain_max.csv` | 各站數值（`rain_max` 是最大時雨量、3、6、12、24 小時雨量） |
+| `county_*.csv`、`county_stats.xlsx` | 各縣市最大值（總雨量、平均風、陣風、時雨量、3、6、12、24 小時雨量） |
 | `*.mp4` | 縮時影片 |
 | `summary.txt` | 事件總結：颱風生命史與最接近台灣的時間、各項排行、達氣象署雨量分級的站數 |
 | `youtube.txt` | 每支影片的標題＋說明（含圖例、雷達缺漏時段、事件總結），可直接貼上 |
 
 其他參數：
-- `--name 名稱`：自訂事件名稱。
 - `--videos radar,radar_ty,gust,wind`：指定要做哪幾支影片。
 - `--no-video`：只做統計和摘要，幾分鐘就跑完。
 - `--top 6`：排行列幾名。

@@ -11,7 +11,7 @@
 雨量欄位的時間 = 快照時間(與網頁、station_agg 相同)。
 注意 CWA 的 Past2days / Past3days(rain_48h / rain_72h)是日曆日(昨天起 / 前天起,台灣 00 時),不是滾動 48 / 72 小時。
 最大平均風 / 最大陣風:觀測時間落在期間內的各筆取最大;陣風時間用 gust_at(有的話)。
-最大時雨量 / 3 小時 / 24 小時雨量(rain_max.csv、縣市表):各快照的滾動累積取最大,只算整段都在期間內的。
+最大時雨量 / 3 / 6 / 12 / 24 小時雨量(rain_max.csv、縣市表):各快照的滾動累積取最大,只算整段都在期間內的。
 颱風、豪雨事件一次產統計 + 影片 + 摘要:用 pipeline.event_report。"""
 import argparse
 from pathlib import Path
@@ -188,11 +188,12 @@ def max_wind(start, end, snaps, col):
 
 
 # ── 最大短時雨量(豪雨事件用)──
-RAIN_MAX = {"rain_1h": "最大時雨量", "rain_3h": "最大3小時雨量", "rain_24h": "最大24小時雨量"}
+RAIN_MAX = {"rain_1h": "最大時雨量", "rain_3h": "最大3小時雨量", "rain_6h": "最大6小時雨量",
+            "rain_12h": "最大12小時雨量", "rain_24h": "最大24小時雨量"}
 
 
 def max_rain(start, end, snaps, col):
-    """各站滾動 1 / 3 / 24 小時累積雨量的最大值;只算整段累積時間都在期間內的(起點 ≥ start),
+    """各站滾動 1 / 3 / 6 / 12 / 24 小時累積雨量的最大值;只算整段累積時間都在期間內的(起點 ≥ start),
     時間 = 快照時間(累積的結束時間)。"""
     n = len(col)
     out = {k: {"val": np.full(n, np.nan), "at": [None] * n} for k in RAIN_MAX}
@@ -570,11 +571,8 @@ def run(start, end=None, shp=config.ROOT / "shp", use_r2=True, out=None):
                                                    at=wind["ws"]["at"], alt_max=WIND_ALT_MAX, wind=True, exclude=WIND_EXCLUDE_TOWNS), "wind"),
         ("最大陣風", "county_gust_max", region_table(stations, wind["gust"]["val"], "最大陣風", "m/s",
                                                  at=wind["gust"]["at"], alt_max=WIND_ALT_MAX, wind=True, exclude=WIND_EXCLUDE_TOWNS), "wind"),
-        ("最大時雨量", "county_rain_1h_max", region_table(stations, rmax["rain_1h"]["val"], "最大時雨量", "mm",
-                                                       at=rmax["rain_1h"]["at"]), "rain"),
-        ("最大24小時雨量", "county_rain_24h_max", region_table(stations, rmax["rain_24h"]["val"], "最大24小時雨量", "mm",
-                                                             at=rmax["rain_24h"]["at"]), "rain"),
-    ]
+    ] + [(label, f"county_{k}_max", region_table(stations, rmax[k]["val"], label, "mm", at=rmax[k]["at"]), "rain")
+         for k, label in RAIN_MAX.items()]
     for _, fname, (head, rows, _), _ in tables:
         write_table_csv(out / f"{fname}.csv", head, rows)
     write_xlsx(out / "county_stats.xlsx", [(name, *t, kind) for name, _, t, kind in tables])

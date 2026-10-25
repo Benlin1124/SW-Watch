@@ -1,11 +1,13 @@
 """颱風 / 豪雨事件一鍵產出:統計圖表(event_stats)+ 縮時影片(radar_video)+ 摘要與 YouTube 標題說明。
-  python -m pipeline.event_report --start "2026-10-22 00:00" [--end "2026-10-24 20:00"] [--name 薔琵颱風]
+  python -m pipeline.event_report --kind typhoon --name 薔琵颱風 --start "2026-10-22 00:00" [--end "2026-10-24 20:00"]
+  python -m pipeline.event_report --kind rain --name 1025豪雨 --start "2026-10-25 00:00" [--end ...]
 時間為台灣時間;--end 省略 = 最新一筆測站快照。輸出全部放在 charts/{起}_{迄}_{名稱}/:
   rain_total.png、rain_total_station.png、wind_max.png、gust_max.png、*.csv、county_stats.xlsx(同 event_stats)
   影片 *.mp4(同 radar_video)、summary.txt(事件總結)、youtube.txt(每支影片的標題 + 說明,可直接貼)
-事件種類(--kind,預設 auto):期間內有颱風中心(氣象署定位)進入台灣本島 500 km 內 → typhoon,否則 rain。
-  typhoon:影片 radar、radar_ty、gust、wind 四支,摘要含颱風生命史與最接近台灣的時間;名稱預設「{颱風名}颱風」。
-  rain:影片只有 radar,摘要著重最大時雨量、24 小時雨量與豪雨標準站數;名稱預設「豪雨事件」。
+事件種類 --kind、名稱 --name 都要自己給:
+  typhoon:影片 radar、radar_ty、gust、wind 四支;摘要先列風,含期間內中心進入本島 500 km 內的颱風生命史與最接近台灣的時間。
+  rain:影片只有 radar;摘要先列雨量。
+兩種摘要都有:最大陣風、最大平均風、總累積雨量、最大時雨量 / 3 / 6 / 12 / 24 小時雨量、達氣象署雨量分級的站數。
 --videos radar,radar_ty,gust,wind 指定要哪幾支;--no-video 只做統計和摘要(快很多)。
 影片要在前景執行(背景執行 ffmpeg 會 WinError 6)。本機沒有的資料自動從 R2 下載;--local 只用本機。"""
 import argparse
@@ -155,13 +157,15 @@ def summary_text(r, name, kind, storms, top):
     tot = ranking(st, total, None, top, lambda v: f" {v:.1f} mm")
     cnt = "、".join(f"{t} mm 以上 {int(np.nansum(total >= t))} 站" for t in (500, 350, 200) if np.nansum(total >= t))
     rain_block = ["▍總累積雨量", *tot] + ([f"累積雨量 {cnt}。"] if cnt else []) + [""]
-    h1 = ranking(st, rm["rain_1h"]["val"], rm["rain_1h"]["at"], top, lambda v: f" {v:.1f} mm")
-    h24 = ranking(st, rm["rain_24h"]["val"], rm["rain_24h"]["at"], top, lambda v: f" {v:.1f} mm")
+    short_block = []
+    for k in event_stats.RAIN_MAX:
+        hours = event_stats.RAIN_WIN[k] // 60
+        title = "最大時雨量" if hours == 1 else f"最大 {hours} 小時雨量"
+        short_block += [f"▍{title}", *ranking(st, rm[k]["val"], rm[k]["at"], top, lambda v: f" {v:.1f} mm"), ""]
     v24, v3, v1 = (rm[k]["val"] for k in ("rain_24h", "rain_3h", "rain_1h"))
     cls = [f"{lab}(24 小時 ≥ {t} mm){int(np.nansum(v24 >= t))} 站" for lab, t in RAIN_CLASS]
     cls += [f"時雨量 ≥ 40 mm {int(np.nansum(v1 >= 40))} 站", f"3 小時 ≥ 100 mm {int(np.nansum(v3 >= 100))} 站"]
-    short_block = ["▍最大時雨量", *h1, "", "▍最大 24 小時雨量", *h24, "",
-                   "▍達氣象署雨量分級的測站數", *[f"・{c}" for c in cls], ""]
+    short_block += ["▍達氣象署雨量分級的測站數", *[f"・{c}" for c in cls], ""]
     L += (wind_block + rain_block + short_block) if kind == "typhoon" else (rain_block + short_block + wind_block)
     L.append("※ 統計為中央氣象署自動氣象站即時資料整理,未經品管,數值以氣象署正式報告為準。")
     return fullwidth("\n".join(L))
@@ -219,8 +223,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--start", required=True, help='台灣時間,例如 "2026-10-22 00:00"')
     ap.add_argument("--end", help="台灣時間;省略 = 最新一筆快照")
-    ap.add_argument("--name", help="事件名稱(標題、資料夾用);省略 = 颱風名或「豪雨事件」")
-    ap.add_argument("--kind", choices=["auto", "typhoon", "rain"], default="auto")
+    ap.add_argument("--name", required=True, help="事件名稱(標題、資料夾用),例如 薔琵颱風、1025豪雨")
+    ap.add_argument("--kind", required=True, choices=["typhoon", "rain"], help="typhoon 颱風 / rain 豪雨")
     ap.add_argument("--videos", help="逗號分隔:radar,radar_ty,gust,wind;省略依事件種類")
     ap.add_argument("--no-video", action="store_true", help="只做統計和摘要")
     ap.add_argument("--top", type=int, default=6, help="摘要排行列幾名")
@@ -233,10 +237,10 @@ def main():
     end = event_stats.resolve_end(to_stamp(parse_tw(a.end)) if a.end else None, use_r2)
 
     geo = event_stats.load_shp(Path(a.shp))
-    storms = storms_near(start, end, use_r2, geo) if a.kind != "rain" else []
-    kind = a.kind if a.kind != "auto" else ("typhoon" if storms else "rain")
-    name = a.name or (f"{storms[0]['name_zh']}颱風" if storms else "豪雨事件")
-    print(f"事件:{name}({kind});颱風:{', '.join(s['name_zh'] for s in storms) or '無'}")
+    kind, name = a.kind, a.name
+    storms = storms_near(start, end, use_r2, geo) if kind == "typhoon" else []
+    print(f"事件:{name}({kind})" + (f";颱風:{', '.join(s['name_zh'] for s in storms) or '期間內沒有接近本島的颱風'}"
+                                    if kind == "typhoon" else ""))
 
     out = event_stats.OUT_DIR / f"{tw(start, '%Y%m%d%H%M')}_{tw(end, '%Y%m%d%H%M')}_{name}"
     r = event_stats.run(start, end, Path(a.shp), use_r2, out)

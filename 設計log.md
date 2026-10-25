@@ -834,3 +834,7 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - event_stats:main 拆成 `run()`(回傳站資料與數值給 event_report);新增 `max_rain`(滾動 1 / 3 / 24 小時累積取最大,只算整段在期間內的)→ `rain_max.csv`,縣市表 / xlsx 加「最大時雨量」「最大24小時雨量」兩頁。
 - radar_video:main 拆成 `render()`(可指定輸出資料夾、回傳幀數與缺漏時段;畫完 close figure,同一程序連做多支不累積記憶體);關掉 datalim 補 4:3 的「Ignoring fixed limits」log。
 - 驗證:薔琵期間 `--no-video` 結果與先前 event_stats 一致(最大陣風三貂角 65.1、雨量太平山 650.0);1 小時短期間跑過 typhoon 四支影片與 rain 模式、單獨的 radar_video --preview 與 event_stats。
+
+## 2026-10-25 event_report:種類、名稱自己給;短時雨量 1 / 3 / 6 / 12 / 24 小時
+- 使用者要求:不要自動判斷事件種類,名稱自己輸入 → `--kind typhoon|rain`、`--name` 改必填(拿掉 auto 與預設名稱)。typhoon 仍找期間內中心進入本島 500 km 內的颱風寫生命史,找不到就只印提示。
+- 最大時雨量、3、6、12、24 小時雨量颱風、豪雨都要有:event_stats.RAIN_MAX 加 rain_6h、rain_12h → rain_max.csv、縣市表 / xlsx 各一頁(共 8 頁);summary / youtube 兩種事件都列五種短時雨量排行(只算整段時間窗在期間內的,事件短於 24 小時就沒有 24 小時雨量)。
