@@ -39,6 +39,7 @@ DBZ_COLORS = ["#ffffff", "#98ffff", "#009aff", "#1919ff", "#19ff19", "#19cd19",
               "#19A019", "#fefe08", "#ffcb00", "#ff9c00", "#fe0005", "#c90200",
               "#9d0000", "#9a009d", "#cf00d7", "#ff00f7", "#fdcafe"]
 EXTENT = (117.4, 125.3, 21.2, 26.6)             # 台灣本島、金馬、澎湖與周圍海面(畫面 4:3,不足處自動補邊)
+EXTENT_SAT = (116.1, 126.6, 20.3, 27.5)         # --sat:比雷達大約 1.3 倍(同中心),看得到較完整的雲系
 EXTENT_TW = (120.1, 122.3, 21.3, 25.55)        # --no-radar:放大到台灣本島(左右自動補成 4:3,稍偏東留颱風,底部留色階)
 OUT_DIR = config.ROOT / "charts" / "radar"
 H = {"User-Agent": "Mozilla/5.0"}
@@ -465,7 +466,7 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
     load = lambda t: load_raw(t, g, use_r2)
     auto, prefix, source = "雷達整合回波", "radar", "中央氣象署"
     if sat:                                              # 衛星日夜:時間跟 B07,每幀直接是 RGBA
-        dn = DayNight(use_r2)
+        dn = DayNight(use_r2, EXTENT_SAT)
         times, table, load = dn.times, None, dn.image
         auto, prefix = "衛星雲圖（白天可見光／夜間短波紅外）", "sat"
         source = "Himawari-9（日本氣象廳）" + ("、中央氣象署" if typhoon or wind else "")
@@ -476,7 +477,8 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
         wname = "測站陣風" if gust else "測站平均風"
         auto, prefix = (f"颱風位置與{wname}" if typhoon else wname) if wind else "颱風路徑", "station"
     geo, world = load_shp(Path(shp)), load_world()
-    fig, im, when = make_frame(geo, world, g, title or auto, EXTENT_TW if no_radar and not sat else EXTENT, source)
+    extent = EXTENT_SAT if sat else EXTENT_TW if no_radar else EXTENT
+    fig, im, when = make_frame(geo, world, g, title or auto, extent, source)
     if sat:                                              # 雲圖蓋住陸地填色,海岸、縣市界改淡黃色疊在上面
         im.set_extent(dn.extent)
         im.set_zorder(1)
