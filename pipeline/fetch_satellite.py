@@ -8,7 +8,7 @@ B03 可見光只在範圍內有白天時處理(夜間不存檔,前端顯示無�
 
 補抓:python -m pipeline.fetch_satellite --start 202610210000 --end 202610211200 [--bands B13,B07,B08]
   時間是 UTC(台灣時間 − 8 小時);已有的時次跳過;要在有 R2 金鑰的排程電腦執行,排程可以同時開著。
-  補抓的資料一樣只保留 SAT_KEEP_DAYS 天(預設 7)。"""
+  補抓的資料一樣只保留 SAT_KEEP_DAYS 天(預設 5)。"""
 import argparse
 import gc
 import hashlib

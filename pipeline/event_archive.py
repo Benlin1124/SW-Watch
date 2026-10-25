@@ -1,17 +1,18 @@
 """事件觀測資料歸檔(手動執行):把一段期間的原始觀測另存一份,不受 cleanup 保留策略影響
-(10 分鐘資料 30 天後只留整點、衛星只留 3 天)。
+(10 分鐘資料 30 天後只留整點、衛星只留 SAT_KEEP_DAYS 天)。
   python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" --end "2026-10-24 20:00" [--web] [--satellite]
 時間為台灣時間。存到 archive/{起}_{迄}_{名稱}/,目錄結構同 data/(每層一個 index.json,只含期間內的時間):
   預設(觀測):stations(測站 10 分鐘快照)、radar(雷達整合回波)、rain/cwa/1h、rain/cwa/today(氣象署雨量格點)、
              typhoon/cwa_track、typhoon/cwa(颱風消息;颱風往前多存一天,路徑才接得起來)
   --web:另存網頁圖層用的衍生資料 stations/agg_*、rain/idw/*(要在網頁重播事件時才需要)
-  --satellite:另存衛星雲圖 B03 / B08 / B13(只保留 3 天,事件結束後要盡快執行;檔案大)
+  --satellite:另存衛星雲圖 B03 / B08 / B13(只保留 SAT_KEEP_DAYS 天,事件結束後要盡快執行;檔案大)
 本機 data/ 有的直接複製,沒有的從 R2 公開網址下載;已存在的檔跳過(中斷後重跑會接著做)。
+格點(.bin.gz)與 agg(.json.gz)原本就是壓縮檔照原樣存;沒壓縮的 .json(測站快照、颱風路徑)存成 .json.gz。
 .env 有 R2 金鑰時,另外上傳到 R2 的 events/{起}_{迄}_{名稱}/(--no-upload 不上傳),並更新 events/index.json。
 event_stats / radar_video / event_report 讀資料時會自動找 archive/,所以原始資料被清掉後還是能重做統計和影片。"""
 import argparse
+import gzip
 import json
-import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,14 +51,22 @@ def meta(layer):
 
 
 def find(layer, name):
-    """歸檔裡的 {layer}/{name};沒有回傳 None。"""
+    """歸檔裡的 {layer}/{name}(.json 也找壓縮過的 .json.gz);沒有回傳 None。讀 JSON 用 load_json。"""
     if not ARCHIVE_DIR.exists():
         return None
+    names = [name, name + ".gz"] if name.endswith(".json") else [name]
     for d in sorted(ARCHIVE_DIR.glob("*/")):
-        p = d / layer / name
-        if p.exists():
-            return p
+        for n in names:
+            p = d / layer / n
+            if p.exists():
+                return p
     return None
+
+
+def load_json(path):
+    """讀 JSON(.json.gz 先解壓)。"""
+    data = path.read_bytes()
+    return json.loads(gzip.decompress(data) if path.name.endswith(".gz") else data)
 
 
 # ── 歸檔 ──
@@ -87,21 +96,25 @@ def source_index(layer, use_r2):
 
 
 def fetch(layer, name, dest, use_r2):
-    """本機 data/ → 複製;否則從 R2 下載。回傳 True = 有檔。"""
+    """本機 data/ → 複製;否則從 R2 下載。沒壓縮的 .json 存成 .json.gz(測站快照約剩 1/4)。回傳 True = 有檔。"""
+    gz = name.endswith(".json")
+    if gz:
+        dest = dest.with_name(dest.name + ".gz")
     if dest.exists():
         return True
     src = config.DATA_DIR / layer / name
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(dest.name + ".tmp")
     if src.exists():
-        shutil.copyfile(src, tmp)
+        data = src.read_bytes()
     elif use_r2:
         r = requests.get(f"{R2_URL}{layer}/{name}", headers=H, timeout=120)
         if r.status_code != 200:
             return False
-        tmp.write_bytes(r.content)
+        data = r.content
     else:
         return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_bytes(gzip.compress(data, 6) if gz else data)
     tmp.replace(dest)
     return True
 
@@ -163,7 +176,7 @@ def main():
     ap.add_argument("--start", required=True, help='台灣時間,例如 "2026-10-22 00:00"')
     ap.add_argument("--end", required=True, help="台灣時間")
     ap.add_argument("--web", action="store_true", help="另存網頁圖層衍生資料(stations/agg_*、rain/idw/*)")
-    ap.add_argument("--satellite", action="store_true", help="另存衛星雲圖(只保留 3 天)")
+    ap.add_argument("--satellite", action="store_true", help="另存衛星雲圖(只保留 SAT_KEEP_DAYS 天)")
     ap.add_argument("--no-upload", action="store_true", help="有 R2 金鑰也不上傳")
     ap.add_argument("--local", action="store_true", help="只用本機 data/,不從 R2 下載")
     a = ap.parse_args()

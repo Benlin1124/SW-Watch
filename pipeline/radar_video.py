@@ -193,7 +193,7 @@ class Typhoon:
                     return None
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(r.content)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return event_archive.load_json(path)              # 歸檔的是 .json.gz
 
     def report_at(self, stamp):
         cur = [r for r in self.reports if r[0] <= stamp]

@@ -102,7 +102,7 @@ def load_snapshot(stamp, use_r2):
                 return None
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(r.content)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return event_archive.load_json(path)                  # 歸檔的是 .json.gz
 
 
 def collect(start, end, use_r2):

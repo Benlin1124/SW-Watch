@@ -853,3 +853,8 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 磁碟 / R2:衛星約 1.1 GB/天 → 約 8 GB(R2 免費額度 10 GB,加上事件歸檔可能超過,超過部分每 GB 每月約 0.015 美元)。
 - 從 10/22 補抓用既有的 `python -m pipeline.fetch_satellite --start 202610211600 --end ...`(UTC),要在有 R2 金鑰的排程電腦跑。
 - 補抓與排程是兩個程序,update_index 只有程序內的鎖,同時讀改寫 index.json 可能互相蓋掉 → backfill 結束時 `repair_index()` 依資料夾實際檔案補回漏掉的時次並上傳。
+
+## 2026-10-25 衛星保留改 5 天;事件歸檔壓縮 JSON
+- 使用者改成衛星保留 5 天:config.SAT_KEEP_DAYS 預設 7 → 5、.env.example、部署說明(約 5.5 GB)同步。
+- 事件歸檔原本原樣複製;格點 .bin.gz、agg .json.gz 本來就壓縮,但測站快照 .json(一筆約 283 KB)沒有 → 歸檔時沒壓縮的 .json 存成 .json.gz(gzip 6,測站快照約 66 KB,剩 1/4)。三天預設歸檔約 200 → 100 MB。
+- 讀回:event_archive.find 對 .json 也找 .json.gz;新增 load_json(.gz 先解壓),event_stats.load_snapshot、radar_video.Typhoon._load 改用它。實測 1 小時歸檔 3.2 → 1.6 MB,--local 從歸檔跑 event_stats、radar_video --preview 正常。
