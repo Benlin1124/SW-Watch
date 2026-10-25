@@ -1,5 +1,5 @@
 // 海象圖層:浮標站、潮位站等海況(pipeline/fetch_marine.py,O-B0075-001,每小時一筆)
-// 圓點依色階上色;浪、風、海流有方向時畫箭頭;點站打開資訊卡,看近 48 小時折線圖(marine/recent.json.gz)
+// 符號見下方「符號」說明(藍框 = 海上觀測,和地面測站區隔);點站打開資訊卡,看近 48 小時折線圖(marine/recent.json.gz)
 import { getIndex, getJSON } from '../data.js';
 import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr } from '../colormaps.js';
 import { diffMin, fmtTW, latestLE } from '../time.js';
@@ -23,11 +23,65 @@ export const MARINE_TYPES = { buoy: '資料浮標', tide: '潮位站', coast: '�
 export const WAVE_CLASSES = [[1, '小浪'], [2, '中浪'], [3, '大浪'], [6, '巨浪']];
 export const waveClass = (h) => [...WAVE_CLASSES].reverse().find(([lo]) => h >= lo)?.[1] ?? '';
 
+// 站種篩選分組:浮球式波浪站併入浮標
+export const MARINE_GROUPS = { buoy: '資料浮標', tide: '潮位站', coast: '岸邊氣象站' };
+const groupOf = (type) => (type === 'wave' ? 'buoy' : type);
+
 const CACHE_MAX = 60;
 const LABEL_ZOOM = 7;
 const EMPTY = { type: 'FeatureCollection', features: [] };
-const IDS = ['mr-pt', 'mr-arrow', 'mr-sel'];
+const IDS = ['mr-sym', 'mr-sel'];
 const fmt = (x, d = 1) => (x == null ? '—' : (+x).toFixed(d));
+
+// ── 符號 ──
+// 和地面測站區隔:所有海上符號都是藍色外框(地面測站是灰黑細框、圓點),數值文字藍色斜體。
+// 形狀 = 站種:◆ 浮標、■ 潮位站、⬢ 岸邊氣象站;氣象要素(氣溫、氣壓、陣風…)用站種形狀、色階同地面測站。
+// 海況另用專用符號:浪高 = 寬箭頭(指向浪前進方向,大小隨浪高)、潮高 = ▲ 漲潮 / ▼ 退潮、海流 = 細長箭頭(大小隨流速);
+// 風速沿用地面測站的箭頭,只差藍框。
+export const MARINE_HALO = '#1565c0';
+const SHAPES = {
+  'mr-diamond': [[16, 3], [29, 16], [16, 29], [3, 16]],
+  'mr-square': [[6, 6], [26, 6], [26, 26], [6, 26]],
+  'mr-hex': Array.from({ length: 6 }, (_, i) => [16 + 13 * Math.cos((Math.PI / 3) * i), 16 + 13 * Math.sin((Math.PI / 3) * i)]),
+  'mr-tide-up': [[16, 4], [29, 27], [3, 27]],
+  'mr-tide-down': [[3, 5], [29, 5], [16, 28]],
+  'mr-wave': [[16, 2], [30, 29], [16, 21], [2, 29]],
+  'mr-flow': [[16, 1], [22, 11], [17.5, 10], [17.5, 31], [14.5, 31], [14.5, 10], [10, 11]],
+};
+const SHAPE_OF = { buoy: 'mr-diamond', wave: 'mr-diamond', tide: 'mr-square', coast: 'mr-hex' };
+
+/** 多邊形 → SDF 圖示(同 stations.js arrowImage 的距離場做法,才能依數值上色、畫外框) */
+function sdfIcon(points) {
+  const P = 6, s = 32 + P * 2, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  g.translate(P, P);
+  g.beginPath();
+  points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.fill();
+  const a = g.getImageData(0, 0, s, s).data;
+  const inside = Array.from({ length: s * s }, (_, i) => a[i * 4 + 3] > 127);
+  const out = new ImageData(s, s);
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const me = inside[y * s + x];
+      let best = Infinity;
+      for (let j = 0; j < s * s; j++) {
+        if (inside[j] === me) continue;
+        const dx = (j % s) - x, dy = Math.floor(j / s) - y;
+        best = Math.min(best, dx * dx + dy * dy);
+      }
+      const d = me ? -(Math.sqrt(best) - 0.5) : Math.sqrt(best) - 0.5;
+      out.data[(y * s + x) * 4 + 3] = Math.round(255 * Math.max(0, Math.min(1, 1 - (d / 8 + 0.25))));
+    }
+  }
+  return out;
+}
+
+/** 圖例用的小圖(SVG) */
+const svgShape = (name, fill = '#9e9e9e') => `<svg width="16" height="16" viewBox="0 0 32 32" style="vertical-align:-3px">
+  <polygon points="${SHAPES[name].map((p) => p.join(',')).join(' ')}" fill="${fill}" stroke="${MARINE_HALO}" stroke-width="3"/></svg>`;
 
 export class MarineLayer {
   key = 'marine';
@@ -37,6 +91,7 @@ export class MarineLayer {
   visible = true;
   opacity = 1;
   variable = 'wave_h';
+  types = new Set(Object.keys(MARINE_GROUPS));   // 顯示的站種(MARINE_GROUPS)
   staleMin = 90;             // 不同步時,最新資料超過幾分鐘標成過時(每小時一筆,上架約晚 20–40 分)
   index = null;
   current = null;
@@ -59,14 +114,14 @@ export class MarineLayer {
   addTo(beforeId) {
     const m = this.map;
     if (!m.hasImage('st-arrow')) m.addImage('st-arrow', arrowImage(), { sdf: true });
+    for (const [name, pts] of Object.entries(SHAPES)) if (!m.hasImage(name)) m.addImage(name, sdfIcon(pts), { sdf: true });
     m.addSource('marine', { type: 'geojson', data: EMPTY });
-    m.addLayer({ id: 'mr-pt', type: 'circle', source: 'marine', filter: ['!', ['has', 'dir']],
-      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 10, 8], 'circle-color': '#888',
-        'circle-stroke-color': '#000', 'circle-stroke-width': 1.2 } }, beforeId);
-    m.addLayer({ id: 'mr-arrow', type: 'symbol', source: 'marine', filter: ['has', 'dir'],
-      layout: { 'icon-image': 'st-arrow', 'icon-rotate': ['get', 'dir'], 'icon-rotation-alignment': 'map',
-        'icon-allow-overlap': true, 'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.45, 10, 0.9] },
-      paint: { 'icon-color': '#888', 'icon-halo-color': '#000', 'icon-halo-width': 1.2 } }, beforeId);
+    // 一個圖層畫全部:圖示名稱、角度、大小由 features() 依變數與站種決定
+    m.addLayer({ id: 'mr-sym', type: 'symbol', source: 'marine',
+      layout: { 'icon-image': ['get', 'icon'], 'icon-rotate': ['coalesce', ['get', 'dir'], 0], 'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true, 'icon-ignore-placement': true, 'symbol-sort-key': ['get', 'v'],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 5, ['*', 0.5, ['get', 'size']], 10, ['*', 0.95, ['get', 'size']]] },
+      paint: { 'icon-color': '#888', 'icon-halo-color': MARINE_HALO, 'icon-halo-width': 1.8 } }, beforeId);
     m.addLayer({ id: 'mr-sel', type: 'circle', source: 'marine', filter: ['==', ['get', 'id'], ''],
       paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 10, 10, 16], 'circle-color': 'rgba(0,0,0,0)',
         'circle-stroke-color': '#00e5ff', 'circle-stroke-width': 3 } }, beforeId);
@@ -74,27 +129,40 @@ export class MarineLayer {
     this.setVisible(this.visible);
 
     this.popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
-    for (const id of ['mr-pt', 'mr-arrow']) {
-      m.on('mousemove', id, (e) => {
-        m.getCanvas().style.cursor = 'pointer';
-        this.popup.setLngLat(e.features[0].geometry.coordinates).setHTML(this.popupHTML(e.features[0].properties.id)).addTo(m);
-      });
-      m.on('mouseleave', id, () => { m.getCanvas().style.cursor = ''; this.popup.remove(); });
-      m.on('click', id, (e) => this.onSelect?.(e.features[0].properties.id));
-    }
+    m.on('mousemove', 'mr-sym', (e) => {
+      m.getCanvas().style.cursor = 'pointer';
+      this.popup.setLngLat(e.features[0].geometry.coordinates).setHTML(this.popupHTML(e.features[0].properties.id)).addTo(m);
+    });
+    m.on('mouseleave', 'mr-sym', () => { m.getCanvas().style.cursor = ''; this.popup.remove(); });
+    m.on('click', 'mr-sym', (e) => this.onSelect?.(e.features[0].properties.id));
     m.on('moveend', () => this.drawLabels());
   }
 
   applyStyle() {
-    const color = stepExpr(SCALES[this.v.scale]);
-    this.map.setPaintProperty('mr-pt', 'circle-color', color);
-    this.map.setPaintProperty('mr-arrow', 'icon-color', color);
+    this.map.setPaintProperty('mr-sym', 'icon-color', stepExpr(SCALES[this.v.scale]));
   }
 
-  async configure({ variable = this.variable }) {
-    this.variable = variable;
+  async configure({ variable = this.variable, types = this.types }) {
+    Object.assign(this, { variable, types: new Set(types) });
     this.applyStyle();
     this.current = null;
+  }
+
+  /** 圖示名稱、角度、大小 */
+  symbol(type, x, dir, tideLv) {
+    const v = this.v, d = dir != null && x > 0 ? (v.flip ? (dir + 180) % 360 : dir) : null;
+    switch (this.variable) {
+      case 'wave_h':        // 寬箭頭,大小隨浪高(1 m 約 0.85、6 m 以上約 1.35);沒有波向畫站種形狀
+        return { icon: d == null ? SHAPE_OF[type] : 'mr-wave', dir: d, size: 0.75 + 0.1 * Math.min(x, 6) };
+      case 'tide':
+        return { icon: tideLv === '漲潮' ? 'mr-tide-up' : tideLv === '退潮' ? 'mr-tide-down' : SHAPE_OF[type], size: 0.9 };
+      case 'cur_spd':
+        return { icon: d == null ? SHAPE_OF[type] : 'mr-flow', dir: d, size: 0.8 + 0.4 * Math.min(x, 1.5) };
+      case 'ws':            // 同地面測站箭頭(藍框),大小隨風級
+        return d == null ? { icon: SHAPE_OF[type], size: 0.8 } : { icon: 'st-arrow', dir: d, size: 0.8 + 0.05 * beaufort(x) };
+      default:
+        return { icon: SHAPE_OF[type] ?? 'mr-diamond', size: 0.8 };
+    }
   }
 
   /** 同步:時間軸所在整點(之前 1 小時內最近的一筆) */
@@ -129,17 +197,17 @@ export class MarineLayer {
         lon: r[f.lon], lat: r[f.lat] };
       this.all.set(base.id, base);
       const x = r[f[this.variable]];
-      if (x == null) continue;
-      const props = { id: base.id, v: x };
-      const dir = v.dir ? r[f[v.dir]] : null;
-      if (dir != null && x > 0) props.dir = v.flip ? (dir + 180) % 360 : dir;
+      if (x == null || !this.types.has(groupOf(base.type))) continue;
+      const s = this.symbol(base.type, x, v.dir ? r[f[v.dir]] : null, r[f.tide_lv]);
+      const props = { id: base.id, v: x, icon: s.icon, size: s.size };
+      if (s.dir != null) props.dir = s.dir;
       out.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [base.lon, base.lat] } });
     }
     return { stamp, features: out };
   }
 
   async show(stamp) {
-    const key = `${stamp}|${this.variable}`;
+    const key = `${stamp}|${this.variable}|${[...this.types].sort()}`;
     if (stamp && this.current?.key === key) return;
     this.wanted = key;
     const src = this.map.getSource('marine');
@@ -177,7 +245,7 @@ export class MarineLayer {
       const [lon, lat] = ft.geometry.coordinates;
       if (!b.contains([lon, lat])) continue;
       const el = document.createElement('div');
-      el.className = 'st-label';
+      el.className = 'st-label mr-label';
       const x = ft.properties.v;
       el.textContent = fmt(x, this.v.d) + (this.v.scale === 'wind' ? `｜${bfLabel(x)}級`
         : this.variable === 'wave_h' && waveClass(x) ? `｜${waveClass(x)}` : '');
@@ -210,7 +278,7 @@ export class MarineLayer {
   popupHTML(id) {
     const s = this.all.get(id), rows = this.readings(id) ?? [];
     return `<div class="popup-title">${s.name}（${s.id}）</div>
-      <div>${MARINE_TYPES[s.type] ?? ''}　${s.area}</div>
+      <div>海上觀測・${MARINE_TYPES[s.type] ?? ''}　${s.area}</div>
       ${rows.map(([k, x]) => `<div>${k}：<b>${x}</b></div>`).join('')}
       <div style="color:var(--muted)">觀測 ${fmtTW(this.snap.time)}（每小時）</div>`;
   }
@@ -218,27 +286,34 @@ export class MarineLayer {
   setOpacity(v) {
     this.opacity = v;
     const m = this.map;
-    m.setPaintProperty('mr-pt', 'circle-opacity', v);
-    m.setPaintProperty('mr-pt', 'circle-stroke-opacity', v);
-    m.setPaintProperty('mr-arrow', 'icon-opacity', v);
+    m.setPaintProperty('mr-sym', 'icon-opacity', v);
     for (const mk of this.markers) mk.setOpacity(String(v));
   }
 
   setVisible(v) {
     this.visible = v;
-    if (this.map.getLayer('mr-pt')) for (const id of IDS) this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
+    if (this.map.getLayer('mr-sym')) for (const id of IDS) this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
     if (!v) this.popup?.remove();
     this.drawLabels();
   }
 
   legend() {
     const s = SCALES[this.v.scale];
-    if (this.v.scale === 'wind') return beaufortLegendHTML(`海象 ${this.v.name}（蒲福風級）`, s.colors);
-    const arrow = this.v.dir ? `；箭頭 = ${this.v.flip ? '前進' : '流去'}方向` : '';
-    const html = legendHTML(`海象 ${this.v.name} (${this.v.unit})${arrow}`, s.levels, s.colors, 0, 22, s.ticks);
-    if (this.variable !== 'wave_h') return html;
-    const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
-    return `${html}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>`;
+    const html = this.v.scale === 'wind' ? beaufortLegendHTML(`海象 ${this.v.name}（蒲福風級）`, s.colors)
+      : legendHTML(`海象 ${this.v.name} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks);
+    // 符號說明:站種形狀 + 這個變數的專用符號
+    const item = (svg, text) => `<span style="white-space:nowrap;margin-right:10px">${svg} ${text}</span>`;
+    const keys = [item(svgShape('mr-diamond'), '浮標'), item(svgShape('mr-square'), '潮位站'), item(svgShape('mr-hex'), '岸邊氣象站')];
+    if (this.variable === 'wave_h') keys.push(item(svgShape('mr-wave'), '浪前進方向，越大浪越高'));
+    if (this.variable === 'tide') keys.push(item(svgShape('mr-tide-up') + svgShape('mr-tide-down'), '漲潮／退潮'));
+    if (this.variable === 'cur_spd') keys.push(item(svgShape('mr-flow'), '海流流去方向，越大流越快'));
+    if (this.variable === 'ws') keys.push(item('', '箭頭 = 風吹去的方向'));
+    let extra = `<div style="margin-top:6px;font-size:11px;line-height:20px">${keys.join('')}<span style="white-space:nowrap">藍框、藍字 = 海上觀測</span></div>`;
+    if (this.variable === 'wave_h') {
+      const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
+      extra = `<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>${extra}`;
+    }
+    return html + extra;
   }
 }
 

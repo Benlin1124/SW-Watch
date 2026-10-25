@@ -173,6 +173,9 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 .seg { display: flex; gap: 12px; flex-wrap: wrap; }
 body[data-map-theme=light] .ty-name, body[data-map-theme=light] .ty-label { color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; }
 body[data-map-theme=dark] .st-label { color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
+/* 海象數值:藍色斜體(海圖慣例),和地面測站的黑字區隔 */
+.st-label.mr-label { color: #0d47a1; font-style: italic; font-weight: 600; }
+body[data-map-theme=dark] .st-label.mr-label { color: #81d4fa; }
 
 /* 測站:搜尋、篩選、排行榜 */
 #st-search { flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--fg); padding: 3px 6px;

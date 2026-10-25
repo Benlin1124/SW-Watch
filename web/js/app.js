@@ -626,9 +626,18 @@ function bindStationUI() {
 
 function bindMarineUI() {
   const vSel = $('mr-var');
-  vSel.innerHTML = Object.entries(MARINE_VARS).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('');
+  const opts = (keys) => keys.map((k) => `<option value="${k}">${MARINE_VARS[k].name}</option>`).join('');
+  vSel.innerHTML = `<optgroup label="海況">${opts(['wave_h', 'wave_per', 'tide', 'cur_spd', 'sst'])}</optgroup>`
+    + `<optgroup label="海上氣象">${opts(['ws', 'gust', 'temp', 'pres'])}</optgroup>`;
   vSel.value = marine.variable;
-  vSel.onchange = async () => { await marine.configure({ variable: vSel.value }); updateLegend(); render(); };
+  const apply = async () => {
+    const types = [...document.querySelectorAll('#mr-types input:checked')].map((x) => x.value);
+    await marine.configure({ variable: vSel.value, types });
+    updateLegend();
+    render();
+  };
+  vSel.onchange = apply;
+  for (const c of document.querySelectorAll('#mr-types input')) c.onchange = apply;
   $('op-marine').oninput = (e) => marine.setOpacity(e.target.value / 100);
   $('chk-marine').onchange = (e) => { marine.setVisible(e.target.checked); if (!e.target.checked) mCard.close(); updateLegend(); };
   marine.showLabels = $('mr-labels').checked;
