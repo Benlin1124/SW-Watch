@@ -847,3 +847,9 @@ Phase 0 + Phase 1 完成，已實際跑通：
   - .env 有 R2 金鑰 → 上傳到 R2 `events/{資料夾}/`(大小相同的跳過)並更新 `events/index.json`;r2.reconcile 只走 data/、cleanup 只刪 data/ 的檔,不會動到 events/。
 - 讀回:event_stats(snapshot_times、load_snapshot)、radar_video(radar_index 含 grid、load_raw、Typhoon)本機 data/ 沒有時找 archive/ → 原始資料清掉後仍可重做統計、影片(--local 也行)。
 - 實測:1 小時期間 --web --satellite 共 27 MB;刪掉 data 依賴後用 --local 從歸檔跑 event_stats 與 radar_video --preview 正常。3 天估計:預設約 200 MB、--web 再約 200 MB、衛星數 GB。
+
+## 2026-10-25 衛星保留改 7 天;補抓後補齊 index
+- 使用者要求衛星雲圖從保留 3 天改 7 天:config.SAT_KEEP_DAYS 預設 3 → 7、.env.example 改 7(.env 有寫就以 .env 為準,排程電腦的 .env 要自己改並重啟排程)。網頁時間軸本來就是 TIMELINE_DAYS = 7,不用改。
+- 磁碟 / R2:衛星約 1.1 GB/天 → 約 8 GB(R2 免費額度 10 GB,加上事件歸檔可能超過,超過部分每 GB 每月約 0.015 美元)。
+- 從 10/22 補抓用既有的 `python -m pipeline.fetch_satellite --start 202610211600 --end ...`(UTC),要在有 R2 金鑰的排程電腦跑。
+- 補抓與排程是兩個程序,update_index 只有程序內的鎖,同時讀改寫 index.json 可能互相蓋掉 → backfill 結束時 `repair_index()` 依資料夾實際檔案補回漏掉的時次並上傳。

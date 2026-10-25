@@ -73,7 +73,7 @@ SAT_BANDS = {
 }
 SAT_WAIT_MIN = 60            # 掃描開始後幾分鐘內等資料上架,超過記 missed
 SAT_B03_EVERY_MIN = 10       # B03 每次約下載 130 MB;改 30 或 60 可大幅省流量
-SAT_KEEP_DAYS = int(os.environ.get("SAT_KEEP_DAYS", 3))   # 本機與 R2 衛星保留天數(B03 一天約 0.5–1 GB);.env 可改
+SAT_KEEP_DAYS = int(os.environ.get("SAT_KEEP_DAYS", 7))   # 本機與 R2 衛星保留天數(一天約 1.1 GB);.env 可改
 
 # ── ECMWF IFS 開放資料(台灣附近,pipeline/fetch_ecmwf.py)──
 ECMWF_RESOL = "0p1"                       # 0.1°;"0p25" = 0.25°

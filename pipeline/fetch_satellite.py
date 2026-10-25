@@ -6,7 +6,9 @@ MapLibre image source 用四角定位就不會有緯度方向的偏移(5–35N �
 重投影用最近鄰:目標格點 → 原始掃描行列的對照表只算一次,存在 pipeline/.cache。
 B03 可見光只在範圍內有白天時處理(夜間不存檔,前端顯示無資料)。
 
-補抓:python -m pipeline.fetch_satellite --start 202610210000 --end 202610211200 [--bands B13,B07,B08]"""
+補抓:python -m pipeline.fetch_satellite --start 202610210000 --end 202610211200 [--bands B13,B07,B08]
+  時間是 UTC(台灣時間 − 8 小時);已有的時次跳過;要在有 R2 金鑰的排程電腦執行,排程可以同時開著。
+  補抓的資料一樣只保留 SAT_KEEP_DAYS 天(預設 7)。"""
 import argparse
 import gc
 import hashlib
@@ -249,6 +251,27 @@ def backfill(start, end, bands):
             if up:
                 log.info("satellite 補抓 %s:R2 上傳 %d 檔", stamp, up)
         t += timedelta(minutes=10)
+    repair_index(bands)
+
+
+def repair_index(bands):
+    """補抓和排程是兩個程序,同時改 index.json 可能互相蓋掉 → 依資料夾裡實際的檔補回漏掉的時次。"""
+    import json
+    from .common import save_json
+    for band in bands:
+        d = config.DATA_DIR / LAYER / band
+        idx_path = d / "index.json"
+        if not idx_path.exists():
+            continue
+        idx = json.loads(idx_path.read_text(encoding="utf-8"))
+        files = {f.name[:12] for f in d.glob("*.bin.gz")}
+        lost = files - set(idx["times"])
+        if lost:
+            idx["times"] = sorted(set(idx["times"]) | files)
+            idx["latest"] = idx["times"][-1]
+            save_json(idx_path, idx)
+            log.info("satellite/%s index 補回 %d 筆", band, len(lost))
+    r2.flush()
 
 
 def cleanup():
