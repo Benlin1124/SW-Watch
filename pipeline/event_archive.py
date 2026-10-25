@@ -5,7 +5,7 @@
   預設(觀測):stations(測站 10 分鐘快照)、radar(雷達整合回波)、rain/cwa/1h、rain/cwa/today(氣象署雨量格點)、
              typhoon/cwa_track、typhoon/cwa(颱風消息;颱風往前多存一天,路徑才接得起來)
   --web:另存網頁圖層用的衍生資料 stations/agg_*、rain/idw/*(要在網頁重播事件時才需要)
-  --satellite:另存衛星雲圖 B03 / B08 / B13(只保留 SAT_KEEP_DAYS 天,事件結束後要盡快執行;檔案大)
+  --satellite:另存衛星雲圖 B03 / B07 / B08 / B13(只保留 SAT_KEEP_DAYS 天,事件結束後要盡快執行;檔案大)
 本機 data/ 有的直接複製,沒有的從 R2 公開網址下載;已存在的檔跳過(中斷後重跑會接著做)。
 格點(.bin.gz)與 agg(.json.gz)原本就是壓縮檔照原樣存;沒壓縮的 .json(測站快照、颱風路徑)存成 .json.gz。
 .env 有 R2 金鑰時,另外上傳到 R2 的 events/{起}_{迄}_{名稱}/(--no-upload 不上傳),並更新 events/index.json。
@@ -28,7 +28,7 @@ OBS = {"stations": ".json", "radar": ".bin.gz", "rain/cwa/1h": ".bin.gz", "rain/
        "typhoon/cwa_track": ".json", "typhoon/cwa": ".json.gz"}
 WEB = {**{f"stations/agg_{h}": ".json.gz" for h in ("1h", "2h", "3h", "6h", "12h", "24h", "48h", "72h")},
        **{f"rain/idw/{h}": ".bin.gz" for h in ("10m", "1h", "3h", "6h", "12h", "24h", "48h", "72h", "today")}}
-SAT = {f"satellite/{b}": ".bin.gz" for b in ("B03", "B08", "B13")}
+SAT = {f"satellite/{b}": ".bin.gz" for b in ("B03", "B07", "B08", "B13")}
 EARLY = {"typhoon/cwa_track": 1, "typhoon/cwa": 1}          # 往前多存幾天
 
 

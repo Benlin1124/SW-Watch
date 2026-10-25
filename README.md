@@ -37,8 +37,9 @@ python -m pipeline.event_report --kind rain --name 1025豪雨 --start "2026-10-2
 
 - **時間**：都是台灣時間。`--end` 省略 = 最新一筆測站快照。
 - **`--kind`、`--name` 必填**：事件種類和名稱自己給，名稱會用在標題和資料夾名稱。
-  - `typhoon`：做 4 支影片（雷達、雷達+颱風、颱風+測站陣風、颱風+測站平均風）。總結先列風，再附上期間內中心進入本島 500 km 內的颱風生命史。
-  - `rain`：只做雷達影片，總結先列雨量。
+  - `typhoon`：做 5 支影片（雷達、雷達+颱風、衛星日夜+颱風、颱風+測站陣風、颱風+測站平均風）。總結先列風，再附上期間內中心進入本島 500 km 內的颱風生命史。
+  - `rain`：做 2 支影片（雷達、衛星日夜），總結先列雨量。
+  - 衛星只保留 5 天。超過 5 天才做影片的話，要先用 `event_archive --satellite` 存起來。
 - **兩種事件的總結都有**：
   - 最大陣風、最大平均風。
   - 總累積雨量。
@@ -58,7 +59,7 @@ python -m pipeline.event_report --kind rain --name 1025豪雨 --start "2026-10-2
 | `youtube.txt` | 每支影片的標題＋說明（含圖例、雷達缺漏時段、事件總結），可直接貼上 |
 
 其他參數：
-- `--videos radar,radar_ty,gust,wind`：指定要做哪幾支影片。
+- `--videos radar,radar_ty,sat,sat_ty,gust,wind`：指定要做哪幾支影片。`sat` 是衛星日夜，`sat_ty` 再加颱風路徑。
 - `--no-video`：只做統計和摘要，幾分鐘就跑完。
 - `--top 6`：排行列幾名。
 - `--fps 8`、`--local`、`--shp`：同 `radar_video`。
@@ -83,7 +84,7 @@ python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" 
 |---|---|---|
 | 預設 | 測站 10 分鐘快照、雷達整合回波、氣象署雨量格點、颱風路徑與颱風消息（颱風往前多存一天） | 約 100 MB |
 | `--web` | 網頁圖層用的衍生資料：測站累積 `stations/agg_*`、雨量內插 `rain/idw/*` | 再加約 200 MB |
-| `--satellite` | 衛星雲圖 B03 / B08 / B13。只保留 5 天，事件結束後要盡快執行 | 數 GB |
+| `--satellite` | 衛星雲圖 B03 / B07 / B08 / B13。只保留 5 天，事件結束後要盡快執行 | 數 GB |
 
 - **壓縮**：雷達、雨量、衛星、測站累積這幾種原本就是壓縮檔，照原樣存。測站快照和颱風路徑原本沒壓縮，歸檔時會壓縮成 `.json.gz`，測站快照約剩原本的 1/4。
 
@@ -110,6 +111,8 @@ pip install matplotlib imageio-ffmpeg     # imageio-ffmpeg 內含 ffmpeg
 python -m pipeline.radar_video --start "2026-10-22 00:00" --end "2026-10-24 20:00"
 # 雷達 + 颱風路徑與暴風圈
 python -m pipeline.radar_video --start "2026-10-22 00:00" --end "2026-10-24 20:00" --typhoon
+# 衛星日夜（白天 B03 可見光、夜間 B07 短波紅外，同網頁「日夜」頻道）+ 颱風路徑
+python -m pipeline.radar_video --start "2026-10-22 00:00" --end "2026-10-24 20:00" --sat --typhoon
 # 不畫雷達：颱風 + 測站平均風（加 --gust 改陣風）
 python -m pipeline.radar_video --start "2026-10-22 00:00" --end "2026-10-24 20:00" --no-radar --typhoon --wind [--gust]
 # 只輸出一張 PNG 先看畫面（可給時間；省略 = 最新一筆）
@@ -125,6 +128,7 @@ python -m pipeline.radar_video --preview "2026-10-24 00:00" --typhoon
 | `--typhoon` | 疊加颱風路徑與暴風圈，檔名加 `_ty`。 |
 | `--wind` | 疊加測站平均風，檔名加 `_wind`；加 `--gust` 改畫陣風，檔名改 `_gust`。 |
 | `--no-radar` | 不畫雷達，畫面放大到台灣本島。時間改用測站快照，檔名開頭改 `station_`。 |
+| `--sat` | 改畫衛星日夜：依每個位置的太陽仰角，白天用 B03 可見光、夜間用 B07 短波紅外，0°–10° 之間漸變。時間跟 B07，海岸和縣市界改成淡黃色，檔名開頭改 `sat_`。 |
 | `--local` | 只用本機 `data/`，不從 R2 下載。 |
 | `--shp` | `TWN_CITY` 所在資料夾，預設 `shp/`。 |
 

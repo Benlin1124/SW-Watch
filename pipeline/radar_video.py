@@ -5,6 +5,8 @@
   加 --wind:疊加當下測站平均風(箭頭指向風吹去的方向,蒲福風級上色),檔名加 _wind
   加 --gust:測站風改畫陣風(檔名 _gust)
   加 --no-radar:不畫雷達(只要颱風 / 測站風),時間改用測站快照,檔名 station_…
+  加 --sat:改畫衛星日夜(白天 B03 可見光、夜間 B07 短波紅外,依太陽仰角漸變,同網頁「日夜」),時間跟 B07,檔名 sat_…
+    (可再加 --typhoon;衛星只保留 SAT_KEEP_DAYS 天,事件要用 event_archive --satellite 先存)
   python -m pipeline.radar_video --preview ["2026-10-24 12:00"]     # 只輸出一張 PNG 看畫面
 時間為台灣時間;--end 省略 = 最新一筆。輸出到 charts/radar/。
 本機 data/radar 沒有的檔自動從 R2 下載(存在 pipeline/.cache/radar/);--local 只用本機資料。
@@ -42,33 +44,45 @@ H = {"User-Agent": "Mozilla/5.0"}
 BASEMAP = config.ROOT / "web" / "assets" / "basemap"
 
 
-def radar_index(use_r2):
-    idx = read_index("radar")
-    times = set(idx.get("times", [])) | event_archive.times("radar")
-    if "grid" in event_archive.meta("radar"):
-        idx.setdefault("grid", event_archive.meta("radar")["grid"])
+def grid_index(layer, use_r2):
+    """格點圖層(radar、satellite/B07…)的時間與 grid:本機 ∪ 事件歸檔 ∪ R2。"""
+    idx = read_index(layer)
+    times = set(idx.get("times", [])) | event_archive.times(layer)
+    if "grid" in event_archive.meta(layer):
+        idx.setdefault("grid", event_archive.meta(layer)["grid"])
     if use_r2:
-        r2 = requests.get(R2_URL + "radar/index.json", headers=H, timeout=60).json()
-        times |= set(r2["times"])
-        idx.setdefault("grid", r2["grid"])
-    return sorted(times), idx["grid"]
+        r = requests.get(f"{R2_URL}{layer}/index.json", headers=H, timeout=60)
+        if r.status_code == 200:
+            times |= set(r.json()["times"])
+            idx.setdefault("grid", r.json()["grid"])
+    return sorted(times), idx.get("grid")
 
 
-def load_raw(stamp, g, use_r2):
-    path = config.DATA_DIR / "radar" / f"{stamp}.bin.gz"
+def radar_index(use_r2):
+    return grid_index("radar", use_r2)
+
+
+def load_bin(layer, stamp, g, use_r2):
+    """{layer}/{stamp}.bin.gz → uint8 (ny, nx);本機 data/ → 事件歸檔 → R2(快取在 pipeline/.cache/)。沒有回傳 None。"""
+    name = f"{stamp}.bin.gz"
+    path = config.DATA_DIR / layer / name
     if not path.exists():
-        path = event_archive.find("radar", f"{stamp}.bin.gz") or path    # 原始資料被清掉 → 事件歸檔
+        path = event_archive.find(layer, name) or path     # 原始資料被清掉 → 事件歸檔
     if not path.exists():
         if not use_r2:
             return None
-        path = config.CACHE_DIR / "radar" / f"{stamp}.bin.gz"
+        path = config.CACHE_DIR / layer / name
         if not path.exists():
-            r = requests.get(f"{R2_URL}radar/{stamp}.bin.gz", headers=H, timeout=60)
+            r = requests.get(f"{R2_URL}{layer}/{name}", headers=H, timeout=120)
             if r.status_code != 200:
                 return None
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(r.content)
     return np.frombuffer(gzip.decompress(path.read_bytes()), dtype=np.uint8).reshape(g["ny"], g["nx"])
+
+
+def load_raw(stamp, g, use_r2):
+    return load_bin("radar", stamp, g, use_r2)
 
 
 def lut(g):
@@ -96,7 +110,7 @@ def load_world():
     return [shape(f["geometry"]) for f in d["features"]]
 
 
-def make_frame(geo, world, g, title="雷達整合回波", extent=EXTENT):
+def make_frame(geo, world, g, title="雷達整合回波", extent=EXTENT, source="中央氣象署"):
     """4:3 滿版地圖,標題、時間、來源直接壓在地圖上;回傳 (fig, 回波 image, 時間文字),每幀只換回波和時間。"""
     fig = plt.figure(figsize=(8, 6), dpi=200)                     # 1600 × 1200
     fig.patch.set_facecolor("white")
@@ -123,8 +137,93 @@ def make_frame(geo, world, g, title="雷達整合回波", extent=EXTENT):
     box = dict(boxstyle="square,pad=0.35", facecolor="white", edgecolor="none", alpha=0.85)
     fig.text(0.015, 0.975, title, fontsize=17, fontweight="bold", va="top", bbox=box, zorder=20)
     when = fig.text(0.015, 0.905, "", fontsize=14, va="top", bbox=box, zorder=20)
-    fig.text(0.015, 0.84, "資料來源：中央氣象署", fontsize=9, color="#444", va="top", bbox=box, zorder=20)
+    fig.text(0.015, 0.84, f"資料來源：{source}", fontsize=9, color="#444", va="top", bbox=box, zorder=20)
     return fig, im, when
+
+
+# ── 衛星日夜(--sat)──
+B07_GRAY = [(30, 0), (20, 0.18), (10, 0.38), (0, 0.55), (-20, 0.7), (-50, 0.85), (-80, 1)]   # 同網頁 colormaps.js
+DN_NIGHT, DN_DAY = 0.0, 10.0                     # 太陽仰角 ≤ 0° 全用 B07、≥ 10° 全用 B03,之間漸變(同網頁)
+SAT_LINE = "#f2d16b"                             # 衛星底圖上的海岸、縣市界
+
+
+def _merc(lat):
+    return np.log(np.tan(np.pi / 4 + np.deg2rad(lat) / 2))
+
+
+def sun_elevation(stamp, lon, lat):
+    """太陽仰角(度),NOAA 近似式含均時差;時間取掃描開始 + 5 分(同網頁 satellite.js sunAt)。"""
+    t = stamp_dt(stamp) + timedelta(minutes=5)
+    doy = t.timetuple().tm_yday - 1
+    m = t.hour * 60 + t.minute
+    gm = 2 * np.pi / 365 * (doy + (m / 60 - 12) / 24)
+    eqt = 229.18 * (0.000075 + 0.001868 * np.cos(gm) - 0.032077 * np.sin(gm) - 0.014615 * np.cos(2 * gm)
+                    - 0.040849 * np.sin(2 * gm))
+    decl = (0.006918 - 0.399912 * np.cos(gm) + 0.070257 * np.sin(gm) - 0.006758 * np.cos(2 * gm)
+            + 0.000907 * np.sin(2 * gm) - 0.002697 * np.cos(3 * gm) + 0.00148 * np.sin(3 * gm))
+    ha = np.deg2rad((m + eqt + 4 * lon) / 4 - 180)
+    p = np.deg2rad(lat)
+    return np.rad2deg(np.arcsin(np.sin(p) * np.sin(decl) + np.cos(p) * np.cos(decl) * np.cos(ha)))
+
+
+class DayNight:
+    """衛星日夜組合(同網頁「日夜」頻道):依每格太陽仰角,白天 B03 可見光、夜間 B07 短波紅外,晨昏之間漸變;
+    可見光除以 sin(仰角)補償晨昏變暗(仰角 < 10° 不再放大)。時次跟 B07,該時次沒有 B03 就全用 B07。
+    衛星格點在麥卡托上等間距 → 裁出畫面附近,重新取樣成經緯度等間距(0.01°)給 imshow。"""
+
+    def __init__(self, use_r2, extent=EXTENT, pad=(1.5, 1.0), res=0.01):
+        self.use_r2 = use_r2
+        self.times, self.g07 = grid_index("satellite/B07", use_r2)
+        t03, self.g03 = grid_index("satellite/B03", use_r2)
+        self.t03 = set(t03)
+        x0, x1, y0, y1 = extent
+        self.extent = (x0 - pad[0], x1 + pad[0], y0 - pad[1], y1 + pad[1])
+        lon = np.arange(self.extent[0] + res / 2, self.extent[1], res)
+        lat = np.arange(self.extent[2] + res / 2, self.extent[3], res)
+        self.lon, self.lat = lon, lat
+        self.idx = {k: self._index(g, lon, lat) for k, g in (("07", self.g07), ("03", self.g03)) if g}
+        LON, LAT = np.meshgrid(lon, lat)
+        self.LON, self.LAT = LON, LAT
+        v = np.arange(256) * self.g07["scale"] + self.g07["offset"]
+        xs, gs = zip(*B07_GRAY[::-1])                                  # np.interp 要遞增
+        self.night = np.round(np.interp(v, xs, gs) * 255).clip(0, 254).astype(np.float32)
+
+    @staticmethod
+    def _index(g, lon, lat):
+        ys, yn = _merc(g["south"]), _merc(g["north"])
+        col = np.floor((lon - g["west"]) / (g["east"] - g["west"]) * g["nx"]).astype(int).clip(0, g["nx"] - 1)
+        row = np.floor((_merc(lat) - ys) / (yn - ys) * g["ny"]).astype(int).clip(0, g["ny"] - 1)
+        return row, col
+
+    def _crop(self, raw, key):
+        row, col = self.idx[key]
+        return raw[np.ix_(row, col)]
+
+    def image(self, stamp):
+        """→ RGBA uint8(列 0 在南),缺值透明;B07 都沒有回傳 None。"""
+        r07 = load_bin("satellite/B07", stamp, self.g07, self.use_r2)
+        if r07 is None:
+            return None
+        a = self._crop(r07, "07")
+        n = self.night[a]
+        ok = a != self.g07["nodata"]
+        gray = n
+        r03 = load_bin("satellite/B03", stamp, self.g03, self.use_r2) if self.g03 and stamp in self.t03 else None
+        if r03 is not None:
+            v = self._crop(r03, "03")
+            el = sun_elevation(stamp, self.LON, self.LAT)
+            w = np.clip((el - DN_NIGHT) / (DN_DAY - DN_NIGHT), 0, 1)
+            k = 1 / np.maximum(np.sin(np.deg2rad(el)), np.sin(np.deg2rad(DN_DAY)))
+            refl = v * self.g03["scale"] + self.g03["offset"]
+            d = 255 * np.clip(refl * k / 100, 0, 1) ** 0.6
+            v_ok = v != self.g03["nodata"]
+            d = np.where(v_ok, d, n)
+            gray = np.where(ok, w * d + (1 - w) * n, d)
+            ok = ok | (v_ok & (w > 0))
+        out = np.zeros(a.shape + (4,), dtype=np.uint8)
+        out[..., :3] = np.round(gray).clip(0, 255).astype(np.uint8)[..., None]
+        out[..., 3] = np.where(ok, 255, 0)
+        return out
 
 
 # ── 颱風路徑、暴風圈(--typhoon)──
@@ -313,13 +412,13 @@ def wind_colorbar(fig):
 
 
 def set_frame(im, when, raw, table, stamp, overlays=()):
-    im.set_data(table[raw])
+    im.set_data(raw if table is None else table[raw])      # 衛星日夜已經是 RGBA
     for o in overlays:
         o.draw(im.axes, stamp)
     when.set_text(tw(stamp, "%Y/%m/%d %H:%M") + " (台灣時間)")
 
 
-def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_radar=False, use_r2=True,
+def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_radar=False, sat=False, use_r2=True,
            fps=8, gif=False, shp=config.ROOT / "shp", out_dir=OUT_DIR, preview=None, title=None):
     """start / end:UTC stamp(end None = 最新一筆);preview:UTC stamp 或 "latest" → 只輸出一張 PNG。
     回傳 dict(path, frames, missing, gaps, seconds, first, last);gaps = 缺資料的 [(前一幀, 下一幀)]。"""
@@ -328,15 +427,27 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
     times, g = radar_index(use_r2)
     table = lut(g)
     load = lambda t: load_raw(t, g, use_r2)
-    auto, prefix = "雷達整合回波", "radar"
-    if no_radar:                                         # 回波全畫成 raw 0(透明),時間用測站快照
+    auto, prefix, source = "雷達整合回波", "radar", "中央氣象署"
+    if sat:                                              # 衛星日夜:時間跟 B07,每幀直接是 RGBA
+        dn = DayNight(use_r2)
+        times, table, load = dn.times, None, dn.image
+        auto, prefix = "衛星雲圖（白天可見光／夜間短波紅外）", "sat"
+        source = "Himawari-9（日本氣象廳）" + ("、中央氣象署" if typhoon or wind else "")
+    elif no_radar:                                       # 回波全畫成 raw 0(透明),時間用測站快照
         times = snapshot_times(use_r2)
         blank = np.zeros((g["ny"], g["nx"]), dtype=np.uint8)
         load = lambda t: blank
         wname = "測站陣風" if gust else "測站平均風"
         auto, prefix = (f"颱風位置與{wname}" if typhoon else wname) if wind else "颱風路徑", "station"
     geo, world = load_shp(Path(shp)), load_world()
-    fig, im, when = make_frame(geo, world, g, title or auto, EXTENT_TW if no_radar else EXTENT)
+    fig, im, when = make_frame(geo, world, g, title or auto, EXTENT_TW if no_radar and not sat else EXTENT, source)
+    if sat:                                              # 雲圖蓋住陸地填色,海岸、縣市界改淡黃色疊在上面
+        im.set_extent(dn.extent)
+        im.set_zorder(1)
+        im.set_interpolation("bilinear")
+        for c in im.axes.collections:
+            if isinstance(c, LineCollection):
+                c.set_color(SAT_LINE)
     if wind:
         wind_colorbar(fig)
     out_dir = Path(out_dir)
@@ -406,6 +517,7 @@ def main():
     p.add_argument("--wind", action="store_true", help="疊加測站平均風(蒲福風級顏色箭頭)")
     p.add_argument("--gust", action="store_true", help="--wind 改畫陣風(gust / gust_dir)")
     p.add_argument("--no-radar", action="store_true", help="不畫雷達(搭配 --wind / --typhoon;時間改用測站快照)")
+    p.add_argument("--sat", action="store_true", help="改畫衛星日夜(白天 B03 可見光、夜間 B07 短波紅外;同網頁「日夜」)")
     p.add_argument("--local", action="store_true", help="只用本機 data/radar")
     a = p.parse_args()
     if not a.start and not a.preview:
@@ -413,7 +525,7 @@ def main():
     preview = a.preview if a.preview in (None, "latest") else to_stamp(parse_tw(a.preview))
     try:
         render(to_stamp(parse_tw(a.start)) if a.start else None, to_stamp(parse_tw(a.end)) if a.end else None,
-               typhoon=a.typhoon, wind=a.wind, gust=a.gust, no_radar=a.no_radar, use_r2=not a.local,
+               typhoon=a.typhoon, wind=a.wind, gust=a.gust, no_radar=a.no_radar, sat=a.sat, use_r2=not a.local,
                fps=a.fps, gif=a.gif, shp=a.shp, preview=preview)
     except ValueError as e:
         p.error(str(e))

@@ -5,10 +5,11 @@
   rain_total.png、rain_total_station.png、wind_max.png、gust_max.png、*.csv、county_stats.xlsx(同 event_stats)
   影片 *.mp4(同 radar_video)、summary.txt(事件總結)、youtube.txt(每支影片的標題 + 說明,可直接貼)
 事件種類 --kind、名稱 --name 都要自己給:
-  typhoon:影片 radar、radar_ty、gust、wind 四支;摘要先列風,含期間內中心進入本島 500 km 內的颱風生命史與最接近台灣的時間。
-  rain:影片只有 radar;摘要先列雨量。
+  typhoon:影片 radar、radar_ty、sat_ty、gust、wind 五支;摘要先列風,含期間內中心進入本島 500 km 內的颱風生命史與最接近台灣的時間。
+  rain:影片 radar、sat 兩支;摘要先列雨量。
 兩種摘要都有:最大陣風、最大平均風、總累積雨量、最大時雨量 / 3 / 6 / 12 / 24 小時雨量、達氣象署雨量分級的站數。
---videos radar,radar_ty,gust,wind 指定要哪幾支;--no-video 只做統計和摘要(快很多)。
+--videos radar,radar_ty,sat,sat_ty,gust,wind 指定要哪幾支;--no-video 只做統計和摘要(快很多)。
+  sat / sat_ty = 衛星日夜(白天 B03 可見光、夜間 B07 短波紅外)/ 加颱風路徑;衛星只保留 SAT_KEEP_DAYS 天,超過要先 event_archive --satellite。
 影片要在前景執行(背景執行 ffmpeg 會 WinError 6)。本機沒有的資料自動從 R2 下載;--local 只用本機。"""
 import argparse
 from datetime import timedelta
@@ -21,7 +22,7 @@ from . import config, event_stats, radar_video
 from .event_stats import bf_label, parse_tw, stamp_dt, to_stamp, tw
 
 NEAR_KM = 500                     # 颱風中心離本島海岸這麼近才算颱風事件
-VIDEOS = {"radar": {}, "radar_ty": {"typhoon": True},
+VIDEOS = {"radar": {}, "radar_ty": {"typhoon": True}, "sat": {"sat": True}, "sat_ty": {"sat": True, "typhoon": True},
           "gust": {"typhoon": True, "wind": True, "gust": True, "no_radar": True},
           "wind": {"typhoon": True, "wind": True, "no_radar": True}}
 # 氣象署雨量分級(24 小時累積;大雨另有時雨量 40 mm、豪雨另有 3 小時 100 mm)
@@ -186,6 +187,8 @@ def gap_text(gaps):
 LEGEND_TY = ["● 紅點:當下颱風中心",
              "— 黑線與小點:氣象署實際定位(只畫氣象署公布的定位點,不另外內插)",
              "◯ 黃圈:七級風暴風半徑(平均半徑)", "◯ 紅圈:十級風暴風半徑(平均半徑)"]
+LEGEND_SAT = ["☀ 白天:B03 可見光(反照率,雲越厚越白)", "☾ 夜間:B07 短波紅外(亮溫,越冷越白)",
+              "依每個位置的太陽仰角切換,仰角 0°–10° 之間漸變"]
 LEGEND_WIND = ["➤ 箭頭:指向風吹去的方向,顏色與長度依蒲福風級(底部色階 0–17 級)", "・ 小圓點:靜風或無風向資料"]
 
 
@@ -200,6 +203,12 @@ def youtube_text(name, kind, results, summary, fps):
         elif key == "radar_ty":
             title = f"{name} 路徑+暴風圈+雷達回波|{p} 縮時"
             what, src, legend = "雷達整合回波疊加颱風實際路徑與暴風圈的縮時影片", "雷達整合回波、颱風路徑", LEGEND_TY
+        elif key.startswith("sat"):
+            ty = key == "sat_ty"
+            title = f"{name} 衛星雲圖縮時(日夜)" + ("+颱風路徑" if ty else "") + f"|{p}"
+            what = "Himawari-9 衛星雲圖" + ("疊加颱風實際路徑與暴風圈" if ty else "") + "的縮時影片"
+            src = "颱風路徑" if ty else ""
+            legend = LEGEND_SAT + (LEGEND_TY if ty else [])
         else:
             wn = "陣風" if key == "gust" else "平均風(10 分鐘平均)"
             title = f"{name} 全台測站{wn.split('(')[0]}變化|颱風路徑+暴風圈 {p}"
@@ -210,9 +219,14 @@ def youtube_text(name, kind, results, summary, fps):
              f"⏱ 每格 10 分鐘,{fps:g} fps,約 {v['seconds']:.0f} 秒"]
         if legend:
             d += ["", "圖例說明:", *legend]
-        if key.startswith("radar") and v["gaps"]:
-            d += ["", f"※ 部分時段雷達資料缺漏({gap_text(v['gaps'])}),影片中會略過。"]
-        d += ["", summary, "", f"資料來源:中央氣象署({src})", f"製作：SW-Watch 劇烈天氣監控平台 {SITE}"]
+        if key.startswith(("radar", "sat")) and v["gaps"]:
+            what_gap = "雷達" if key.startswith("radar") else "衛星"
+            d += ["", f"※ 部分時段{what_gap}資料缺漏({gap_text(v['gaps'])}),影片中會略過。"]
+        if key.startswith("sat"):
+            source = "資料來源:Himawari-9(日本氣象廳)" + (f"、中央氣象署({src})" if src else "")
+        else:
+            source = f"資料來源:中央氣象署({src})"
+        d += ["", summary, "", source, f"製作：SW-Watch 劇烈天氣監控平台 {SITE}"]
         tags = f"#{name} #氣象 #台灣" + (" #颱風" if kind == "typhoon" else " #豪雨")
         blocks.append(f"################ {v['path'].name}\n"
                       + fullwidth("\n".join(["【標題】", title, "", "【說明】", *d, "", tags])))
@@ -225,7 +239,7 @@ def main():
     ap.add_argument("--end", help="台灣時間;省略 = 最新一筆快照")
     ap.add_argument("--name", required=True, help="事件名稱(標題、資料夾用),例如 薔琵颱風、1025豪雨")
     ap.add_argument("--kind", required=True, choices=["typhoon", "rain"], help="typhoon 颱風 / rain 豪雨")
-    ap.add_argument("--videos", help="逗號分隔:radar,radar_ty,gust,wind;省略依事件種類")
+    ap.add_argument("--videos", help="逗號分隔:radar,radar_ty,sat,sat_ty,gust,wind;省略依事件種類")
     ap.add_argument("--no-video", action="store_true", help="只做統計和摘要")
     ap.add_argument("--top", type=int, default=6, help="摘要排行列幾名")
     ap.add_argument("--fps", type=float, default=8)
@@ -250,7 +264,8 @@ def main():
 
     if a.no_video:
         return
-    keys = a.videos.split(",") if a.videos else (list(VIDEOS) if kind == "typhoon" else ["radar"])
+    keys = a.videos.split(",") if a.videos else (["radar", "radar_ty", "sat_ty", "gust", "wind"] if kind == "typhoon"
+                                                 else ["radar", "sat"])
     results = {}
     for k in keys:
         print(f"影片 {k} …")

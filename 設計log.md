@@ -873,3 +873,12 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 效能:每格算次方要 47 秒 → 補償倍率量化 48 級、每級一張 raw → 灰階查表,一張(含解碼、PNG)約 1.2 秒。
 - 滑鼠讀值:太陽仰角、B03 反照率、B07 亮溫。圖例:B03、B07 兩條色階 + 漸變說明。
 - 實測:10/24 06:30(晨昏線約 110°E)交界漸變無接縫;10/25 15:00 白天全可見光;網頁選單切換正常。
+
+## 2026-10-25 衛星日夜影片(radar_video --sat)
+- 同網頁「日夜」頻道做成影片:`python -m pipeline.radar_video --start ... --end ... --sat [--typhoon]`,檔名 sat_…;畫面、時間、標題、颱風疊加同雷達影片。
+- DayNight(radar_video):時間跟 B07;每幀載 B07(+ 該時次有的話 B03),裁出畫面附近(EXTENT 外加 1.5° / 1°)並從麥卡托等距格點重新取樣成 0.01° 經緯度等距給 imshow;每格太陽仰角(同網頁 sunAt 公式)0°–10° 漸變,可見光除以 sin(仰角)補償(< 10° 不再放大),B07 灰階錨點同 colormaps.js。輸出 RGBA,set_frame 遇 RGBA 直接 set_data。
+- 雲圖蓋住陸地填色(zorder 1),海岸、縣市界改淡黃 #f2d16b;資料來源「Himawari-9(日本氣象廳)」(+ 颱風時「、中央氣象署」)。make_frame 加 source 參數。
+- 共用:grid_index(layer)、load_bin(layer)(本機 → 事件歸檔 → R2,快取 pipeline/.cache/{layer})取代 radar 專用的讀檔。
+- event_report:VIDEOS 加 sat、sat_ty;typhoon 預設五支(radar、radar_ty、sat_ty、gust、wind),rain 預設 radar、sat;youtube.txt 加衛星圖例、來源與缺漏時段。
+- event_archive --satellite 原本漏了 B07(日夜要用)→ 補上。
+- 實測:預覽 10/23 14:00(白天可見光,颱風眼清楚)、10/24 06:30(晨昏漸變)、10/24 00:00(夜間 B07;極冷雲頂有顆粒雜訊,B07 在低溫訊號差,網頁同);1 小時 7 幀 2.3 MB,三天約 150 MB。
