@@ -1,6 +1,7 @@
 """雷達整合回波動畫:一段期間的 data/radar 格點 → MP4(每 10 分鐘一幀)。
 回波色階與網頁相同(畫面不放色階)(colormaps.js DBZ_LEVELS / DBZ_COLORS,< 0 dBZ 不畫);底圖:Natural Earth 陸地 + shp/TWN_CITY 縣市界。
   python -m pipeline.radar_video --start "2026-10-22 00:00" [--end "2026-10-25 09:00"] [--fps 8] [--gif]
+  加 --typhoon:疊加 CWA 颱風實際路徑(每個定位一點)與 7 級 / 10 級暴風圈(平均半徑正圓,只畫外框),檔名加 _ty
   python -m pipeline.radar_video --preview ["2026-10-24 12:00"]     # 只輸出一張 PNG 看畫面
 時間為台灣時間;--end 省略 = 最新一筆。輸出到 charts/radar/。
 本機 data/radar 沒有的檔自動從 R2 下載(存在 pipeline/.cache/radar/);--local 只用本機資料。
@@ -8,6 +9,7 @@ MP4 用 imageio-ffmpeg(pip install imageio-ffmpeg,內含 ffmpeg)。"""
 import argparse
 import gzip
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import matplotlib
@@ -21,7 +23,7 @@ from shapely.geometry import shape
 
 from . import config
 from .common import read_index
-from .event_stats import FONT, LIGHT, R2_URL, _polys, load_shp, parse_tw, to_stamp, tw
+from .event_stats import FONT, LIGHT, R2_URL, _polys, load_shp, parse_tw, stamp_dt, to_stamp, tw
 
 DBZ_LEVELS = [-5, 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 85]
 DBZ_COLORS = ["#ffffff", "#98ffff", "#009aff", "#1919ff", "#19ff19", "#19cd19",
@@ -114,8 +116,126 @@ def make_frame(geo, world, g):
     return fig, im, when
 
 
-def set_frame(im, when, raw, table, stamp):
+# ── 颱風路徑、暴風圈(--typhoon)──
+C15, C25 = "#f9a825", "#e53935"                  # 7 級 / 10 級暴風圈(同網頁)
+
+
+def destination(lon, lat, bearing, km):
+    """球面上從 (lon, lat) 往方位 bearing 走 km 公里(同網頁 typhoon.js)。"""
+    d, b = km / 6371.0088, np.deg2rad(bearing)
+    p1, l1 = np.deg2rad(lat), np.deg2rad(lon)
+    p2 = np.arcsin(np.sin(p1) * np.cos(d) + np.cos(p1) * np.sin(d) * np.cos(b))
+    l2 = l1 + np.arctan2(np.sin(b) * np.sin(d) * np.cos(p1), np.cos(d) - np.sin(p1) * np.sin(p2))
+    return np.rad2deg(l2), np.rad2deg(p2)
+
+
+def wind_circle(lon, lat, r):
+    """暴風圈外框;r = 半徑(km)或四象限 [NE, SE, SW, NW](每象限畫 0–90° 圓弧,交界是徑向直線)。"""
+    if isinstance(r, list):
+        a = np.concatenate([np.arange(q * 90, q * 90 + 91, 3) for q in range(4)])
+        rr = np.concatenate([np.full(31, r[q]) for q in range(4)])
+    else:
+        a, rr = np.arange(0, 361, 3), np.full(121, r)
+    x, y = destination(lon, lat, a, rr)
+    return np.append(x, x[0]), np.append(y, y[0])
+
+
+def _ms(stamp):
+    return stamp_dt(stamp).timestamp()
+
+
+class Typhoon:
+    """期間內各報 CWA 路徑(typhoon/cwa_track)。
+    實際路徑:各報的過去定位合併(同一時間以較晚的報為準,警報期間每小時一個定位);
+    只畫實際路徑(到畫面時間為止,氣象署每個定位一個點)、颱風中心、7 級 / 10 級暴風圈(平均半徑正圓,不填色);
+    目前位置與半徑:實際定位之間內插,最後一個定位之後沿當下最新一報(初始時間 ≤ 該時間)的預報內插。"""
+
+    def __init__(self, start, end, use_r2):
+        idx = read_index("typhoon/cwa_track").get("times", [])
+        if use_r2:
+            idx = sorted(set(idx) | set(requests.get(R2_URL + "typhoon/cwa_track/index.json", headers=H, timeout=60).json()["times"]))
+        lo = to_stamp(stamp_dt(start) - timedelta(days=1))
+        self.reports = []                             # [(init, storms)]
+        for t in [x for x in idx if lo <= x <= end]:
+            d = self._load(t, use_r2)
+            if d:
+                self.reports.append((t, d["storms"]))
+        self.past = {}
+        for _, storms in self.reports:
+            for st in storms:
+                for q in st["past"]:
+                    self.past.setdefault(st["id"], {})[q["t"]] = q
+        self.artists = []
+
+    @staticmethod
+    def _load(stamp, use_r2):
+        path = config.DATA_DIR / "typhoon" / "cwa_track" / f"{stamp}.json"
+        if not path.exists():
+            if not use_r2:
+                return None
+            path = config.CACHE_DIR / "typhoon" / "cwa_track" / f"{stamp}.json"
+            if not path.exists():
+                r = requests.get(f"{R2_URL}typhoon/cwa_track/{stamp}.json", headers=H, timeout=60)
+                if r.status_code != 200:
+                    return None
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(r.content)
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def report_at(self, stamp):
+        cur = [r for r in self.reports if r[0] <= stamp]
+        return cur[-1][1] if cur else []
+
+    def draw(self, ax, stamp):
+        for art in self.artists:
+            art.remove()
+        self.artists = []
+        T = _ms(stamp)
+        for st in self.report_at(stamp):
+            sid = st["id"]
+            past = sorted(self.past.get(sid, {}).values(), key=lambda q: q["t"])
+            fcst = []
+            if st.get("fcst_init"):
+                f0 = _ms(st["fcst_init"])
+                fcst = [{**q, "ms": f0 + q["tau"] * 3600} for q in st.get("fcst", [])]
+            pts = [{**q, "ms": _ms(q["t"])} for q in past]
+            last = pts[-1]["ms"] if pts else -1
+            pts += [q for q in fcst if q["ms"] > last]
+            if not pts or T < pts[0]["ms"] or T > pts[-1]["ms"]:
+                continue
+            now = self._interp(pts, T)
+            seen = [q for q in pts if q["ms"] <= T and q.get("t")]
+            px = [q["lon"] for q in seen] + [now["lon"]]
+            py = [q["lat"] for q in seen] + [now["lat"]]
+            self.artists += ax.plot(px, py, color="#222", lw=1.6, zorder=8, solid_capstyle="round")
+            # 定位點只畫氣象署實際給的(警報期間每小時,之前 3 / 6 小時),不內插
+            self.artists += ax.plot(px[:-1], py[:-1], "o", ms=3, mfc="#222", mec="none", zorder=9)
+            for key, color in (("r15", C15), ("r25", C25)):                        # 平均半徑正圓,只畫外框
+                if now.get(key):
+                    x, y = wind_circle(now["lon"], now["lat"], now[key])
+                    self.artists += ax.plot(x, y, color=color, lw=2.2, zorder=10)
+            self.artists += ax.plot(now["lon"], now["lat"], "o", ms=11, mfc="#e53935", mec="white", mew=2, zorder=11)
+
+    @staticmethod
+    def _interp(pts, T):
+        """T 前後兩點內插位置與暴風圈(四象限兩端都有才內插,否則取較近的一端)。"""
+        for a, b in zip(pts, pts[1:]):
+            if a["ms"] <= T <= b["ms"]:
+                f = (T - a["ms"]) / (b["ms"] - a["ms"] or 1)
+                near = a if f < 0.5 else b
+                out = {k: a[k] + (b[k] - a[k]) * f for k in ("lon", "lat")}
+                for k in ("r15", "r25"):
+                    out[k] = a[k] + (b[k] - a[k]) * f if a.get(k) and b.get(k) else near.get(k)
+                    qa, qb = a.get(k + "q"), b.get(k + "q")
+                    out[k + "q"] = [x + (y - x) * f for x, y in zip(qa, qb)] if qa and qb else near.get(k + "q")
+                return out
+        return dict(pts[-1])
+
+
+def set_frame(im, when, raw, table, stamp, ty=None):
     im.set_data(table[raw])
+    if ty:
+        ty.draw(im.axes, stamp)
     when.set_text(tw(stamp, "%Y/%m/%d %H:%M") + " (台灣時間)")
 
 
@@ -128,6 +248,7 @@ def main():
     p.add_argument("--fps", type=float, default=8)
     p.add_argument("--gif", action="store_true", help="另外輸出 GIF")
     p.add_argument("--shp", default=str(config.ROOT / "shp"), help="TWN_CITY 所在資料夾")
+    p.add_argument("--typhoon", action="store_true", help="疊加颱風路徑與 7 級 / 10 級暴風圈(只畫外框)")
     p.add_argument("--local", action="store_true", help="只用本機 data/radar")
     a = p.parse_args()
     use_r2 = not a.local
@@ -138,10 +259,13 @@ def main():
     fig, im, when = make_frame(geo, world, g)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    suffix = "_ty" if a.typhoon else ""
+
     if a.preview:
         stamp = times[-1] if a.preview == "latest" else max(t for t in times if t <= to_stamp(parse_tw(a.preview)))
-        set_frame(im, when, load_raw(stamp, g, use_r2), table, stamp)
-        out = OUT_DIR / f"radar_{tw(stamp, '%Y%m%d%H%M')}.png"
+        ty = Typhoon(stamp, stamp, use_r2) if a.typhoon else None
+        set_frame(im, when, load_raw(stamp, g, use_r2), table, stamp, ty)
+        out = OUT_DIR / f"radar_{tw(stamp, '%Y%m%d%H%M')}{suffix}.png"
         fig.savefig(out, facecolor="white")
         print(f"預覽 {tw(stamp)} → {out}")
         return
@@ -154,7 +278,8 @@ def main():
     if not sel:
         p.error("期間內沒有雷達資料")
     import imageio_ffmpeg
-    name = f"radar_{tw(sel[0], '%Y%m%d%H%M')}_{tw(sel[-1], '%Y%m%d%H%M')}"
+    ty = Typhoon(sel[0], sel[-1], use_r2) if a.typhoon else None
+    name = f"radar_{tw(sel[0], '%Y%m%d%H%M')}_{tw(sel[-1], '%Y%m%d%H%M')}{suffix}"
     fig.canvas.draw()
     w, h = fig.canvas.get_width_height()
     writer = imageio_ffmpeg.write_frames(str(OUT_DIR / f"{name}.mp4"), (w, h), fps=a.fps, quality=8,
@@ -167,7 +292,7 @@ def main():
         if raw is None:
             missing += 1
             continue
-        set_frame(im, when, raw, table, t)
+        set_frame(im, when, raw, table, t, ty)
         fig.canvas.draw()
         frame = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
         writer.send(np.ascontiguousarray(frame))
