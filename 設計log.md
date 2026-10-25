@@ -902,3 +902,10 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 改法(satellite.js):dnSources() 讓 B07+B13、B03 同時下載,同一時次只抓一次;整個範圍太陽仰角都在 0° 以下就不抓 B03。合成搬到模組函式 dnCompose()。
 - 先顯示快速版:show() 在完整版還沒好時,先用 B07/B13 做一張 0.02° 的快速版(白天區域暫時是紅外線灰階),B03 到了再換完整版。快取的 Promise 做完標 .done。
 - 實測(未快取):白天快速版 2.3–3.2 秒、完整版 6.9–8.7 秒(原 12–13 秒);夜間 3.4 秒不抓 B03。網頁時間軸切到白天:2.3 秒出快速版、9 秒換完整版。
+## 2026-10-25 網頁日夜頻道不卡:合成搬到 Web Worker、改 JPEG
+- 使用者反映日夜還是卡卡的,單獨 B03 順。原因:日夜每張要在主執行緒合成約 1600 萬格(約 1 秒),期間地圖完全不能動;B03 單頻道只有查色表。
+- 新增 web/js/layers/daynight.js(純計算,不 import:sunAt、sunElevation、hasDaylight、夜間 B07×B13 表、dnCode 合成、halve)與 daynight-worker.js(合成 + 上下翻轉 + 查灰階,回傳 RGBA,零複製轉移)。主執行緒只做 putImageData 與 toBlob。
+- 改 JPEG(0.92):日夜 PNG 一張約 18 MB、編碼約 1 秒,快取多張時 headless 實測出現 ERR_BLOB_OUT_OF_MEMORY;JPEG 約 1/10 大。缺值畫黑色(範圍都在全盤內,幾乎沒有)。WebP 5000×3240 編碼要 2 秒,不用。
+- 不在 worker 建 OffscreenCanvas:5000×3240 在 worker 出現 createImageData 記憶體不足。
+- 快取的 raw 改存 B03 縮成 B07 格點(滑鼠讀值本來就只取每 2×2 一格),一張從 24 MB 降到 12 MB;DN 快取 12 → 24 張(同 B03)。
+- 實測 8 格逐格切換(未快取):主執行緒長任務每次 50–210 ms(B03 單頻道 55–170 ms,原本日夜每張 1 秒以上),每格約 5 秒(下載);滑鼠讀值正常。
