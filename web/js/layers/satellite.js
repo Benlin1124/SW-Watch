@@ -10,11 +10,35 @@ export const SAT_BANDS = {
   B07: { name: 'B07 短波紅外', cache: 60, legend: ['亮溫 (°C)', [-80, 30], [-80, -60, -40, -20, 0, 10, 20, 30]] },
   // 組合產品:B13 − B07 亮溫差(需要 B13 和 B07 同一時次)
   FOG: { name: '夜間低雲／霧（B13−B07）', cache: 30, from: ['B13', 'B07'] },
+  // 日夜:依每格太陽仰角,白天 B03 可見光、夜間 B07 短波紅外,晨昏之間漸變(時次跟 B07;夜間沒有 B03 就全用 B07)
+  DN: { name: '日夜（B03 白天／B07 夜間）', cache: 12, from: ['B07'] },
   B08: { name: 'B08 水氣', cache: 60, legend: ['亮溫 (°C)', [-90, 0], [-80, -60, -40, -20, 0]] },
   B03: { name: 'B03 可見光', cache: 24, legend: ['反照率 (%)', [0, 100], [0, 20, 40, 60, 80, 100]] },
 };
 
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+
+// 日夜漸變:太陽仰角 night 以下全用 B07、day 以上全用 B03(度)
+const DN = { night: 0, day: 10 };
+const GRAY_LUT = Uint32Array.from({ length: 256 }, (_, v) => (v === 255 ? 0 : (0xff000000 | (v << 16) | (v << 8) | v) >>> 0));
+
+/** 太陽赤緯與時間(NOAA 近似式,含均時差);時間取掃描開始 + 5 分(全盤掃到台灣附近約這時候) */
+function sunAt(stamp) {
+  const t = Date.UTC(+stamp.slice(0, 4), +stamp.slice(4, 6) - 1, +stamp.slice(6, 8), +stamp.slice(8, 10), +stamp.slice(10, 12) + 5);
+  const d = new Date(t), doy = (t - Date.UTC(d.getUTCFullYear(), 0, 1)) / 864e5;
+  const min = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const gm = (2 * Math.PI / 365) * (doy + (min / 60 - 12) / 24);
+  const eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(gm) - 0.032077 * Math.sin(gm) - 0.014615 * Math.cos(2 * gm) - 0.040849 * Math.sin(2 * gm));
+  const decl = 0.006918 - 0.399912 * Math.cos(gm) + 0.070257 * Math.sin(gm) - 0.006758 * Math.cos(2 * gm)
+    + 0.000907 * Math.sin(2 * gm) - 0.002697 * Math.cos(3 * gm) + 0.00148 * Math.sin(3 * gm);
+  return { decl, min: min + eqt };
+}
+
+/** 太陽仰角(度) */
+function sunElevation({ decl, min }, lat, lon) {
+  const ha = (((min + 4 * lon) / 4 - 180) * Math.PI) / 180, p = (lat * Math.PI) / 180;
+  return (Math.asin(Math.sin(p) * Math.sin(decl) + Math.cos(p) * Math.cos(decl) * Math.cos(ha)) * 180) / Math.PI;
+}
 
 export class SatelliteLayer {
   key = 'satellite';
@@ -39,9 +63,9 @@ export class SatelliteLayer {
   async bandIndex(band) {
     const from = SAT_BANDS[band].from;
     if (!from) return getIndex(`satellite/${band}`);
-    const [a, b] = await Promise.all(from.map((x) => getIndex(`satellite/${x}`)));
-    const set = new Set(b.times);
-    const times = a.times.filter((t) => set.has(t));
+    const [a, ...rest] = await Promise.all(from.map((x) => getIndex(`satellite/${x}`)));
+    const sets = rest.map((b) => new Set(b.times));
+    const times = a.times.filter((t) => sets.every((s) => s.has(t)));
     return { ...a, times, latest: times[times.length - 1] ?? null };
   }
 
@@ -82,7 +106,8 @@ export class SatelliteLayer {
     if (!this.cache.has(key)) {
       const g = this.indexes[band]?.grid;              // 一定用這個頻道自己的 grid(scale / offset)
       if (!g) return Promise.reject(new Error(`satellite ${band} index 尚未載入`));
-      const p = SAT_BANDS[band].from ? this.fogFrame(stamp, g)
+      const p = band === 'DN' ? this.dnFrame(stamp)
+        : SAT_BANDS[band].from ? this.fogFrame(stamp, g)
         : getGrid(`satellite/${band}`, stamp, g).then(async (raw) => ({ raw, url: await renderPNG(raw, g, satLUT(g, band, style)) }));
       p.catch(() => this.cache.delete(key));
       this.cache.set(key, p);
@@ -107,6 +132,56 @@ export class SatelliteLayer {
         : fogCode(r13[i] * g13.scale + g13.offset, r07[i] * g07.scale + g07.offset);
     }
     return { raw: { r13, r07, g13, g07 }, url: await renderPNG(code, { ...g, nodata: 255 }, fogLUT()) };
+  }
+
+  /** 日夜:B03(0.01°)與 B07(0.02°)範圍相同、格點剛好兩倍 → 有 B03 時用 B03 解析度,B07 每格放大成 2×2。
+   *  權重 w = 太陽仰角在 DN.night → DN.day 之間線性漸變;可見光除以 sin(仰角)補償晨昏變暗(仰角 < DN.day 時不再放大) */
+  async dnFrame(stamp) {
+    const i07 = this.indexes.B07 ?? await getIndex('satellite/B07');
+    const i03 = await getIndex('satellite/B03').catch(() => null);
+    const g07 = i07.grid;
+    const r07 = await getGrid('satellite/B07', stamp, g07);
+    const r03 = i03?.times.includes(stamp) ? await getGrid('satellite/B03', stamp, i03.grid).catch(() => null) : null;
+    const g = r03 ? i03.grid : g07, f = r03 ? 2 : 1;
+    const night = satLUT(g07, 'B07').map((p) => Math.min(254, p & 255));   // B07 灰階(同單頻道);255 留給缺值
+    const sun = sunAt(stamp), ys = mercY(g.south), yn = mercY(g.north);
+    const B = 16;                                                   // 太陽仰角每 16 格算一次
+    const code = new Uint8Array(g.nx * g.ny);
+    const sMax = Math.sin((DN.day * Math.PI) / 180);
+    // 可見光灰階查表:補償倍率 k(1 ~ 1/sin(DN.day))量化成 KQ 級,每級一張 raw → 灰階表(不用每格算次方)
+    const KQ = 48, kMax = 1 / sMax, dayLUT = [];
+    if (r03) {
+      for (let q = 0; q < KQ; q++) {
+        const k = 1 + ((kMax - 1) * q) / (KQ - 1), t = new Uint8Array(256);
+        for (let v = 0; v < 255; v++) t[v] = Math.min(254, Math.round(255 * Math.pow(Math.min(1, ((v * g.scale + g.offset) * k) / 100), 0.6)));
+        dayLUT.push(t);
+      }
+    }
+    const nd03 = g.nodata, nd07 = g07.nodata;
+    for (let y0 = 0; y0 < g.ny; y0 += B) {
+      const lat = Math.atan(Math.sinh(ys + ((Math.min(y0 + B / 2, g.ny - 1) + 0.5) / g.ny) * (yn - ys))) * 180 / Math.PI;
+      const y1 = Math.min(y0 + B, g.ny);
+      for (let x0 = 0; x0 < g.nx; x0 += B) {
+        const lon = g.west + ((Math.min(x0 + B / 2, g.nx - 1) + 0.5) / g.nx) * (g.east - g.west);
+        const el = sunElevation(sun, lat, lon);
+        const w = r03 ? Math.max(0, Math.min(1, (el - DN.night) / (DN.day - DN.night))) : 0;
+        const x1 = Math.min(x0 + B, g.nx);
+        const day = w > 0 ? dayLUT[Math.round(((1 / Math.max(Math.sin((el * Math.PI) / 180), sMax) - 1) / (kMax - 1)) * (KQ - 1))] : null;
+        for (let y = y0; y < y1; y++) {
+          const row = y * g.nx, row07 = ((y / f) | 0) * g07.nx;
+          for (let x = x0; x < x1; x++) {
+            const a = r07[row07 + ((x / f) | 0)];
+            const n = a === nd07 ? -1 : night[a];
+            if (!day) { code[row + x] = n < 0 ? 255 : n; continue; }
+            const v = r03[row + x];
+            const d = v === nd03 ? n : day[v];
+            if (d < 0) { code[row + x] = 255; continue; }
+            code[row + x] = w === 1 || n < 0 ? d : Math.round(w * d + (1 - w) * n);
+          }
+        }
+      }
+    }
+    return { raw: { r07, r03, g07, g03: i03?.grid, sun }, url: await renderPNG(code, { ...g, nodata: 255 }, GRAY_LUT) };
   }
 
   async show(stamp) {
@@ -155,6 +230,14 @@ export class SatelliteLayer {
     const ix = Math.floor(((lng - g.west) / (g.east - g.west)) * g.nx);
     const iy = Math.floor(((mercY(lat) - mercY(g.south)) / (mercY(g.north) - mercY(g.south))) * g.ny);
     if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
+    if (this.band === 'DN') {
+      const { r07, r03, g07, g03, sun } = this.current.raw, i = iy * g.nx + ix;
+      const el = sunElevation(sun, lat, lng);
+      const parts = [`太陽仰角 ${el.toFixed(0)}°`];
+      if (r03 && r03[iy * 2 * g03.nx + ix * 2] !== g03.nodata) parts.push(`B03 ${(r03[iy * 2 * g03.nx + ix * 2] * g03.scale + g03.offset).toFixed(0)}%`);
+      if (r07[i] !== g07.nodata) parts.push(`B07 ${(r07[i] * g07.scale + g07.offset).toFixed(1)} °C`);
+      return parts.join('、');
+    }
     if (SAT_BANDS[this.band].from) {
       const { r13, r07, g13, g07 } = this.current.raw, i = iy * g.nx + ix;
       if (r13[i] === g13.nodata || r07[i] === g07.nodata) return null;
@@ -169,6 +252,12 @@ export class SatelliteLayer {
 
   legend() {
     if (this.band === 'FOG') return fogLegendHTML(`衛星 ${SAT_BANDS.FOG.name} 亮溫差`);
+    if (this.band === 'DN') {
+      const [t03, r03, k03] = SAT_BANDS.B03.legend, [t07, r07, k07] = SAT_BANDS.B07.legend;
+      return satLegendHTML(`衛星 日夜：白天 B03 可見光 ${t03}`, 'B03', this.style, r03, k03)
+        + satLegendHTML(`夜間 B07 短波紅外 ${t07}`, 'B07', this.style, r07, k07)
+        + `<div class="legend-labels" style="margin-top:4px">太陽仰角 ${DN.night}° 以下全用 B07、${DN.day}° 以上全用 B03，之間漸變</div>`;
+    }
     const [title, range, ticks] = SAT_BANDS[this.band].legend;
     const b13 = this.band === 'B13' ? (this.style === 'bd' ? '（增強）' : '（灰階）') : '';
     return satLegendHTML(`衛星 ${SAT_BANDS[this.band].name}${b13} ${title}`, this.band, this.style, range, ticks);
