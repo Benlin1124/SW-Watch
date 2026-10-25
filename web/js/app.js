@@ -20,12 +20,12 @@ const $ = (id) => document.getElementById(id);
 const BASE = new URL('../assets/basemap/', import.meta.url).href;
 // casing = 線條外圍的襯邊(和線條反差的顏色),疊在雷達、雲圖上也看得清楚
 const THEMES = {
-  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#222222', county: '#1a1a1a', casing: 'rgba(255,255,255,0.85)', grid: 'rgba(0,0,0,0.18)', imagery: false },
-  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#d5dbe3', border: '#f2f5f8', county: '#ffffff', casing: 'rgba(0,0,0,0.6)', grid: 'rgba(255,255,255,0.12)', imagery: false },
-  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#ffffff', county: '#ffffff', casing: 'rgba(0,0,0,0.65)', grid: 'rgba(255,255,255,0.25)', imagery: true },
+  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#222222', county: '#1a1a1a', km100: '#1565c0', casing: 'rgba(255,255,255,0.85)', grid: 'rgba(0,0,0,0.18)', imagery: false },
+  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#d5dbe3', border: '#f2f5f8', county: '#ffffff', km100: '#64b5f6', casing: 'rgba(0,0,0,0.6)', grid: 'rgba(255,255,255,0.12)', imagery: false },
+  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#ffffff', county: '#ffffff', km100: '#90caf9', casing: 'rgba(0,0,0,0.65)', grid: 'rgba(255,255,255,0.25)', imagery: true },
 };
 // 線寬隨縮放加粗(全區看得到,放大不會太細)
-const LINE_W = { coast: [1, 1.6, 2.6], borders: [1.3, 2, 3], county: [0.8, 1.4, 2.4] };   // 縮放 4、7、11
+const LINE_W = { coast: [1, 1.6, 2.6], borders: [1.3, 2, 3], county: [0.8, 1.4, 2.4], km100: [1, 1.5, 2.2] };   // 縮放 4、7、11
 const zw = ([a, b, c], plus = 0) => ['interpolate', ['linear'], ['zoom'], 4, a + plus, 7, b + plus, 11, c + plus];
 
 /** 經緯網格:每 5° 一條(全部縮放),放大後加 1° 細線 */
@@ -67,18 +67,20 @@ function addOverlays(beforeId) {
   map.addSource('coast', { type: 'geojson', data: `${BASE}coast.json` });
   map.addSource('borders', { type: 'geojson', data: `${BASE}borders.json` });
   map.addSource('county', { type: 'geojson', data: `${BASE}taiwan.json` });
+  map.addSource('km100', { type: 'geojson', data: `${BASE}km100.json` });   // NCDR 台灣周圍 100 公里線
   map.addSource('grid', { type: 'geojson', data: graticule() });
   map.addLayer({ id: 'grid-minor', type: 'line', source: 'grid', minzoom: 5.5, filter: ['!', ['get', 'major']],
     paint: { 'line-color': th.grid, 'line-width': 0.5 } }, beforeId);
   map.addLayer({ id: 'grid-major', type: 'line', source: 'grid', filter: ['get', 'major'],
     paint: { 'line-color': th.grid, 'line-width': 0.8 } }, beforeId);
-  for (const id of ['coast', 'borders', 'county']) {
+  for (const id of ['coast', 'borders', 'county', 'km100']) {
     const layout = { 'line-join': 'round', 'line-cap': 'round' };
     map.addLayer({ id: `${id}-casing`, type: 'line', source: id, layout,
       paint: { 'line-color': th.casing, 'line-width': zw(LINE_W[id], 2), 'line-blur': 0.5 } }, beforeId);
     map.addLayer({ id, type: 'line', source: id, layout, paint: { 'line-color': th[id === 'borders' ? 'border' : id], 'line-width': zw(LINE_W[id]) } }, beforeId);
   }
   map.setPaintProperty('borders', 'line-dasharray', [3, 1.5]);   // 國界虛線,和海岸線分得開
+  map.setPaintProperty('km100', 'line-dasharray', [4, 2]);
 }
 
 function setTheme(name) {
@@ -90,7 +92,8 @@ function setTheme(name) {
   map.setPaintProperty('coast', 'line-color', th.coast);
   map.setPaintProperty('borders', 'line-color', th.border);
   map.setPaintProperty('county', 'line-color', th.county);
-  for (const id of ['coast', 'borders', 'county']) map.setPaintProperty(`${id}-casing`, 'line-color', th.casing);
+  map.setPaintProperty('km100', 'line-color', th.km100);
+  for (const id of ['coast', 'borders', 'county', 'km100']) map.setPaintProperty(`${id}-casing`, 'line-color', th.casing);
   map.setPaintProperty('grid-major', 'line-color', th.grid);
   map.setPaintProperty('grid-minor', 'line-color', th.grid);
   typhoon.setTheme(name === 'light' ? 'light' : 'dark');
@@ -891,6 +894,9 @@ function bindUI() {
   };
   $('chk-county').onchange = (e) => {
     for (const id of ['county', 'county-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
+  };
+  $('chk-km100').onchange = (e) => {
+    for (const id of ['km100', 'km100-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };
   $('btn-reset-prefs').onclick = () => { prefs.reset(); location.reload(); };
   map.on('moveend', () => {

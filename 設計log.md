@@ -816,3 +816,8 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 輸出:station_202610220030_202610242000_ty_gust.mp4(15 MB)、…_ty_wind.mp4(25 MB),386 幀(10/22 00:30 起)。
 - 修正:早期測站快照沒有 type 欄位(KeyError),沒有就不判斷日本站。
 - 修正(使用者回報整點沒有資料):測站風每小時觀測一次,整點那筆快照裡的風還是前一小時(剛好早 60 分鐘),原本條件 `obs > 畫面 − 60 分` 把它排除了 → 改成 `≥`。兩支影片重新輸出。
+
+## 2026-10-25 網頁底圖加 100 公里線
+- 來源 NCDR `https://watch.ncdr.nat.gov.tw/00_Wxmap/json/area/100KM.json`(台灣周圍 100 公里範圍的多邊形,颱風暴風圈接近的參考線)。
+- `build_basemap.py` 加 `km100`(只取外框線、簡化 0.002°、4 位小數 → `web/assets/basemap/km100.json` 2 KB),新增 `--only` 只重產指定的底圖:`python -m pipeline.build_basemap --only km100`。來源要 User-Agent,檔案有 BOM(utf-8-sig)。
+- 網頁:疊在資料上面的邊界線多一條 `km100`(虛線 [4, 2],有襯邊),顏色隨底圖(淺 #1565c0、深 #64b5f6、衛星 #90caf9);底圖區塊加「100 公里線」勾選(預設開)。
