@@ -1,7 +1,7 @@
 """真實色雲圖(日夜合成,satellite/TC):
 白天:B03 紅 / B02 混 15% B04 綠 / B01 藍,反照率先除以 cos(太陽天頂角)(天頂角 80° 以上不再放大,約 5.8 倍),
      再減 Rayleigh 散射(pyspectral;天頂角 70→88° 逐漸減弱,避免晨昏過度修正變橘);
-     暗部拉亮曲線 → 局部對比(半徑 20 反銳化)→ 細部銳化(半徑 2)。
+     暗部拉亮曲線(局部對比、細部銳化可在 LOCAL / FINE 開,目前不做)。
 夜間:同網頁「日夜」頻道的紅外線灰階(B07,冷雲頂 −30→−50 °C 漸變改用 B13)。
 太陽仰角 0→10° 之間白天 / 夜間線性漸變。網頁「日夜」頻道直接把這張圖轉灰階顯示。
 格點同 fetch_satellite.target(Web Mercator 等間距),影像第 0 列在北(圖片方向)。"""
@@ -17,6 +17,9 @@ RAY_FULL, RAY_ZERO = 70.0, 88.0                  # Rayleigh 修正從 70° 開�
 GREEN_NIR = 0.15                                 # 混綠:B02 × 0.85 + B04 × 0.15
 BLOCK = 300                                      # 角度、Rayleigh 分塊算(整張 0.01° 一次算要好幾 GB)
 SAT_LON = 140.7                                  # Himawari-9 星下點經度
+# 局部對比 / 細部銳化(反銳化:半徑 px, 強度 %;強度 0 = 不做)。2026-10-26 使用者在網頁上看覺得太銳利 → 都不做
+LOCAL = (20, 0)
+FINE = (2, 0)
 
 _ray = None
 
@@ -76,10 +79,17 @@ def day_rgb(refl, when, lon, lat):
         for k, v in enumerate((ch["B03"], (1 - GREEN_NIR) * ch["B02"] + GREEN_NIR * ch["B04"], ch["B01"])):
             img[sl, :, k] = np.interp(np.clip(v, 0, 100), *CURVE)
         del ch, sunz, satz, azd, LON, LAT
-    im = Image.fromarray(img).filter(ImageFilter.UnsharpMask(radius=20, percent=60, threshold=0))
-    del img
-    im = im.filter(ImageFilter.UnsharpMask(radius=2, percent=60, threshold=2))
-    return np.asarray(im), el
+    return np.asarray(enhance(Image.fromarray(img))), el
+
+
+def enhance(im, local=None, fine=None):
+    """局部對比 + 細部銳化(PIL 反銳化遮罩)。"""
+    (r1, p1), (r2, p2) = local or LOCAL, fine or FINE
+    if p1:
+        im = im.filter(ImageFilter.UnsharpMask(radius=r1, percent=p1, threshold=0))
+    if p2:
+        im = im.filter(ImageFilter.UnsharpMask(radius=r2, percent=p2, threshold=2))
+    return im
 
 
 def compose(night, day=None):
