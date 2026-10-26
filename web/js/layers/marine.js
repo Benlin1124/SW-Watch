@@ -1,9 +1,10 @@
 // 海象圖層:浮標站、潮位站等海況(pipeline/fetch_marine.py,O-B0075-001,每小時一筆)
-// 符號見下方「符號」說明(藍框 = 海上觀測,和地面測站區隔);點站打開資訊卡,看近 48 小時折線圖(marine/recent.json.gz)
+// 符號見下方「符號」說明(藍框 = 海上觀測,和地面測站區隔);點站打開資訊卡,看折線圖(marine/recent.json.gz,近 10 天,可選時段)
 import { getIndex, getJSON } from '../data.js';
 import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr } from '../colormaps.js';
 import { addMin, diffMin, fmtTW, latestLE } from '../time.js';
 import { arrowImage } from './stations.js';
+import * as prefs from '../prefs.js';
 
 // dir:方向欄位;flip:資料是「來的方向」(浪、風)→ 箭頭畫成去的方向;海流本來就是流去的方向
 export const MARINE_VARS = {
@@ -400,8 +401,10 @@ export class MarineLayer {
   }
 }
 
-// ── 資訊卡:當下各項觀測 + 近 48 小時折線圖 ──
+// ── 資訊卡:當下各項觀測 + 折線圖(時段可選,同測站資訊卡;時間軸拉到圖外時圖跟著移)──
 const REFETCH_MS = 5 * 60e3;
+const CARD_HOURS = [6, 12, 24, 48, 72, 168, 240];
+const hoursLabel = (h) => (h >= 168 ? `${h / 24} 天` : `${h} 小時`);
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
 const TABS = {
   wave: { name: '浪', series: [{ key: 'wave_h', label: '浪高', unit: 'm', stroke: '#1e88e5', zero: true },
@@ -424,6 +427,8 @@ export class MarineCard {
   T = null;
   plot = null;
   recent = null;             // { at, promise }
+  hours = CARD_HOURS.includes(prefs.get('mrCardHours')) ? prefs.get('mrCardHours') : 48;   // 圖表時段
+  range = null;              // 圖上的時間範圍 [起, 迄](UTC 秒)
 
   constructor(layer) {
     this.layer = layer;
@@ -431,6 +436,13 @@ export class MarineCard {
     const tabs = this.el.querySelector('.sc-tabs');
     tabs.innerHTML = Object.entries(TABS).map(([k, t]) => `<button data-tab="${k}">${t.name}</button>`).join('');
     for (const b of tabs.querySelectorAll('[data-tab]')) b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
+    const hSel = document.createElement('select');
+    hSel.id = 'mc-hours';
+    hSel.title = '圖表時段';
+    hSel.innerHTML = CARD_HOURS.map((h) => `<option value="${h}">${hoursLabel(h)}</option>`).join('');
+    hSel.value = this.hours;
+    hSel.onchange = () => { this.hours = +hSel.value; prefs.set('mrCardHours', this.hours); this.drawChart(); };
+    tabs.appendChild(hSel);
   }
 
   series() {
@@ -471,7 +483,10 @@ export class MarineCard {
     now.innerHTML = rows?.length
       ? rows.map(([k, x]) => `<div><span>${k}</span><b>${x}</b></div>`).join('') + `<div class="sc-obs">觀測 ${fmtTW(this.layer.snap.time)}</div>`
       : `<div class="sc-nodata">${T ? fmtTW(T) : ''} 這個站沒有資料</div>`;
-    this.plot?.redraw(false);
+    // 時間軸移到圖的範圍外(看過去的事件)→ 圖跟著移
+    const t = T && toSec(T);
+    if (this.plot && this.range && t && (t < this.range[0] || t > this.range[1])) this.drawChart();
+    else this.plot?.redraw(false);
   }
 
   async drawChart() {
@@ -499,21 +514,28 @@ export class MarineCard {
     box.innerHTML = '';
     const used = tab.series.filter((s) => st[s.key]);
     if (!used.length) {
-      box.innerHTML = '<div class="sc-nodata">這個站近 48 小時沒有資料</div>';
+      box.innerHTML = `<div class="sc-nodata">這個站近 ${hoursLabel(d.n - 1)}沒有資料</div>`;
       note.textContent = '';
       return;
     }
-    note.textContent = `近 48 小時（至 ${fmtTW(d.time)}），每小時一筆；斷開處為缺漏`;
-    const t0 = toSec(d.start), xs = Array.from({ length: d.n }, (_, i) => t0 + i * d.step * 60);
+    // 時段:結尾 = 最新資料;時間軸在這段之前時,改成讓時間軸落在中間(同測站資訊卡)
+    const t0 = toSec(d.start), xsAll = Array.from({ length: d.n }, (_, i) => t0 + i * d.step * 60);
+    const H = this.hours * 3600, latest = toSec(d.time), T = this.T && toSec(this.T);
+    const end = T && T <= latest - H ? Math.min(latest, T + H / 2) : latest;
+    this.range = [end - H, end];
+    const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
+    const xs = keep.map((i) => xsAll[i]);
+    const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end))}`;
+    note.textContent = `${hoursLabel(this.hours)}（${endTxt}），每小時一筆；斷開處為缺漏` + (xs.length < this.hours ? '；較早的資料已過保留期限' : '');
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };
     const tick = (t) => { const s = fmtTW(stampOf(t), 'dh'); return s.endsWith('00時') ? s.replace('00時', '') : s.replace(/^\d+日/, ''); };
     const axes = [{ ...axisStyle, space: 45, values: (u, ticks) => ticks.map(tick) }];
     for (const s of used) {
-      series.push({ label: s.label, stroke: s.stroke, width: 1.6, scale: s.scale ?? 'y', points: { show: true, size: 4 },
+      series.push({ label: s.label, stroke: s.stroke, width: 1.6, scale: s.scale ?? 'y', points: { show: this.hours <= 48, size: 4 },
         value: (u, v) => (v == null ? '—' : s.wind ? `${v.toFixed(1)}（${bfLabel(v)}級）`
           : s.key === 'wave_h' && waveClass(v) ? `${v} m（${waveClass(v)}）` : `${v} ${s.unit}`) });
-      data.push(st[s.key]);
+      data.push(keep.map((i) => st[s.key][i]));
       // 浪高、流速從 0 起畫(浪高至少到 3 m,看得到小浪、中浪分界)
       scales[s.scale ?? 'y'] ??= s.zero ? { auto: true, range: (u, lo, hi) => [0, Math.max(hi * 1.1, s.key === 'wave_h' ? 3 : 0.5)] } : { auto: true };
     }

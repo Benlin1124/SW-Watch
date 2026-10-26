@@ -1,7 +1,7 @@
 """海象:O-B0075-001(48 小時浮標站與潮位站海況監測資料,每小時一筆;只有 REST datastore)
 + O-B0076-001(海象測站基本資料:站名、座標、站種;fileapi,每天更新)
 → data/marine/{stamp}.json   每小時一個快照,格式同 stations(fields + rows,站名座標一起存)
-→ data/marine/recent.json.gz 近 48 小時各站時序(資訊卡折線圖用)
+→ data/marine/recent.json.gz 近 KEEP_DAYS 天各站時序(資訊卡折線圖用,壓縮後約 150 KB)
 平常只抓最近 FETCH_HOURS 小時(timeFrom,約幾十 KB);本機沒資料或斷了比較久才抓整份 48 小時(約 1.8 MB)補齊。
 晚到的資料會補進已存在的整點(內容有變才重寫)。"""
 import gzip
@@ -18,7 +18,7 @@ CODE = "O-B0075-001"
 CODE_30D = "O-B0075-002"                 # 30 天資料(修復用;約 26 MB,大約晚一天)
 META_CODE = "O-B0076-001"
 FETCH_HOURS = 4            # 平常抓最近幾小時
-RECENT_HOURS = 48
+RECENT_HOURS = 24 * config.KEEP_DAYS   # 資訊卡可選到 10 天(同快照保留天數)
 TW = timezone(timedelta(hours=8))
 
 # 站種:潮位站 / 資料浮標 / 岸邊氣象站 / 浮球式波浪站
