@@ -503,7 +503,7 @@ def set_frame(im, when, raw, table, stamp, overlays=()):
 
 
 def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_radar=False, sat=False, tc=False,
-           use_r2=True, fps=8, gif=False, shp=config.ROOT / "shp", out_dir=OUT_DIR, preview=None, title=None):
+           extent=None, use_r2=True, fps=8, gif=False, shp=config.ROOT / "shp", out_dir=OUT_DIR, preview=None, title=None):
     """start / end:UTC stamp(end None = 最新一筆);preview:UTC stamp 或 "latest" → 只輸出一張 PNG。
     回傳 dict(path, frames, missing, gaps, seconds, first, last);gaps = 缺資料的 [(前一幀, 下一幀)]。"""
     plt.rcParams["font.sans-serif"] = FONT + [f for f in plt.rcParams["font.sans-serif"] if f not in FONT]
@@ -514,7 +514,7 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
     auto, prefix, source = "雷達整合回波", "radar", "中央氣象署"
     sat = sat or tc
     if sat:                                              # 衛星真實色 / 日夜:每幀直接是 RGBA
-        dn = SatImages(use_r2, EXTENT_SAT, gray=not tc)
+        dn = SatImages(use_r2, extent or EXTENT_SAT, gray=not tc)
         times, table, load = dn.times, None, dn.image
         auto, prefix = ("衛星真實色雲圖（夜間紅外線）", "tc") if tc else ("衛星雲圖（白天可見光／夜間紅外線）", "sat")
         source = "Himawari-9（日本氣象廳）" + ("、中央氣象署" if typhoon or wind else "")
@@ -525,7 +525,8 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
         wname = "測站陣風" if gust else "測站平均風"
         auto, prefix = (f"颱風位置與{wname}" if typhoon else wname) if wind else "颱風路徑", "station"
     geo, world = load_shp(Path(shp)), load_world()
-    extent = EXTENT_SAT if sat else EXTENT_TW if no_radar else EXTENT
+    custom = bool(sat and extent)                       # 衛星自訂範圍(--extent):檔名加 _wide
+    extent = (extent or EXTENT_SAT) if sat else EXTENT_TW if no_radar else EXTENT
     fig, im, when = make_frame(geo, world, g, title or auto, extent, source)
     if sat:                                              # 雲圖蓋住陸地填色,海岸、縣市界改淡黃色疊在上面
         im.set_extent(dn.extent)
@@ -538,7 +539,7 @@ def render(start=None, end=None, *, typhoon=False, wind=False, gust=False, no_ra
         wind_colorbar(fig)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    suffix = ("_ty" if typhoon else "") + (("_gust" if gust else "_wind") if wind else "")
+    suffix = ("_wide" if custom else "") + ("_ty" if typhoon else "") + (("_gust" if gust else "_wind") if wind else "")
     winds = [StationWind(use_r2, gust)] if wind else []
 
     if preview:
@@ -607,6 +608,8 @@ def main():
     p.add_argument("--no-radar", action="store_true", help="不畫雷達(搭配 --wind / --typhoon;時間改用測站快照)")
     p.add_argument("--sat", action="store_true", help="改畫衛星日夜(白天可見光、夜間紅外線灰階;同網頁「日夜」)")
     p.add_argument("--tc", action="store_true", help="改畫衛星真實色(白天彩色、夜間紅外線;同網頁「真實色」)")
+    p.add_argument("--extent", nargs=4, type=float, metavar=("西", "東", "南", "北"),
+                   help="--tc / --sat 的畫面範圍(經緯度),例如 110 134 14 32;預設 EXTENT_SAT,檔名加 _wide")
     p.add_argument("--local", action="store_true", help="只用本機 data/radar")
     a = p.parse_args()
     if not a.start and not a.preview:
@@ -614,7 +617,7 @@ def main():
     preview = a.preview if a.preview in (None, "latest") else to_stamp(parse_tw(a.preview))
     try:
         render(to_stamp(parse_tw(a.start)) if a.start else None, to_stamp(parse_tw(a.end)) if a.end else None,
-               typhoon=a.typhoon, wind=a.wind, gust=a.gust, no_radar=a.no_radar, sat=a.sat, tc=a.tc, use_r2=not a.local,
+               typhoon=a.typhoon, wind=a.wind, gust=a.gust, no_radar=a.no_radar, sat=a.sat, tc=a.tc, extent=tuple(a.extent) if a.extent else None, use_r2=not a.local,
                fps=a.fps, gif=a.gif, shp=a.shp, preview=preview)
     except ValueError as e:
         p.error(str(e))
