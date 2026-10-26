@@ -4,7 +4,7 @@ import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
 import { RadarLayer } from './layers/radar.js';
 import { SatelliteLayer } from './layers/satellite.js';
 import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
-import { category, TyphoonLayer } from './layers/typhoon.js';
+import { category, lonFix, TyphoonLayer } from './layers/typhoon.js';
 import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js';
 import { MARINE_VARS, MarineCard, MarineLayer } from './layers/marine.js';
 import { localToStamp, stampToLocal, twMidnight } from './layers/station_custom.js';
@@ -533,7 +533,7 @@ function syncEnsSelects() {
 async function loadBestTrack() {
   if (!typhoon.latest) return;
   try {
-    const d = await getJSON(`typhoon/cwa_track/${typhoon.latest}.json`);
+    const d = lonFix(await getJSON(`typhoon/cwa_track/${typhoon.latest}.json`));
     const s = d.storms.find((x) => x.id === ens.tc);
     ens.setBestTrack(s ? s.past : null);
   } catch (e) { console.warn('best track', e); }
@@ -963,7 +963,8 @@ function bindUI() {
     const v = [radar, ecmwf, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
     const el = $('readout');
     el.style.display = 'block';
-    el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${e.lngLat.lng.toFixed(3)}°E${v ? `　${v}` : ''}`;
+    const lng = ((e.lngLat.lng + 180) % 360 + 360) % 360 - 180;   // 地圖往東捲過 180° 時 lng 會超過 180
+    el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${Math.abs(lng).toFixed(3)}°${lng < 0 ? 'W' : 'E'}${v ? `　${v}` : ''}`;
   });
   map.on('mouseout', () => { $('readout').style.display = 'none'; });
   window.addEventListener('resize', () => refreshSlider());

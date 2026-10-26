@@ -2,6 +2,7 @@
 // 文字標示用 HTML marker(中文不需要地圖字型檔)
 import { getIndex, getJSON } from '../data.js';
 import { addMin, fmtTW, latestLE, toDate, toStamp } from '../time.js';
+import { fmtLon, geom360, lon360 } from '../lon.js';
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
@@ -41,6 +42,15 @@ export function category(wind) {
   if (wind >= 32.7) return { name: '中度颱風', color: '#fb8c00' };
   if (wind >= 17.2) return { name: '輕度颱風', color: '#fdd835' };
   return { name: '熱帶性低氣壓', color: '#4fc3f7' };
+}
+
+/** 颱風資料的經度換成 0–360°(跨換日線的路徑、潛勢區才連續;見 lon.js) */
+export function lonFix(data) {
+  for (const s of data?.storms ?? []) {
+    for (const p of [...(s.past ?? []), ...(s.fcst ?? [])]) p.lon = lon360(p.lon);
+    for (const g of Object.values(s.geo ?? {})) geom360(g);
+  }
+  return data;
 }
 
 const fmtNum = (v, unit) => (v == null ? '—' : `${v}${unit}`);
@@ -83,7 +93,7 @@ function popupHTML(name, p, kind) {
     : `${fmtTW(p.t, 'full')}（${ip ? '內插，' : ''}+${p.tau} 小時預報）`;
   return `<div class="popup-title">${name}　${c.name}</div>
     <div>${time}</div>
-    <div>位置 ${p.lat.toFixed(1)}°N ${p.lon.toFixed(1)}°E</div>
+    <div>位置 ${p.lat.toFixed(1)}°N ${fmtLon(p.lon)}</div>
     <div>中心氣壓 ${fmtNum(p.pres, ' hPa')}　最大風速 ${fmtNum(p.wind, ' m/s')}　陣風 ${fmtNum(p.gust, ' m/s')}</div>
     ${p.r15 ? `<div>7 級風暴風半徑 ${p.r15} km${p.r25 ? `　10 級 ${p.r25} km` : ''}</div>` : ''}
     ${p.r70 ? `<div>70% 機率半徑 ${p.r70} km</div>` : ''}
@@ -293,7 +303,7 @@ export class TyphoonLayer {
   async show(stamp) {
     this.wanted = stamp;
     if (!stamp) { this.data = null; this.draw(); return; }
-    if (!this.cache.has(stamp)) this.cache.set(stamp, getJSON(`${this.path}/${stamp}.json`));
+    if (!this.cache.has(stamp)) this.cache.set(stamp, getJSON(`${this.path}/${stamp}.json`).then(lonFix));
     const data = await this.cache.get(stamp);
     if (this.wanted !== stamp) return;
     if (data !== this.data && !this.raf) this.popup?.remove();   // 換了一次預報,點選的位置已不適用

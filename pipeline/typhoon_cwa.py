@@ -51,6 +51,7 @@ def geo_circle(lon, lat, radius_km, n=72):
     else:
         r = np.full(n, float(radius_km))
     lons, lats, _ = GEOD.fwd(np.full(n, lon), np.full(n, lat), az, r * 1000)
+    lons = lon + (lons - lon + 180) % 360 - 180      # GEOD 回 −180–180;接回圓心那一側,跨換日線的圓才不會破掉
     return Polygon(zip(lons, lats))
 
 
@@ -84,7 +85,7 @@ def convert_tc(tc):
         r15, q15 = _radii(f.get("Circle15ms"))
         r25, q25 = _radii(f.get("Circle25ms"))
         past.append(dict(
-            t=utc_stamp(f["DateTime"]), lon=float(f["CoordinateLongitude"]),
+            t=utc_stamp(f["DateTime"]), lon=float(f["CoordinateLongitude"]) % 360,   # 0–360°(跨換日線)
             lat=float(f["CoordinateLatitude"]), wind=_num(f.get("MaxWindSpeed")),
             gust=_num(f.get("MaxGustSpeed")), pres=_num(f.get("Pressure")),
             mv_spd=_num(f.get("MovingSpeed")), mv_dir=f.get("MovingDirection"),
@@ -97,7 +98,7 @@ def convert_tc(tc):
         r15, _ = _radii(f.get("Circle15ms"))
         r25, _ = _radii(f.get("Circle25ms"))
         fcst.append(dict(
-            tau=int(f["ForecastHour"]), lon=float(f["CoordinateLongitude"]),
+            tau=int(f["ForecastHour"]), lon=float(f["CoordinateLongitude"]) % 360,
             lat=float(f["CoordinateLatitude"]), wind=_num(f.get("MaxWindSpeed")),
             gust=_num(f.get("MaxGustSpeed")), pres=_num(f.get("Pressure")),
             r15=r15, r25=r25, r70=_num(f.get("Radius70PercentProbability"))))

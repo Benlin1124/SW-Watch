@@ -72,7 +72,7 @@ def read_bufr_tracks(path):
             if _isnum(la) and _isnum(lo) and _isnum(tau):
                 lo = float(lo)
                 rows.append(dict(storm=sid, name=name, member=int(mem), ftype=int(ft) if _isnum(ft) else -1,
-                                 tau=int(tau), lat=float(la), lon=lo - 360 if lo > 180 else lo,
+                                 tau=int(tau), lat=float(la), lon=lo % 360,   # 經度一律 0–360°(跨換日線才連續)
                                  mslp=float(pr) / 100.0 if _isnum(pr) else np.nan))
             centre += 1
     return pd.DataFrame(rows, columns=COLUMNS)
@@ -139,7 +139,7 @@ def parse_atcf(text, member):
         storm = f"{cy_i:02d}{BASIN_LETTER.get(basin, basin)}"
         name = f[27] if len(f) > 27 and f[27] else storm
         rows.append(dict(storm=storm, name=name, member=member, ftype=0 if "C00" in tech.upper() else 4,
-                         tau=tau_i, lat=la, lon=lo, mslp=p))
+                         tau=tau_i, lat=la, lon=lo % 360, mslp=p))   # 西經 → 180–360°
     return rows
 
 
@@ -177,7 +177,7 @@ def fetch_weatherlab(model, init):
     storm = raw["track_id"].map(lambda t: f"{int(t[2:4]):02d}{BASIN_LETTER.get(t[:2], t[:2])}")  # WP092026 → 09W
     return pd.DataFrame({"storm": storm, "name": storm, "member": raw["sample"].astype(int), "ftype": 4,
                          "tau": raw["lead_time_hours"].astype(int), "lat": raw["lat"].astype(float),
-                         "lon": raw["lon"].astype(float),
+                         "lon": raw["lon"].astype(float) % 360,
                          "mslp": raw["minimum_sea_level_pressure_hpa"].astype(float)}, columns=COLUMNS)
 
 
@@ -189,7 +189,7 @@ def flag_outliers(df, k=OUTLIER_K, min_members=5):
     for storm, g in df.groupby("storm"):
         if g.member.nunique() < min_members:
             continue
-        cons = g.groupby("tau")[["lat", "lon"]].mean()
+        cons = g.groupby("tau")[["lat", "lon"]].mean()   # 經度已是 0–360°,跨換日線平均才不會變成 0°
         dev = {}
         for m, gm in g.groupby("member"):
             gm = gm.set_index("tau")

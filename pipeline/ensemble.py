@@ -53,7 +53,7 @@ def load_targets():
         for s in json.loads(p.read_text(encoding="utf-8"))["storms"]:
             d = fixes.setdefault(s["id"], {"name_zh": s["name_zh"], "name_en": s["name_en"], "pts": {}})
             for f in s["past"]:
-                d["pts"][f["t"]] = (f["lat"], f["lon"])
+                d["pts"][f["t"]] = (f["lat"], f["lon"] % 360)   # 0–360°,跨換日線內插才連續
     out = {}
     for tid, d in fixes.items():
         ts = sorted(d["pts"])

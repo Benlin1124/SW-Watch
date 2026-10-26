@@ -3,6 +3,7 @@
 // 細線 = 成員、粗實線 = 系集平均、粗虛線 = 控制報(同 TY_ENS_3.ipynb 的畫法)
 import { getIndex, getJSON } from '../data.js';
 import { addMin, diffMin, fmtTW, latestLE } from '../time.js';
+import { fmtLon, lon360 } from '../lon.js';
 
 export const MODEL_COLORS = {
   ECMWF: '#e53935', AIFS: '#fb8c00', GEFS: '#1e88e5', AIGEFS: '#00acc1',
@@ -79,7 +80,7 @@ export class EnsembleLayer {
         `<div class="popup-title">${MODEL_NAMES[p.model] ?? p.model} 系集平均</div>
          <div>初始 ${fmtInit(p.init)}（台灣 ${fmtTW(initStamp(p.init), 'md')}）</div>
          <div>+${p.tau} 小時 → 有效時間 ${fmtTW(p.valid, 'full')}</div>
-         <div>位置 ${(+p.lat).toFixed(1)}°N ${(+p.lon).toFixed(1)}°E　成員 ${p.n}</div>
+         <div>位置 ${(+p.lat).toFixed(1)}°N ${fmtLon(+p.lon)}　成員 ${p.n}</div>
          <div>平均氣壓 ${p.p === 'null' || p.p == null ? '—' : `${p.p} hPa`}</div>`).addTo(m);
     });
     m.on('click', 'ens-best-pt', (e) => {
@@ -115,7 +116,11 @@ export class EnsembleLayer {
 
   async loadInit(init) {
     if (!this.cache.has(init)) {
-      const p = getJSON(`${this.path}/${init}.json`);
+      // 經度換成 0–360°(跨換日線的成員路徑、系集平均才連續;見 lon.js)
+      const p = getJSON(`${this.path}/${init}.json`).then((d) => {
+        for (const tc of d.tcs ?? []) for (const list of Object.values(tc.models ?? {})) for (const mb of list) mb.lon = mb.lon.map(lon360);
+        return d;
+      });
       p.catch(() => this.cache.delete(init));
       this.cache.set(init, p);
     }
