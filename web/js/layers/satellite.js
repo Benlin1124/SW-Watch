@@ -67,6 +67,7 @@ export class SatelliteLayer {
   current = null;            // { key, stamp, raw }
   cache = new Map();         // `${band}|${style}|${stamp}` → Promise<{ raw, url }>(做完的 .done = true)
   dnSrc = new Map();         // 日夜下載中的來源格點:stamp → { sun, night, vis }
+  onLoading = null;          // (stamp | null):這個時間還在下載 / 合成(畫面先維持上一張)
 
   constructor(map) { this.map = map; }
 
@@ -178,15 +179,9 @@ export class SatelliteLayer {
     }
   }
 
-  /** 日夜快速版:只用 B07 / B13(約 4 MB),B03 還沒到之前先顯示 */
-  async dnQuick(stamp) {
-    const s = this.dnSources(stamp);
-    return dnCompose(await s.night, null, s.sun);
-  }
-
   async show(stamp) {
     const key = `${this.band}|${this.style}|${stamp}`;
-    if (stamp && this.current?.key === key && !this.current.quick) return;
+    if (stamp && this.current?.key === key) return;
     this.wanted = key;
     const src = this.map.getSource('satellite');
     if (!stamp) {
@@ -195,23 +190,18 @@ export class SatelliteLayer {
       this.current = null;
       return;
     }
-    const full = this.frame(stamp);
-    // 日夜:完整版還沒好(B03 約 10 MB 下載中)→ 先放 B07 / B13 快速版
-    if (this.band === 'DN' && !full.done && this.current?.key !== key) {
-      const q = await this.dnQuick(stamp).catch(() => null);
-      if (q && this.wanted === key && !full.done) {
-        const prev = this.current?.quick;
-        src.updateImage({ url: q.url, coordinates: this.index.grid.corners });
-        this.current = { key, stamp, raw: q.raw, quick: q.url };
-        if (prev) URL.revokeObjectURL(prev);
-      } else if (q) URL.revokeObjectURL(q.url);
+    // 還沒做好(日夜白天要等 B03 約 10 MB)→ 畫面維持上一張,圖層時間欄標「載入中」(使用者不要先顯示 B07 的快速版)
+    const p = this.frame(stamp);
+    if (!p.done) this.onLoading?.(stamp);
+    let f;
+    try {
+      f = await p;
+    } finally {
+      if (this.wanted === key) this.onLoading?.(null);
     }
-    const f = await full;
     if (this.wanted !== key) return;
-    const quick = this.current?.quick;
     src.updateImage({ url: f.url, coordinates: this.index.grid.corners });
     this.current = { key, stamp, raw: f.raw };
-    if (quick) URL.revokeObjectURL(quick);
   }
 
   async prefetch(stamps, onProgress) {

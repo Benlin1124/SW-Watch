@@ -118,6 +118,13 @@ const marine = new MarineLayer(map);
 const mCard = new MarineCard(marine);
 marine.onSelect = (id) => { card.close(); mCard.open(id, state.T); };
 const LAYERS = [satellite, ecmwf, radar, stations, marine, typhoon, ens];
+// 衛星這一張還沒好:畫面維持上一張,時間欄先標要顯示的時間「載入中」(好了由 updateLayerTime 蓋掉)
+satellite.onLoading = (stamp) => {
+  if (!stamp) return;
+  const el = $('time-satellite');
+  el.textContent = `${fmtTW(stamp)} 載入中…`;
+  el.classList.add('stale');
+};
 
 // ── 狀態 ──
 const state = {
