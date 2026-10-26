@@ -1,4 +1,4 @@
-"""各縣市測站近 72 小時時序(網頁點測站看折線圖用)
+"""各縣市測站近 KEEP_DAYS 天(預設 10 天)時序(網頁點測站看折線圖用;一個縣市壓縮後約 0.3 MB)
   data/stations/recent/{縣市名 UTF-8 hex}.json.gz
     {county, time, hours,
      t10: {start, step: 10, n}   10 分鐘格(雨量;第 i 格 = start + 10i 分,最後一格 = time)
@@ -10,17 +10,17 @@
   依各站觀測時間 obs 放格。日本氣象廳站比 CWA 晚 10 分鐘,雨量也依 obs 放格。
 每 10 分鐘:讀回各縣市檔 → 時間窗往後移 → 填入新快照 → 寫回(22 個檔,R2 每月約 9.5 萬次寫入)。
 不放每站一個檔:1362 站 × 每 10 分鐘 = 每月約 590 萬次寫入,超過 R2 免費額度。
-重建:python -m pipeline.station_recent --rebuild"""
+重建:python -m pipeline.station_recent --rebuild(時間範圍改了也會在下一次執行時自動重建)"""
 import argparse
 import gzip
 import json
 from datetime import timedelta
 
-from . import r2
+from . import config, r2
 from .common import layer_dir, log, read_index, save_json, stamp_dt
 
 LAYER = "stations/recent"
-HOURS = 72
+HOURS = 24 * config.KEEP_DAYS     # 資訊卡可選到 10 天(同測站快照保留天數;原本 72 小時)
 RAIN = ["rain_10m", "rain_1h"]
 WX = ["temp", "rh", "pres", "ws", "wd", "gust", "gust_dir"]
 INFO = ["name", "town", "type", "alt", "lon", "lat"]
@@ -36,7 +36,7 @@ def _fmt(dt):
 
 
 def window(stamp):
-    """(10 分鐘格起點, 整點格起點):各涵蓋 (T-72h, T]。"""
+    """(10 分鐘格起點, 整點格起點):各涵蓋 (T-HOURS, T]。"""
     t = stamp_dt(stamp)
     t10 = t - timedelta(minutes=10 * (HOURS * 6 - 1))
     th = t.replace(minute=0) - timedelta(hours=HOURS - 1)
@@ -163,6 +163,10 @@ def _save(states):
 def run(snapshot):
     stamp = snapshot["time"]
     states = _load_states()
+    if any(s.get("hours") != HOURS for s in states.values()):      # 時間範圍改了(例如 72 小時 → 10 天):從快照重建
+        log.info("station_recent 時間範圍改為 %d 小時,從快照重建", HOURS)
+        rebuild(stamp)
+        return
     for s in states.values():
         rewindow(s, stamp)
     apply(states, snapshot, stamp)
@@ -171,7 +175,7 @@ def run(snapshot):
 
 
 def rebuild(stamp=None):
-    """從 data/stations 快照重建最近 72 小時。"""
+    """從 data/stations 快照重建最近 HOURS 小時。"""
     times = read_index("stations")["times"]
     stamp = stamp or times[-1]
     s10, _ = window(stamp)

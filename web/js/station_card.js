@@ -1,4 +1,4 @@
-// 測站資訊卡:點測站(或搜尋、排行榜)打開;顯示時間軸當下各變數,與近 72 小時折線圖(uPlot)
+// 測站資訊卡:點測站(或搜尋、排行榜)打開;顯示時間軸當下各變數,與折線圖(uPlot;1 小時到 10 天)
 // 時序資料:stations/recent/{縣市名 UTF-8 hex}.json.gz(pipeline/station_recent.py),一個縣市一個檔
 import { getJSON } from './data.js';
 import { bfLabel } from './colormaps.js';
@@ -7,7 +7,8 @@ import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
 
 const REFETCH_MS = 5 * 60e3;
-const HOURS = [1, 3, 6, 12, 24, 48, 72];
+const HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 240];
+const hoursLabel = (h) => (h >= 168 ? `${h / 24} 天` : `${h} 小時`);
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
 const countyKey = (c) => [...new TextEncoder().encode(c || '其他')].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fmt = (x, d = 1) => (x == null ? '—' : (+x).toFixed(d));
@@ -42,7 +43,7 @@ export class StationCard {
     this.onClose = onClose;
     this.el.querySelector('#sc-close').onclick = () => this.close();
     const hSel = this.el.querySelector('#sc-hours');
-    hSel.innerHTML = HOURS.map((h) => `<option value="${h}">${h} 小時</option>`).join('');
+    hSel.innerHTML = HOURS.map((h) => `<option value="${h}">${hoursLabel(h)}</option>`).join('');
     hSel.value = this.hours;
     hSel.onchange = () => { this.hours = +hSel.value; prefs.set('cardHours', this.hours); this.drawChart(); };
     for (const b of this.el.querySelectorAll('[data-tab]')) {
@@ -147,7 +148,7 @@ export class StationCard {
     const t10 = toSec(d.t10.start);
     const miss = [...d.have].filter((c, i) => c === '0' && t10 + i * 600 > end - H && t10 + i * 600 <= end).length;
     const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end), 'hm')}`;
-    note.textContent = `${this.hours} 小時（${endTxt}）`
+    note.textContent = `${hoursLabel(this.hours)}（${endTxt}）`
       + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '');
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
@@ -164,7 +165,7 @@ export class StationCard {
       series.push({
         label: s.label, stroke: s.stroke, width: s.bars ? 0 : 1.6, fill: s.fill, scale: s.scale ?? 'y',
         paths: s.bars ? uPlot.paths.bars({ size: [0.9, 8] }) : undefined,
-        points: { show: tab.x === 'h' || this.hours <= 6, size: 4 },
+        points: { show: (tab.x === 'h' && this.hours <= 72) || this.hours <= 6, size: 4 },   // 7 天以上點太密不畫
         value: (u, v) => (v == null ? '—' : s.wind ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v} ${s.unit}`),
       });
       data.push(keep.map((i) => st[s.key][i]));
