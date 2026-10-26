@@ -150,7 +150,10 @@ def list_slot(stamp):
 
 def load_band(stamp, band, keys, lons, lats, cal):
     """下載分段 → 校正 → 取到目標格點(最近鄰)→ float32 (ny, nx),第 0 列在南,範圍外 NaN;回傳 (陣列, 下載 MB)。"""
+    import dask
     from satpy import Scene
+    # satpy 依 dask 的 array.chunk-size 切塊;預設一塊約 120 MB(B03 2200×14300),只用到一角也整塊算 → 改小省記憶體
+    dask.config.set({"array.chunk-size": "16MiB"})
     tmp = config.CACHE_DIR / "himawari" / f"{stamp}_{band}"
     tmp.mkdir(parents=True, exist_ok=True)
     local = [str(tmp / k.rsplit("/", 1)[1]) for k in keys]
