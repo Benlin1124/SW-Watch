@@ -15,6 +15,7 @@ from .common import (check_update, fetch_cwa, fetch_cwa_rest, layer_dir, log, re
 
 LAYER = "marine"
 CODE = "O-B0075-001"
+CODE_30D = "O-B0075-002"                 # 30 天資料(修復用;約 26 MB,大約晚一天)
 META_CODE = "O-B0076-001"
 FETCH_HOURS = 4            # 平常抓最近幾小時
 RECENT_HOURS = 48
@@ -69,10 +70,10 @@ def values(w):
             "cur_spd": _num(cur.get("CurrentSpeed")), "cur_dir": _num(cur.get("CurrentDirection"))}
 
 
-def collect(time_from=None):
+def collect(time_from=None, code=CODE):
     """→ {stamp: {站號: 數值 dict}};time_from = 台灣時間 datetime(None = 整份 48 小時)。"""
     params = {"timeFrom": time_from.strftime("%Y-%m-%dT%H:%M:%S")} if time_from else {}
-    data = fetch_cwa_rest(CODE, timeout=180, **params)
+    data = fetch_cwa_rest(code, timeout=300, **params)
     out = defaultdict(dict)
     for loc in data["Records"]["SeaSurfaceObs"]["Location"]:
         sid = loc["Station"]["StationID"]
@@ -111,6 +112,28 @@ def write_recent(meta, latest):
                "meta": {k: meta[k] for k in st if k in meta}, "stations": st}, gz=True)
 
 
+def merge_write(meta, obs, source):
+    """把各整點的觀測併進既有快照:有回傳的站更新、沒回傳的站保留原本的值(不會因為某次只回傳部分站就把其他站蓋掉)。
+    內容有變才重寫(省 R2 上傳)。回傳寫入的整點。"""
+    written = []
+    for stamp in sorted(obs):
+        old = _read(stamp)
+        rows = {}
+        if old:
+            fo = {k: i for i, k in enumerate(old["fields"])}
+            for r in old["rows"]:
+                rows[r[fo["id"]]] = [r[fo[k]] if k in fo else None for k in FIELDS]
+        for sid, v in obs[stamp].items():
+            if sid in meta:
+                rows[sid] = [meta[sid].get(k) for k in META_FIELDS] + [v.get(k) for k in VALUE_FIELDS]
+        new = [rows[sid] for sid in sorted(rows)]
+        if old and old.get("fields") == FIELDS and old.get("rows") == new:
+            continue
+        save_points(LAYER, stamp, {"time": stamp, "fields": FIELDS, "rows": new}, fields=FIELDS, source=source)
+        written.append(stamp)
+    return written
+
+
 def run():
     meta = station_meta()
     prev = read_index(LAYER).get("latest")
@@ -124,16 +147,7 @@ def run():
     if status == "older":
         return status, latest, prev
 
-    written = []
-    for stamp in sorted(obs):
-        rows = [[meta[sid].get(k) for k in META_FIELDS] + [v.get(k) for k in VALUE_FIELDS]
-                for sid, v in sorted(obs[stamp].items()) if sid in meta]
-        old = _read(stamp)
-        if old and old.get("fields") == FIELDS and old.get("rows") == rows:
-            continue                            # 內容沒變不重寫(省 R2 上傳)
-        save_points(LAYER, stamp, {"time": stamp, "fields": FIELDS, "rows": rows},
-                    fields=FIELDS, source=f"CWA {CODE} / {META_CODE}")
-        written.append(stamp)
+    written = merge_write(meta, obs, f"CWA {CODE} / {META_CODE}")
     if written:
         write_recent(meta, max(read_index(LAYER)["times"]))
         log.info("marine %s 完成(寫入 %d 個整點%s)", latest, len(written), ",完整 48 小時" if full else "")
@@ -143,7 +157,35 @@ def run():
     return status, latest, prev
 
 
+def repair(days=config.KEEP_DAYS):
+    """補回 / 修復最近 days 天的快照:30 天資料(O-B0075-002,約 26 MB,大約晚一天)+ 48 小時資料,合併寫入。
+    2026-10-26:一次抓取只回傳花蓮資料浮標,當時的寫法整個覆蓋 → 43 個整點只剩 1 站,用這個補回。"""
+    meta = station_meta()
+    cut = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%d%H%M")
+    obs = defaultdict(dict)
+    for code in (CODE_30D, CODE):                           # 48 小時的較新,後併
+        for stamp, v in collect(code=code).items():
+            if stamp >= cut:
+                obs[stamp].update(v)
+    written = merge_write(meta, obs, f"CWA {CODE_30D} / {CODE} / {META_CODE}")
+    if written:
+        write_recent(meta, max(read_index(LAYER)["times"]))
+    log.info("marine 修復:%d 個整點有資料,寫入 %d 個(%s – %s)", len(obs), len(written),
+             min(obs, default="-"), max(obs, default="-"))
+    return written
+
+
 if __name__ == "__main__":
+    import argparse
     import logging
     logging.basicConfig(level=logging.INFO)
-    print(run())
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repair", action="store_true", help="用 30 天 + 48 小時資料補回 / 修復最近 KEEP_DAYS 天的快照")
+    ap.add_argument("--days", type=int, default=config.KEEP_DAYS)
+    a = ap.parse_args()
+    if a.repair:
+        from . import r2
+        repair(a.days)
+        print("R2 上傳 / 刪除:", r2.flush())               # 單獨執行沒有排程幫忙 flush
+    else:
+        print(run())
