@@ -15,6 +15,10 @@ eccodes
 satpy
 pyresample
 pykdtree
+# true color: Rayleigh correction (downloads LUTs on first use), sun/satellite angles, WebP
+pyspectral
+pyorbital
+pillow
 s3fs
 # Cloudflare R2 upload; boto3/botocore must match the aiobotocore used by s3fs
 boto3>=1.41,<1.42.20

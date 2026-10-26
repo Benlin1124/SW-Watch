@@ -940,3 +940,12 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 前端:新增 web/js/lon.js(lon360、geom360、fmtLon)。typhoon.js 載入時 lonFix()(過去 / 預報點、geo 裡的多邊形);app.js 的實際路徑也套用;ensemble.js 載入時成員 lon 換 0–360(舊檔是 −180–180,前端會自己換,不用重抓)。popup 位置 180 以上標西經;滑鼠讀值地圖往東捲過 180 時也換回東 / 西經。
 - pipeline:typhoon_cwa 經度 % 360、geo_circle 把 GEOD 的 −180–180 接回圓心那一側(跨換日線的暴風圈 / 潛勢區才是完整多邊形);fetch_ensemble 三種來源(ECMWF BUFR、NCEP ATCF、WeatherLab)經度 % 360,離群判斷的系集共識平均才正確;ensemble.load_targets 的氣象署定位 % 360(內插才連續)。
 - 實測:geo_circle(179.5°E, 500 km) bounds 174.6–184.5、潛勢區單一有效 Polygon;人工跨換日線颱風(172°E → 175.4°W)網頁路徑、暴風圈、潛勢區連續。
+## 2026-10-26 衛星真實色(方案 2)
+- 測試(薔琵 10/23 14:00):A 線性(偏暗,雲立體)/ B Rayleigh+CIRA 曲線(顏色好但雲被壓平)/ C 不修正(海面灰霧)。satpy 偏灰是亮度曲線太保守,不是 Rayleigh。使用者要 B 的顏色、A 的雲 → J 版:暗部拉亮曲線(反照率 0/5/10/20/40/70/100% → 0/45/75/110/160/215/255)+ 局部對比(反銳化半徑 20、60%)+ 細部銳化(半徑 2、60%)。
+- 晨昏測試:原本補償到天頂角 88°(放大 28 倍),日落前出現橘黃色帶 → 補償上限 80°(約 5.8 倍)、Rayleigh 在天頂角 70→88° 減弱、太陽仰角 0→10° 漸變到夜間紅外線灰階(同日夜頻道 B07/B13 規則)。
+- 不用 satpy 的 true_color 合成:整段算角度要好幾 GB,這台電腦配置失敗。改成同 fetch_satellite 的做法(對照表取到目標格點),只在目標格點上算 pyorbital 角度、pyspectral Rayleigh,分 300 列一塊。
+- 規劃(使用者決定):每 10 分;0.01° 全範圍 WebP q80;日夜頻道不另存,網頁把真實色轉灰階(raster-saturation −1);B03 改 0.02°(satellite/B03_2km,2×2 平均)上傳,保留 B03 頻道與讀值;影片 / 事件報告在另一台電腦跑、讀不到排程電腦本機 → 影片改讀 R2 的真實色圖片。R2 衛星預估 5.4 GB(原 6.5 GB)。
+- pipeline:config.SAT_BANDS 只剩紅外線;SAT_VIS_BANDS = B01–B04。fetch_satellite 重寫:target(res)、load_band()、process_tc()(白天下載 B01–B04 → B03_2km 格點 + 真實色;夜間只用已存的 B07/B13 放大成 0.01°,不下載)、排程產品 PRODUCTS = 紅外線 + TC(TC 要該時次已有 B07,紅外線先做)、補抓 --bands 可含 TC、cleanup 含 TC / B03_2km / 舊 B03(任何副檔名)。新增 pipeline/truecolor.py。r2:.webp 用 image/webp。requirements 加 pyspectral、pyorbital、pillow。
+- 網頁 satellite.js:新增「真實色」頻道;「日夜」改讀同一張 TC 圖、轉灰階;B03 讀 B03_2km;圖片頻道用 Image().decode() 預載、讀值只顯示太陽仰角;刪掉瀏覽器端日夜合成(daynight-worker.js、dnFrame),daynight.js 只留太陽位置。
+- 影片:radar_video 新增 --tc(真實色);--sat 改用 TC 轉灰階,沒有 TC 的時次(舊資料、事件歸檔)改用原本的 DayNight 格點合成。event_report:影片 tc、tc_ty;颱風預設 radar、radar_ty、tc_ty、sat_ty、gust、wind,豪雨預設 radar、tc、sat;YouTube 說明加真實色圖例。event_archive --satellite:TC(.webp)、B03_2km、B07、B08、B13 與舊 B03。
+- 實測(這台電腦,小範圍 116–128°E、18–28°N):排程模擬 7 輪,先做三個時次的紅外線、再逐一做真實色;白天一張約 50–90 秒(含下載 110 MB);夜間 < 1 秒。記憶體峰值比基準多約 0.7 GB(多半是讀 0.5 km B03 分段),全範圍預估 1.5–2 GB。網頁三個頻道、影片預覽(真實色 + 颱風路徑)都正常,海岸線對齊。全範圍沒在這台跑(這台可用記憶體不足)。

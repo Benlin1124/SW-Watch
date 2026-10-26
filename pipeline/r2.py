@@ -94,6 +94,8 @@ def _headers(key):
         return "application/json; charset=utf-8", "public, max-age=60"
     if key.endswith(".bin.gz"):
         return "application/octet-stream", "public, max-age=86400"   # 前端自己 gunzip,不設 Content-Encoding
+    if key.endswith(".webp"):
+        return "image/webp", "public, max-age=86400"                 # 衛星真實色(satellite/TC)
     return "application/octet-stream", "public, max-age=300"
 
 

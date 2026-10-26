@@ -71,7 +71,7 @@ def setup_logging():
     # 衛星套件的一般訊息(BZ2 解壓暫存檔、太空背景算 log 的 NaN 警告)不寫進 log
     logging.getLogger("satpy").setLevel(logging.WARNING)
     warnings.filterwarnings("ignore", message="invalid value encountered", category=RuntimeWarning)
-    # 衛星 B03 一筆要 1–2 分鐘,期間每分鐘的觸發被略過是預期的,不寫進 log
+    # 衛星白天真實色一筆要 1–3 分鐘,期間每分鐘的觸發被略過是預期的,不寫進 log
     logging.getLogger("apscheduler.scheduler").addFilter(
         lambda r: not ("safe_satellite" in r.getMessage() and "maximum number of running instances" in r.getMessage()))
 

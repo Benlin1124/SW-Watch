@@ -65,15 +65,21 @@ TAIWAN_GEOJSON_URL = "https://watch.ncdr.nat.gov.tw/00_Wxmap/json/area/low/TWN_C
 # ── 衛星(Himawari-9,AWS noaa-himawari9 全盤 HSD)──
 SAT_BUCKET = "noaa-himawari9/AHI-L1b-FLDK"
 SAT_EXTENT = (105.0, 5.0, 155.0, 35.0)     # lon_min, lat_min, lon_max, lat_max
-# 頻道 → (輸出解析度 °, 校正方式, 量化 scale, offset, 單位)
+# 紅外線頻道(各自處理、24 小時)→ (輸出解析度 °, 校正方式, 量化 scale, offset, 單位)
 SAT_BANDS = {
     "B13": (0.02, "brightness_temperature", 0.6, -100.0, "°C"),
     "B07": (0.02, "brightness_temperature", 0.6, -90.0, "°C"),    # 3.9 µm 短波紅外:夜間低雲、霧(白天含太陽反射,地表可到 50 °C 以上)
     "B08": (0.02, "brightness_temperature", 0.6, -100.0, "°C"),
-    "B03": (0.01, "reflectance", 0.5, 0.0, "%"),
 }
+# 可見光(白天,和真實色一起處理,見 fetch_satellite.process_tc / truecolor.py):
+#   下載 B01 藍、B02 綠、B03 紅、B04 近紅外 → 0.01° 真實色 WebP(satellite/TC,夜間漸變紅外線)
+#   + B03 數值格點 0.02°(satellite/B03_2km,網頁 B03 頻道與讀值;0.01° 只在處理時用,不存)
+SAT_VIS_BANDS = ("B01", "B02", "B03", "B04")
+SAT_TC_RES = 0.01
+SAT_B03 = (0.02, "reflectance", 0.5, 0.0, "%")
+SAT_TC_QUALITY = 80          # WebP 品質:白天一張約 3 MB、夜間約 0.6 MB
 SAT_WAIT_MIN = 60            # 掃描開始後幾分鐘內等資料上架,超過記 missed
-SAT_B03_EVERY_MIN = 10       # B03 每次約下載 130 MB;改 30 或 60 可大幅省流量
+SAT_B03_EVERY_MIN = 10       # 白天可見光(真實色 + B03)每次約下載 220 MB;改 30 或 60 可大幅省流量(夜間真實色照樣每 10 分)
 SAT_KEEP_DAYS = int(os.environ.get("SAT_KEEP_DAYS", 5))   # 本機與 R2 衛星保留天數(一天約 1.1 GB);.env 可改
 
 # ── ECMWF IFS 開放資料(台灣附近,pipeline/fetch_ecmwf.py)──
