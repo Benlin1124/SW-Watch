@@ -88,10 +88,10 @@ export function beaufortLegendHTML(title, colors) {
 const range = (a, b, step) => Array.from({ length: Math.round((b - a) / step) + 1 }, (_, i) => +(a + i * step).toFixed(1));
 
 export const SCALES = {
-  // 氣象署雨量色階(第一級改成 0.5,讓 10 分鐘雨量 0.5 mm 也看得到)
-  rain: { levels: [0.5, 2, 6, 10, 15, 20, 30, 40, 50, 70, 90, 110, 130, 150, 200, 300, 400],
-    colors: ['#9bffff', '#00cfff', '#0198ff', '#0165ff', '#309901', '#32ff00', '#f8ff00', '#ffcb00',
-      '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'] },
+  // 氣象署雨量色階(使用者提供):levels[k] = 第 k 色下界,0.5–1 灰、最後一色 ≥ 300;測站與 ECMWF 預報共用
+  rain: { levels: [0.5, 1, 2, 5, 10, 15, 20, 30, 40, 50, 70, 90, 110, 130, 150, 200, 300],
+    colors: ['#c1c2c2', '#9bffff', '#00cfff', '#0198ff', '#0165ff', '#309901', '#32ff00', '#f8ff00', '#ffcb00',
+      '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'], min: 0.5 },
   // 溫度:使用者提供的色階圖取色;0°C 以下每 2 度一色、0–40°C 每 1 度一色,40 以上用最後一色
   temp: { levels: [...range(-14, -2, 2), ...range(0, 40, 1)],
     colors: ['#3c016e', '#5a009e', '#6d00be', '#8200e5', '#9910fe', '#a42dfd', '#bf69fd',

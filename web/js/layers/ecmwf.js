@@ -20,14 +20,6 @@ export const EC_VARS = {
 };
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
 
-// 雨量色階同 風雨變化趨勢_精簡版.ipynb(依時段長度換級距)
-const RAIN_COLORS = ['#c1c2c2', '#9bffff', '#00cfff', '#0198ff', '#0165ff', '#309901', '#32ff00', '#f8ff00',
-  '#ffcb00', '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'];
-const RAIN_LEVELS = {
-  small: [0.1, 1, 2, 6, 10, 15, 20, 30, 40, 50, 70, 90, 110, 130, 150, 200, 300, 400],
-  mid: [0.1, 1, 5, 10, 20, 30, 50, 70, 90, 110, 130, 150, 200, 250, 300, 350, 400, 500],
-  large: [10, 20, 60, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000],
-};
 const UP = 8;                      // 畫圖放大倍數(色塊邊界才不會有鋸齒)
 const ARROW_EVERY = 1;             // 每格(0.1°)都放風向箭頭,重疊的由地圖自動略過 → 放大越密
 const CACHE_MAX = 24;
@@ -157,7 +149,7 @@ export class EcmwfLayer {
       }
       const span = step - from;
       const label = rainHours && span < rainHours ? `起報後 ${span} 小時雨量` : rainHours ? `${span} 小時雨量` : `起報後累積雨量（${step} 小時）`;
-      return { field: a, label, rainSpan: rainHours ? Math.max(span, rainHours) : Math.max(step, 24) };
+      return { field: a, label };
     }
     if (variable === 'wind' || variable === 'gust') {
       const [u, v] = await Promise.all([this.slice(init, 'u10', k), this.slice(init, 'v10', k)]);
@@ -172,11 +164,8 @@ export class EcmwfLayer {
     return { field: await this.slice(init, variable, k), label: EC_VARS[variable].name };
   }
 
-  scale(variable, rainSpan) {
-    if (variable === 'rain') {
-      const levels = RAIN_LEVELS[rainSpan <= 6 ? 'small' : rainSpan <= 12 ? 'mid' : 'large'];
-      return { levels, colors: RAIN_COLORS, min: levels[0] };
-    }
+  scale(variable) {
+    if (variable === 'rain') return SCALES.rain;             // 各時段同一套(氣象署,≥ 300 最後一色)
     if (variable === 't2') return SCALES.temp;
     if (variable === 'msl') return SCALES.pres;
     if (variable === 'swh') return SCALES.wave;
@@ -251,7 +240,7 @@ export class EcmwfLayer {
       const [init, s, variable, rh] = key.split('|'), step = +s;
       const p = (async () => {
         const r = await this.field(init, step, variable, +rh);
-        const sc = this.scale(variable, r.rainSpan);
+        const sc = this.scale(variable);
         return { init, step, variable, field: r.field, label: r.label, sc, url: await this.render(r.field, sc),
           arrows: r.u ? this.arrows(r.u, r.v) : EMPTY };
       })();
