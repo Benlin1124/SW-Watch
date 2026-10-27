@@ -1,4 +1,4 @@
-"""ECMWF IFS 0.1° 開放資料(台灣附近):氣壓、溫度、10 m 風、陣風、降雨;00/12Z 起報,0–84 小時每 3 小時。
+"""ECMWF IFS 0.1° 開放資料(台灣附近):氣壓、溫度、10 m 風、陣風、降雨、海浪;00/12Z 起報,0–84 小時每 3 小時。
 參考 風雨變化趨勢_精簡版.ipynb。
   data/ecmwf/index.json              times = 起報時間(stamp);grid、vars、steps
   data/ecmwf/{起報}/{變數}.bin.gz    uint16 (步數, ny, nx),第 0 列最南;實際值 = raw * scale + offset,65535 = 無資料
@@ -8,8 +8,9 @@
   u10 / v10  10 m 風 m/s(平均風 = 合成風速)
   gust 10 m 陣風 m/s:開放資料只有「預報時刻前 1 小時內最大」(10fg,step 範圍 t-1~t),3 小時之間的極值抓不到
   tp   起報後累積雨量 mm(前端相減得到 3/6/12/24 小時雨量)
+  swh  示性波高 m、mwd 平均波向(來向,度)、pp1d 尖峰週期 s:海浪模式(stream wave,同網格;陸地 = 無資料)
 下載:依 .index 用 HTTP Range 只抓需要的欄位(每欄全球 1–3.6 MB),解出後只留台灣附近。
-  每報約 29 步 × 6 欄 ≈ 400 MB 下載;本機和 R2 每報只存約 3 MB。
+  每報約 29 步 ×(6 欄大氣 + 3 欄海浪)≈ 570 MB 下載;本機和 R2 每報只存約 4–5 MB。
   來源:AWS 鏡像(免費),失敗改 ECMWF 官網。
 排程每 10 分鐘檢查一次:最新一報的 84 小時檔上架了就抓;重啟後會補保留期間內漏掉的報。
 手動:python -m pipeline.fetch_ecmwf [--init 2026102200]"""
@@ -38,7 +39,12 @@ VARS = {
     "v10": ("10v", None, 0.01, -300.0, "m/s", "10 m 南北風"),
     "gust": ("10fg", None, 0.01, 0.0, "m/s", "10 m 陣風(前 1 小時最大)"),
     "tp": ("tp", lambda v: v * 1000, 0.1, 0.0, "mm", "起報後累積雨量"),
+    "swh": ("swh", None, 0.01, 0.0, "m", "示性波高"),
+    "mwd": ("mwd", None, 0.01, 0.0, "°", "平均波向(來向)"),
+    "pp1d": ("pp1d", None, 0.01, 0.0, "s", "尖峰週期"),
 }
+WAVE = {"swh", "mwd", "pp1d"}                # 這些在海浪模式的檔(stream wave),其餘在大氣(oper)
+STREAMS = ("oper", "wave")
 GIVEN_UP_PATH = config.CACHE_DIR / "ecmwf_given_up.json"
 
 
@@ -46,19 +52,19 @@ def stamp_of(init):
     return init.strftime("%Y%m%d%H%M")
 
 
-def _url(host, init, step, ext):
+def _url(host, init, step, ext, stream="oper"):
     d, h = init.strftime("%Y%m%d"), init.strftime("%H")
-    return (f"{host}/{d}/{h}z/ifs/{config.ECMWF_RESOL}/oper/"
-            f"{d}{h}0000-{step}h-oper-fc-sfc.{ext}")
+    return (f"{host}/{d}/{h}z/ifs/{config.ECMWF_RESOL}/{stream}/"
+            f"{d}{h}0000-{step}h-{stream}-fc-sfc.{ext}")
 
 
-def _get(init, step, ext, headers=None, tries=6):
+def _get(init, step, ext, headers=None, tries=6, stream="oper"):
     """依序試各來源;S3 忙碌(503 SlowDown)或連線失敗就等一下再試。404 直接回 None。"""
     last = None
     for k in range(tries):
         host = HOSTS[k % len(HOSTS)]
         try:
-            r = requests.get(_url(host, init, step, ext), headers=headers, timeout=120)
+            r = requests.get(_url(host, init, step, ext, stream), headers=headers, timeout=120)
             if r.status_code == 404:
                 return None
             if r.status_code in (200, 206):
@@ -67,21 +73,23 @@ def _get(init, step, ext, headers=None, tries=6):
         except requests.RequestException as e:
             last = f"{type(e).__name__}: {e}"
         time.sleep(min(5 * 2 ** k, 60))
-    raise RuntimeError(f"ECMWF {stamp_of(init)} +{step}h {ext} 下載失敗:{last}")
+    raise RuntimeError(f"ECMWF {stamp_of(init)} +{step}h {stream} {ext} 下載失敗:{last}")
 
 
 def available(init):
-    """最後一步(84 小時)的 index 上架了 → 這一報可以抓。"""
-    for host in HOSTS:
-        try:
-            r = requests.head(_url(host, init, STEPS[-1], "index"), timeout=30)
-            if r.status_code == 200:
-                return True
-            if r.status_code == 404:
-                return False
-        except requests.RequestException:
-            continue
-    return False
+    """大氣和海浪最後一步(84 小時)的 index 都上架了 → 這一報可以抓。"""
+    def up(stream):
+        for host in HOSTS:
+            try:
+                r = requests.head(_url(host, init, STEPS[-1], "index", stream), timeout=30)
+                if r.status_code == 200:
+                    return True
+                if r.status_code == 404:
+                    return False
+            except requests.RequestException:
+                continue
+        return False
+    return all(up(s) for s in STREAMS)
 
 
 def _crop_slices(h):
@@ -102,34 +110,40 @@ def _crop_slices(h):
 
 
 def _field(init, step, entry):
-    """Range 下載一個 GRIB 欄位,解出後只留台灣附近(第 0 列在南)。"""
+    """Range 下載一個 GRIB 欄位,解出後只留台灣附近(第 0 列在南);遮罩的格點(海浪的陸地)= NaN。"""
     import eccodes
     a, n = entry["_offset"], entry["_length"]
-    r = _get(init, step, "grib2", headers={"Range": f"bytes={a}-{a + n - 1}"})
+    r = _get(init, step, "grib2", headers={"Range": f"bytes={a}-{a + n - 1}"}, stream=entry["stream"])
     if r is None or len(r.content) != n:
         raise RuntimeError(f"ECMWF {stamp_of(init)} +{step}h {entry['param']} 下載不完整")
     h = eccodes.codes_new_from_message(r.content)
     try:
         ni, nj, rs, cs = _crop_slices(h)
-        v = eccodes.codes_get_values(h).reshape(nj, ni)[rs, cs]
+        v = eccodes.codes_get_values(h).reshape(nj, ni)[rs, cs].astype(np.float32)
+        if eccodes.codes_get(h, "bitmapPresent"):
+            v[v == eccodes.codes_get(h, "missingValue")] = np.nan
     finally:
         eccodes.codes_release(h)
-    return v[::-1].astype(np.float32)
+    return v[::-1]
 
 
 def fetch_step(init, step, pool):
     """一個預報時刻的各變數(找不到的欄位回 None:0 小時沒有陣風、雨量)。"""
-    r = _get(init, step, "index")
-    if r is None:
-        raise RuntimeError(f"ECMWF {stamp_of(init)} +{step}h 尚未上架")
     entries = {}
-    for line in r.text.splitlines():
-        e = json.loads(line)
-        if e.get("levtype") == "sfc":
-            entries[e["param"]] = e
+    for stream in STREAMS:
+        r = _get(init, step, "index", stream=stream)
+        if r is None:
+            raise RuntimeError(f"ECMWF {stamp_of(init)} +{step}h {stream} 尚未上架")
+        for line in r.text.splitlines():
+            e = json.loads(line)
+            if e.get("levtype") == "sfc":
+                e.setdefault("stream", stream)
+                entries[e["param"]] = e
     jobs = {}
     for var, (param, *_rest) in VARS.items():
         e = entries.get(param)
+        if e is not None and (e["stream"] == "wave") != (var in WAVE):
+            e = None
         if e is None or e["_length"] < 1000:      # 0 小時的 tp / 10fg 只是空欄位
             continue
         jobs[var] = pool.submit(_field, init, step, e)
@@ -156,7 +170,7 @@ def grid_and_vars(shape):
 def process(init):
     """下載一報、存成每變數一個檔;任何一步失敗就整報放棄(下次排程再試)。"""
     t0 = time.time()
-    log.info("ECMWF %s 開始下載(%d 步,約 400 MB、10–15 分鐘)", stamp_of(init), len(STEPS))
+    log.info("ECMWF %s 開始下載(%d 步,約 570 MB、15–20 分鐘)", stamp_of(init), len(STEPS))
     data = {k: [] for k in VARS}
     with ThreadPoolExecutor(4) as pool:
         for step in STEPS:

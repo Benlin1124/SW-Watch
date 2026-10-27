@@ -1,4 +1,4 @@
-// ECMWF IFS 預報(台灣附近,pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風
+// ECMWF IFS 預報(台灣附近,pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風、浪高、尖峰週期
 // 每個起報、每個變數一個檔(全部預報時刻);換時刻不用再下載。
 // 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大 4 倍做雙線性內插再上色
 import { DATA_BASE_URL } from '../config.js';
@@ -7,6 +7,7 @@ import { beaufortLegendHTML, legendHTML, SCALES } from '../colormaps.js';
 import { addMin, fmtTW } from '../time.js';
 import { EMPTY_PNG } from './radar.js';
 import { arrowImage } from './stations.js';
+import { waveClass, WAVE_CLASSES } from './marine.js';
 
 export const EC_VARS = {
   rain: { name: '降雨', unit: 'mm' },
@@ -14,6 +15,8 @@ export const EC_VARS = {
   msl: { name: '海平面氣壓', unit: 'hPa' },
   wind: { name: '平均風', unit: 'm/s' },
   gust: { name: '陣風', unit: 'm/s' },
+  swh: { name: '浪高', unit: 'm' },
+  pp1d: { name: '尖峰週期', unit: 's' },
 };
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
 
@@ -159,6 +162,11 @@ export class EcmwfLayer {
       const f = variable === 'gust' ? await this.slice(init, 'gust', k) : u.map((x, i) => Math.hypot(x, v[i]));
       return { field: f, u, v, label: variable === 'gust' ? '陣風（該時刻前 1 小時最大）' : '10 m 平均風' };
     }
+    if (variable === 'swh' || variable === 'pp1d') {     // 海浪:箭頭畫浪前進方向(mwd 是來向,轉 180°)
+      const [f, d] = await Promise.all([this.slice(init, variable, k), this.slice(init, 'mwd', k)]);
+      const rad = d.map((x) => ((x + 180) * Math.PI) / 180);
+      return { field: f, u: rad.map(Math.sin), v: rad.map(Math.cos), label: variable === 'swh' ? '示性波高' : '尖峰週期' };
+    }
     return { field: await this.slice(init, variable, k), label: EC_VARS[variable].name };
   }
 
@@ -169,6 +177,8 @@ export class EcmwfLayer {
     }
     if (variable === 't2') return SCALES.temp;
     if (variable === 'msl') return SCALES.pres;
+    if (variable === 'swh') return SCALES.wave;
+    if (variable === 'pp1d') return SCALES.period;
     return SCALES.wind;
   }
 
@@ -290,7 +300,8 @@ export class EcmwfLayer {
     const x = this.shown.field[iy * g.nx + ix];
     if (Number.isNaN(x)) return null;
     const v = this.shown.variable, unit = EC_VARS[v].unit;
-    return `ECMWF ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}`;
+    const cls = v === 'swh' && waveClass(x) ? `（${waveClass(x)}）` : '';
+    return `ECMWF ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}`;
   }
 
   legend() {
@@ -298,7 +309,12 @@ export class EcmwfLayer {
     const { variable, sc, label, init, step } = this.shown;
     const title = `ECMWF ${label}（${fmtEcInit(init)} +${step}h）`;
     if (variable === 'wind' || variable === 'gust') return beaufortLegendHTML(`${title}（蒲福風級）`, sc.colors);
-    return legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks);
+    const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks);
+    if (variable === 'swh') {
+      const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
+      return `${html}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m；箭頭 = 浪前進方向</div>`;
+    }
+    return variable === 'pp1d' ? `${html}<div class="legend-labels" style="margin-top:4px">箭頭 = 浪前進方向</div>` : html;
   }
 }
 

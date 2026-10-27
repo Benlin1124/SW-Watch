@@ -109,6 +109,7 @@ const radar = new RadarLayer(map);
 const satellite = new SatelliteLayer(map);
 const ecmwf = new EcmwfLayer(map);
 const wind = new WindLayer(map, ecmwf);
+const waves = new WindLayer(map, ecmwf, 'wave');
 const typhoon = new TyphoonLayer(map);
 const ens = new EnsembleLayer(map);
 // 系集各模式的設定(初始時間不存:下次打開已過時)
@@ -187,18 +188,20 @@ async function render() {
   }));
   await updateWind();
   if (!state.playing) { renderStorms(); refreshStationUI(); }
-  if (ecmwf.visible || wind.visible) updateLegend();        // ECMWF 圖例跟著變數、時刻、雨量時段
+  if (ecmwf.visible || wind.visible || waves.visible) updateLegend();        // ECMWF 圖例跟著變數、時刻、雨量時段
   card.update(state.T);
   mCard.update(state.T);
 }
 
-/** 風場動畫跟著 ECMWF 顯示的時刻或時間軸(不同步時用現在) */
+/** 風場 / 海浪動畫跟著 ECMWF 顯示的時刻或時間軸(不同步時用現在) */
 async function updateWind() {
-  if (!wind.visible) return;
-  try { await wind.update(state.sync || state.playing ? state.T : null); } catch (e) { console.warn('wind', e); }
-  const el = $('time-wind'), t = wind.timeLabel();
-  el.textContent = t ? t.text : '無資料';
-  el.classList.toggle('nodata', !t);
+  const T = state.sync || state.playing ? state.T : null;
+  await Promise.all([wind, waves].filter((l) => l.visible).map(async (l) => {
+    try { await l.update(T); } catch (e) { console.warn(l.key, e); }
+    const el = $(`time-${l.key}`), t = l.timeLabel();
+    el.textContent = t ? t.text : '無資料';
+    el.classList.toggle('nodata', !t);
+  }));
 }
 
 function updateLayerTime(l, stamp, sync) {
@@ -573,7 +576,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [satellite, ecmwf, wind, radar, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, ecmwf, wind, waves, radar, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
 }
@@ -783,9 +786,11 @@ function bindEcmwfUI() {
 }
 
 function bindWindUI() {
-  $('chk-wind').onchange = async (e) => { wind.setVisible(e.target.checked); await updateWind(); updateLegend(); };
-  $('wind-color').onchange = (e) => { wind.setColor(e.target.value); updateLegend(); };
-  $('wind-density').oninput = (e) => wind.setDensity(e.target.value / 100);
+  for (const l of [wind, waves]) {
+    $(`chk-${l.key}`).onchange = async (e) => { l.setVisible(e.target.checked); await updateWind(); updateLegend(); };
+    $(`${l.key}-color`).onchange = (e) => { l.setColor(e.target.value); updateLegend(); };
+    $(`${l.key}-density`).oninput = (e) => l.setDensity(e.target.value / 100);
+  }
 }
 
 // ── 測站:搜尋、篩選、排行榜、資訊卡 ──
@@ -980,7 +985,7 @@ function bindUI() {
   document.addEventListener('input', saveEns);
 
   map.on('mousemove', (e) => {
-    const v = [radar, ecmwf, wind, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
+    const v = [radar, ecmwf, wind, waves, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
     const el = $('readout');
     el.style.display = 'block';
     const lng = ((e.lngLat.lng + 180) % 360 + 360) % 360 - 180;   // 地圖往東捲過 180° 時 lng 會超過 180
@@ -999,6 +1004,7 @@ map.on('load', async () => {
   satellite.addTo('radar');
   ecmwf.addTo('radar');
   wind.addTo();
+  waves.addTo();                // 後加的在下面:浪在風底下
   typhoon.addTo();
   ens.addTo('ty-cone-fill');
   addOverlays('ens-members');

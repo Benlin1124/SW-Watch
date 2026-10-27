@@ -80,6 +80,8 @@
               <option value="msl">海平面氣壓</option>
               <option value="wind">平均風</option>
               <option value="gust">陣風</option>
+              <option value="swh">浪高</option>
+              <option value="pp1d">尖峰週期</option>
             </select>
             <select id="ec-rain">
               <option value="3">3 小時</option><option value="6">6 小時</option>
@@ -119,6 +121,24 @@
             </select>
           </label>
           <label>密度 <input type="range" id="wind-density" min="25" max="300" value="100"></label>
+        </div>
+      </div>
+
+      <div class="layer" data-layer="wave">
+        <label class="layer-head" title="ECMWF 海浪預報的波峰動畫：往浪前進方向移動，越長浪越高、越快週期越長；時間同風場動畫">
+          <input type="checkbox" id="chk-wave">
+          <span class="layer-name">海浪動畫</span>
+          <span class="layer-time" id="time-wave">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>顏色
+            <select id="wave-color">
+              <option value="white">白</option>
+              <option value="black">黑</option>
+              <option value="speed">依浪高</option>
+            </select>
+          </label>
+          <label>密度 <input type="range" id="wave-density" min="25" max="300" value="100"></label>
         </div>
       </div>
 

@@ -167,9 +167,9 @@ export class Capture {
       box.remove();
     }
 
-    // 1b. 風場動畫:擷取當下畫面上的粒子(螢幕解析度,放大到輸出尺寸)
-    const wc = map.getContainer().querySelector('.wind-canvas');
-    if (wc && wc.style.display !== 'none') {
+    // 1b. 風場 / 海浪動畫:擷取當下畫面上的粒子(螢幕解析度,放大到輸出尺寸)
+    for (const wc of map.getContainer().querySelectorAll('.wind-canvas')) {
+      if (wc.style.display === 'none') continue;
       const r = wc.width / mr.width;
       ctx.drawImage(wc, (fr.left - mr.left) * r, (fr.top - mr.top) * r, fr.width * r, fr.height * r, 0, 0, W, H);
     }
