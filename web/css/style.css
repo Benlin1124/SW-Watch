@@ -55,10 +55,17 @@ button.toggle.on { background: var(--accent); color: #000; border-color: var(--a
 
 /* ── 左側面板 ── */
 #panel {
-  position: absolute; top: 60px; left: 12px; width: 270px; max-height: calc(100% - 150px); overflow-y: auto;
+  position: absolute; top: 60px; left: 12px; width: 270px; max-height: calc(100% - 150px); overflow: hidden auto;
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; z-index: 4;
 }
 #panel h3 { margin: 6px 0 8px; font-size: 13px; color: var(--muted); font-weight: 500; }
+/* 圖層分組(觀測、預報、颱風);沒勾的圖層只留標題列 */
+.layer-group { margin: 12px 0 6px; padding-bottom: 2px; border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); letter-spacing: 0.15em; }
+#panel h3 + .layer-group { margin-top: 0; }
+.layer.off { margin-bottom: 6px; }
+.layer.off .layer-opts { display: none; }
+.layer.off .fold { visibility: hidden; }
+.layer.off .layer-name { color: var(--muted); font-weight: 500; }
 #panel section + section { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 4px; }
 .layer { margin-bottom: 10px; }
 .layer-head { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -163,8 +170,8 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 .model { border-radius: 4px; background: rgba(255, 255, 255, 0.04); padding: 3px 5px; color: var(--fg); }
 .model.all { background: rgba(79, 195, 247, 0.12); }
 .model-head { display: flex; align-items: center; gap: 6px; }
-.model-head label { flex: 1; gap: 5px; white-space: nowrap; }
-.model-head select { flex: 0 0 128px; font-size: 12px; padding: 2px 4px; }
+.model-head label { flex: 1; gap: 5px; white-space: nowrap; min-width: 0; }
+.model-head select { flex: 0 1 116px; min-width: 0; font-size: 12px; padding: 2px 4px; }
 .model-head .expand { padding: 0 6px; font-size: 11px; }
 .model-body { display: grid; gap: 3px; padding: 4px 0 2px 20px; color: var(--muted); }
 .model-body .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

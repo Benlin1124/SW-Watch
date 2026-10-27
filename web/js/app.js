@@ -207,6 +207,7 @@ async function updateWind() {
 function updateLayerTime(l, stamp, sync) {
   const el = $(`time-${l.key}`);
   el.classList.remove('nodata', 'stale');
+  if (!stamp && !l.visible) { el.textContent = '--'; return; }      // 沒勾的圖層不顯示「無資料」
   if (!stamp) { el.textContent = '無資料'; el.classList.add('nodata'); return; }
   if (l.key === 'typhoon') {
     el.textContent = `初始 ${fmtTW(stamp)}`;
@@ -767,7 +768,7 @@ function bindEcmwfUI() {
   $('ec-pause').onclick = ecPause;
   $('ec-play').onclick = async () => {
     if (playing || !ecmwf.index) return;
-    if (!ecmwf.visible) { $('chk-ecmwf').checked = true; ecmwf.setVisible(true); }
+    if (!ecmwf.visible) { $('chk-ecmwf').checked = true; ecmwf.setVisible(true); syncLayerOff(); }
     playing = true;
     setFollow(false);
     $('ec-play').classList.add('on');
@@ -895,6 +896,15 @@ function bindCollapse() {
       prefs.set('folded', folded);
     };
     layer.querySelector('.layer-head').prepend(b);
+  }
+  syncLayerOff();
+  document.addEventListener('change', (e) => { if (e.target.closest?.('.layer-head')) syncLayerOff(); });
+}
+
+/** 沒勾的圖層只留標題列(選項收起來),面板才不會太長 */
+function syncLayerOff() {
+  for (const layer of document.querySelectorAll('#panel .layer')) {
+    layer.classList.toggle('off', !layer.querySelector('.layer-head input[type=checkbox]').checked);
   }
 }
 

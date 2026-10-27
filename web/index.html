@@ -29,6 +29,7 @@
     <section>
       <h3>圖層</h3>
 
+      <div class="layer-group">觀測</div>
       <div class="layer" data-layer="satellite">
         <label class="layer-head">
           <input type="checkbox" id="chk-satellite" checked>
@@ -63,83 +64,6 @@
         </label>
         <div class="layer-opts">
           <label>透明度 <input type="range" id="op-radar" min="0" max="100" value="85"></label>
-        </div>
-      </div>
-
-      <div class="layer" data-layer="ecmwf">
-        <label class="layer-head">
-          <input type="checkbox" id="chk-ecmwf">
-          <span class="layer-name">ECMWF 預報</span>
-          <span class="layer-time" id="time-ecmwf">--</span>
-        </label>
-        <div class="layer-opts">
-          <label>變數
-            <select id="ec-var">
-              <option value="rain">降雨</option>
-              <option value="t2">溫度</option>
-              <option value="msl">海平面氣壓</option>
-              <option value="wind">平均風</option>
-              <option value="gust">陣風</option>
-              <option value="swh">浪高</option>
-              <option value="pp1d">尖峰週期</option>
-            </select>
-            <select id="ec-rain">
-              <option value="3">3 小時</option><option value="6">6 小時</option>
-              <option value="12">12 小時</option><option value="24">24 小時</option>
-              <option value="0">起報後累積</option>
-            </select>
-          </label>
-          <label>初始 <select id="ec-init"></select></label>
-          <label>
-            <button id="ec-prev" title="上一個時刻">◀</button>
-            <select id="ec-step"></select>
-            <button id="ec-next" title="下一個時刻">▶</button>
-          </label>
-          <div class="ec-play">
-            <button id="ec-play" title="播放預報（和下方時間軸分開）">▶ 播放</button>
-            <button id="ec-pause" title="暫停">⏸ 暫停</button>
-          </div>
-          <div class="ty-toggles">
-            <label title="預報時刻跟著下方時間軸（時間軸停在哪就顯示那之前最近的時刻）"><input type="checkbox" id="ec-follow"> 對齊時間軸</label>
-            <label title="平均風、陣風畫風吹去的方向；浪高、尖峰週期畫浪前進方向"><input type="checkbox" id="ec-arrows" checked> 箭頭</label>
-          </div>
-          <label>透明度 <input type="range" id="op-ecmwf" min="0" max="100" value="80"></label>
-        </div>
-      </div>
-
-      <div class="layer" data-layer="wind">
-        <label class="layer-head" title="ECMWF 10 m 風預報的流動粒子；ECMWF 開著跟它的時刻，否則跟時間軸（兩個預報時刻之間內插）">
-          <input type="checkbox" id="chk-wind">
-          <span class="layer-name">風場動畫</span>
-          <span class="layer-time" id="time-wind">--</span>
-        </label>
-        <div class="layer-opts">
-          <label>顏色
-            <select id="wind-color">
-              <option value="white">白</option>
-              <option value="black">黑</option>
-              <option value="speed">依風級</option>
-            </select>
-          </label>
-          <label>密度 <input type="range" id="wind-density" min="25" max="300" value="100"></label>
-        </div>
-      </div>
-
-      <div class="layer" data-layer="wave">
-        <label class="layer-head" title="ECMWF 海浪預報的波峰動畫：往浪前進方向移動，越長浪越高、越快週期越長；時間同風場動畫">
-          <input type="checkbox" id="chk-wave">
-          <span class="layer-name">海浪動畫</span>
-          <span class="layer-time" id="time-wave">--</span>
-        </label>
-        <div class="layer-opts">
-          <label>顏色
-            <select id="wave-color">
-              <option value="white">白</option>
-              <option value="black">黑</option>
-              <option value="speed">依浪高</option>
-            </select>
-          </label>
-          <label>密度 <input type="range" id="wave-density" min="25" max="300" value="100"></label>
         </div>
       </div>
 
@@ -231,10 +155,89 @@
             <label><input type="checkbox" value="tide" checked> ■ 潮位站</label>
             <label><input type="checkbox" value="coast" checked> ⬢ 岸邊氣象站</label>
           </div>
-          <div class="hint">每小時一筆；點站看近 48 小時變化</div>
+          <div class="hint">每小時一筆；點站看變化（最多 10 天）</div>
         </div>
       </div>
 
+      <div class="layer-group">預報</div>
+      <div class="layer" data-layer="ecmwf">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-ecmwf">
+          <span class="layer-name">ECMWF 預報</span>
+          <span class="layer-time" id="time-ecmwf">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>變數
+            <select id="ec-var">
+              <option value="rain">降雨</option>
+              <option value="t2">溫度</option>
+              <option value="msl">海平面氣壓</option>
+              <option value="wind">平均風</option>
+              <option value="gust">陣風</option>
+              <option value="swh">浪高</option>
+              <option value="pp1d">尖峰週期</option>
+            </select>
+            <select id="ec-rain">
+              <option value="3">3 小時</option><option value="6">6 小時</option>
+              <option value="12">12 小時</option><option value="24">24 小時</option>
+              <option value="0">起報後累積</option>
+            </select>
+          </label>
+          <label>初始 <select id="ec-init"></select></label>
+          <label>
+            <button id="ec-prev" title="上一個時刻">◀</button>
+            <select id="ec-step"></select>
+            <button id="ec-next" title="下一個時刻">▶</button>
+          </label>
+          <div class="ec-play">
+            <button id="ec-play" title="播放預報（和下方時間軸分開）">▶ 播放</button>
+            <button id="ec-pause" title="暫停">⏸ 暫停</button>
+          </div>
+          <div class="ty-toggles">
+            <label title="預報時刻跟著下方時間軸（時間軸停在哪就顯示那之前最近的時刻）"><input type="checkbox" id="ec-follow"> 對齊時間軸</label>
+            <label title="平均風、陣風畫風吹去的方向；浪高、尖峰週期畫浪前進方向"><input type="checkbox" id="ec-arrows" checked> 箭頭</label>
+          </div>
+          <label>透明度 <input type="range" id="op-ecmwf" min="0" max="100" value="80"></label>
+        </div>
+      </div>
+
+      <div class="layer" data-layer="wind">
+        <label class="layer-head" title="ECMWF 10 m 風預報的流動粒子；ECMWF 開著跟它的時刻，否則跟時間軸（兩個預報時刻之間內插）">
+          <input type="checkbox" id="chk-wind">
+          <span class="layer-name">風場動畫</span>
+          <span class="layer-time" id="time-wind">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>顏色
+            <select id="wind-color">
+              <option value="white">白</option>
+              <option value="black">黑</option>
+              <option value="speed">依風級</option>
+            </select>
+          </label>
+          <label>密度 <input type="range" id="wind-density" min="25" max="300" value="100"></label>
+        </div>
+      </div>
+
+      <div class="layer" data-layer="wave">
+        <label class="layer-head" title="ECMWF 海浪預報的波峰動畫：往浪前進方向移動，越長浪越高、越快週期越長；時間同風場動畫">
+          <input type="checkbox" id="chk-wave">
+          <span class="layer-name">海浪動畫</span>
+          <span class="layer-time" id="time-wave">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>顏色
+            <select id="wave-color">
+              <option value="white">白</option>
+              <option value="black">黑</option>
+              <option value="speed">依浪高</option>
+            </select>
+          </label>
+          <label>密度 <input type="range" id="wave-density" min="25" max="300" value="100"></label>
+        </div>
+      </div>
+
+      <div class="layer-group">颱風</div>
       <div class="layer" data-layer="typhoon">
         <label class="layer-head">
           <input type="checkbox" id="chk-typhoon" checked>
@@ -313,6 +316,7 @@
           </div>
         </div>
       </div>
+
     </section>
 
     <section>
