@@ -5,7 +5,7 @@
 //   風(kind wind):10 m 風 u10 / v10,粒子留尾跡、逐格淡出。
 //   浪(kind wave):浪前進方向(mwd 來向轉 180°),畫成往前凸的波峰弧線,不留尾跡、淡入淡出;
 //     弧長隨浪高(swh)、速度隨尖峰週期(pp1d,深水波速和週期成正比)。陸地無資料 → 不畫。
-import { beaufort, beaufortLegendHTML, legendHTML, SCALES } from '../colormaps.js';
+import { beaufort, beaufortLegendHTML, infoHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, diffMin, fmtTW, nowStamp } from '../time.js';
 import { fmtEcInit } from './ecmwf.js';
 import { waveClass } from './marine.js';
@@ -29,6 +29,7 @@ const MAX_N = 6000;
 const SLICES_MAX = 8;
 const COLORS = { white: 'rgba(255,255,255,0.9)', black: 'rgba(25,25,25,0.85)' };
 const ALPHAS = [0.25, 0.5, 0.75, 1];          // 浪:淡入淡出分 4 級(同級一起畫)
+const TIME_NOTE = 'ECMWF 圖層開著時跟它的預報時刻；沒開時跟時間軸，在前後兩個預報時刻（每 3 小時）之間內插。這是預報，不是觀測。';
 const DIRS = ['北', '北北東', '東北', '東北東', '東', '東南東', '東南', '南南東', '南', '南南西', '西南', '西南西', '西', '西北西', '西北', '北北西'];
 const dirName = (x, y) => DIRS[Math.round((((Math.atan2(x, y) * 180) / Math.PI + 360) % 360) / 22.5) % 16];
 const levelOf = (levels, x) => { let i = 0; while (i + 1 < levels.length && x >= levels[i + 1]) i++; return i; };
@@ -291,13 +292,13 @@ export class WindLayer {
   legend() {
     const s = this.shown, when = s ? `（${fmtEcInit(s.init)} +${Math.round(s.hours * 10) / 10}h）` : '（無資料）';
     if (this.kind === 'wave') {
-      const title = `海浪動畫：ECMWF 海浪預報${when}`;
-      const note = '<div class="legend-labels" style="margin-top:4px">波峰往浪前進方向移動；越長浪越高、越快週期越長</div>';
+      const title = `海浪動畫：ECMWF 海浪預報${when}`, note = `波峰往浪前進方向移動；越長浪越高、越快週期越長。${TIME_NOTE}`;
       return this.color === 'speed'
-        ? legendHTML(`${title} 波峰顏色 = 浪高 (m)`, SCALES.wave.levels, SCALES.wave.colors, 0, 22, SCALES.wave.ticks) + note
-        : `<div class="legend-title">${title}</div>${note}`;
+        ? withInfo(legendHTML(`${title} 波峰顏色 = 浪高 (m)`, SCALES.wave.levels, SCALES.wave.colors, 0, 22, SCALES.wave.ticks), note)
+        : `<div class="legend-title">${title}${infoHTML(note)}</div>`;
     }
-    const title = `風場動畫：ECMWF 10 m 風預報${when}`;
-    return this.color === 'speed' ? beaufortLegendHTML(`${title} 粒子顏色（蒲福風級）`, SCALES.wind.colors) : `<div class="legend-title">${title}</div>`;
+    const title = `風場動畫：ECMWF 10 m 風預報${when}`, note = `粒子順著風吹去的方向流動，越快風越大。${TIME_NOTE}`;
+    return this.color === 'speed' ? withInfo(beaufortLegendHTML(`${title} 粒子顏色（蒲福風級）`, SCALES.wind.colors), note)
+      : `<div class="legend-title">${title}${infoHTML(note)}</div>`;
   }
 }

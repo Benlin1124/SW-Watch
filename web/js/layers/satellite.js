@@ -3,7 +3,7 @@
 // 數值頻道畫法同雷達(uint8 → 查色表 → PNG);真實色、日夜是 pipeline 做好的 WebP,直接給 MapLibre 顯示
 import { getGrid, getIndex } from '../data.js';
 import { DATA_BASE_URL } from '../config.js';
-import { fogCode, fogLegendHTML, fogLUT, satLegendHTML, satLUT } from '../colormaps.js';
+import { fogCode, fogLegendHTML, fogLUT, infoHTML, satLegendHTML, satLUT } from '../colormaps.js';
 import { latestLE } from '../time.js';
 import { EMPTY_PNG, renderPNG } from './radar.js';
 import { DN, mercY, sunAt, sunElevation } from './daynight.js';
@@ -200,9 +200,8 @@ export class SatelliteLayer {
     if (this.band === 'FOG') return fogLegendHTML(`衛星 ${SAT_BANDS.FOG.name} 亮溫差`);
     if (SAT_BANDS[this.band].image) {
       const day = this.band === 'TC' ? '白天真實色（B03 紅、B02 混 B04 綠、B01 藍，Rayleigh 散射修正）' : '白天可見光（真實色轉灰階）';
-      return `<div class="legend-title">衛星 ${SAT_BANDS[this.band].name}</div>`
-        + `<div class="legend-labels" style="display:block;line-height:1.5">${day}；夜間 B07 短波紅外灰階（越冷越白，`
-        + `雲頂比 ${DN.cold[0]} °C 冷改用 B13）；太陽仰角 ${DN.night}°–${DN.day}° 之間漸變。解析度 0.01°（夜間 0.02°）</div>`;
+      return `<div class="legend-title">衛星 ${SAT_BANDS[this.band].name}${infoHTML(`${day}；夜間 B07 短波紅外灰階（越冷越白，`
+        + `雲頂比 ${DN.cold[0]} °C 冷改用 B13）；太陽仰角 ${DN.night}°–${DN.day}° 之間漸變。解析度 0.01°（夜間 0.02°）`)}</div>`;
     }
     const [title, range, ticks] = SAT_BANDS[this.band].legend;
     const b13 = this.band === 'B13' ? (this.style === 'bd' ? '（增強）' : '（灰階）') : '';

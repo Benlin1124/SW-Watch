@@ -1,7 +1,7 @@
 // 海象圖層:浮標站、潮位站等海況(pipeline/fetch_marine.py,O-B0075-001,每小時一筆)
 // 符號見下方「符號」說明(藍框 = 海上觀測,和地面測站區隔);點站打開資訊卡,看折線圖(marine/recent.json.gz,近 10 天,可選時段)
 import { getIndex, getJSON } from '../data.js';
-import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr } from '../colormaps.js';
+import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr, withInfo } from '../colormaps.js';
 import { addMin, diffMin, fmtTW, latestLE } from '../time.js';
 import { arrowImage } from './stations.js';
 import * as prefs from '../prefs.js';
@@ -391,13 +391,13 @@ export class MarineLayer {
     if (this.variable === 'wave_h') keys.push(item(svgShape('mr-wave'), '浪前進方向，越大浪越高'));
     if (this.variable === 'tide' && !this.aggMode) keys.push(item(svgShape('mr-tide-up') + svgShape('mr-tide-down'), '漲潮／退潮'));
     if (this.variable === 'cur_spd') keys.push(item(svgShape('mr-flow'), '海流流去方向，越大流越快'));
-    if (this.variable === 'ws') keys.push(item('', '箭頭 = 風吹去的方向'));
-    let extra = `<div style="margin-top:6px;font-size:11px;line-height:20px">${keys.join('')}<span style="white-space:nowrap">藍框、藍字 = 海上觀測</span></div>`;
+    let extra = `<div style="margin-top:6px;font-size:11px;line-height:20px">${keys.join('')}</div>`;
     if (this.variable === 'wave_h') {
       const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
       extra = `<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>${extra}`;
     }
-    return html + extra;
+    const note = `藍框、藍字 = 海上觀測（和地面測站區隔）${this.variable === 'ws' ? '；箭頭 = 風吹去的方向' : ''}`;
+    return withInfo(html, note) + extra;
   }
 }
 

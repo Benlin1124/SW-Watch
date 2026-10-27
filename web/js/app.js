@@ -580,6 +580,20 @@ function updateLegend() {
   const parts = [satellite, ecmwf, wind, waves, radar, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
+  syncInfo();
+}
+
+// 色階 ⓘ 說明:點一下打開、再點或點別處關閉;色階重畫(播放時每格)後依說明文字維持打開
+let openInfo = null;
+function syncInfo() {
+  for (const el of $('legend-body').querySelectorAll('.info')) el.classList.toggle('open', el.textContent === openInfo);
+}
+function bindInfo() {
+  const toggle = (el) => { openInfo = el && el.textContent !== openInfo ? el.textContent : null; syncInfo(); };
+  document.addEventListener('click', (e) => toggle(e.target.closest?.('#legend-body .info')));
+  $('legend-body').addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('.info')) { e.preventDefault(); toggle(e.target.closest('.info')); }
+  });
 }
 
 // 色階大小:0.6–2 倍,每次 ±0.1;可收合成只剩標題列
@@ -939,6 +953,7 @@ function bindUI() {
   bindSatUI();
   bindEcmwfUI();
   bindWindUI();
+  bindInfo();
   pairNumbers();
   $('play-range').onchange = () => {
     if (state.playing) stop();

@@ -3,7 +3,7 @@
 // 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大 4 倍做雙線性內插再上色
 import { DATA_BASE_URL } from '../config.js';
 import { getIndex } from '../data.js';
-import { beaufortLegendHTML, legendHTML, SCALES } from '../colormaps.js';
+import { beaufortLegendHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, fmtTW } from '../time.js';
 import { EMPTY_PNG } from './radar.js';
 import { arrowImage } from './stations.js';
@@ -35,6 +35,7 @@ const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(一報 29 個�
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 const latOf = (y) => (Math.atan(Math.exp(y)) * 360) / Math.PI - 90;
+const WAVE_NOTE = '示性波高、尖峰週期：ECMWF 海浪模式（0.1°，近岸與港內沒有值）；箭頭 = 浪前進方向。';
 export const fmtEcInit = (s) => `${s.slice(4, 6)}/${s.slice(6, 8)} ${s.slice(8, 10)}Z`;
 
 function packHex(hex) {
@@ -319,9 +320,9 @@ export class EcmwfLayer {
     const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks);
     if (variable === 'swh') {
       const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
-      return `${html}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m；箭頭 = 浪前進方向</div>`;
+      return `${withInfo(html, WAVE_NOTE)}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>`;
     }
-    return variable === 'pp1d' ? `${html}<div class="legend-labels" style="margin-top:4px">箭頭 = 浪前進方向</div>` : html;
+    return variable === 'pp1d' ? withInfo(html, WAVE_NOTE) : html;
   }
 }
 

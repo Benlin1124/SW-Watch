@@ -31,6 +31,12 @@ export const radarLUT = (spec) => binLUT(spec, DBZ_LEVELS, DBZ_COLORS, { minVisi
 
 /** 分級圖例:數字標在色格交界(該色下界);數字太長放不下時,格子放寬,還是太擠就隔幾個標一個。
  *  有 ticks 時色格縮窄到總寬約 460 px,只標 ticks 裡的值(含最後的上界) */
+/** 色階標題旁的 ⓘ:點了才顯示說明(app.js updateLegend 處理開關;地圖擷取不畫) */
+export const infoHTML = (text) => `<span class="info" tabindex="0" role="button" aria-label="說明" title="說明">i<span class="info-pop">${text}</span></span>`;
+
+/** 在色階 HTML 的第一個標題(legend-title)後面加 ⓘ */
+export const withInfo = (html, text) => html.replace('</div>', `${infoHTML(text)}</div>`);
+
 export function legendHTML(title, levels, colors, from = 1, w = 22, ticks = null) {
   const cols = colors.slice(from), labs = levels.slice(from, colors.length + 1);
   const need = Math.max(...labs.map((v) => String(v).length)) * 6.5 + 6;     // 11px 字一個標籤要的寬度
@@ -226,9 +232,8 @@ export function fogLegendHTML(title) {
   const cells = Array.from({ length: n }, (_, i) => `<span style="width:${w}px;background:${cssOf(fogColor(i + 1, 6))}"></span>`).join('');
   const labels = Array.from({ length: n }, (_, i) => FOG.min + i * FOG.step)
     .map((v, i) => (i % 2 ? '' : `<span style="left:${i * w}px">${v}</span>`)).join('');
-  return `<div class="legend-title">${title}</div><div class="legend-bar">${cells}</div>
-    <div class="legend-labels abs" style="width:${n * w}px">${labels}<span style="left:${n * w}px">°C</span></div>
-    <div class="legend-labels" style="margin-top:4px">底圖 B13 灰階；青色 = 低雲／霧（夜間適用，白天請看 B03）</div>`;
+  return `<div class="legend-title">${title}${infoHTML('底圖 B13 灰階；青色 = 低雲／霧（夜間適用，白天請看 B03）')}</div><div class="legend-bar">${cells}</div>
+    <div class="legend-labels abs" style="width:${n * w}px">${labels}<span style="left:${n * w}px">°C</span></div>`;
 }
 
 /** B13 增強色階圖例:比照 notebook 的 BoundaryNorm 色條,每格等寬,刻度標在格界;太擠的刻度排到第二列 */

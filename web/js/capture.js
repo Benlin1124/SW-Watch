@@ -297,7 +297,8 @@ export class Capture {
       // 比螢幕上小一點(0.7),寬不超過圖寬 35%(直式 60%)、高不超過 30%;網頁上色階的 −/＋ 也會跟著放大縮小
       const frac = this.outW >= bottom ? 0.35 : 0.6;
       const s = Math.min(k * (+zoom || 1) * 0.7, Math.min(W - pad * 2 - 16 * k, this.outW * frac) / bw, (bottom * 0.3) / bh);
-      const img = await toCanvas(body, { pixelRatio: s, skipFonts: true, width: bw, height: bh });
+      const img = await toCanvas(body, { pixelRatio: s, skipFonts: true, width: bw, height: bh,
+        filter: (n) => !n.classList?.contains('info') });          // ⓘ 說明不畫進圖
       const ip = 8 * s, w = bw * s, h = bh * s;
       const x = this.outW - pad - w - ip * 2, y = bottom - h - ip * 2;
       this.drawBox(ctx, x, y, w + ip * 2, h + ip * 2, s);

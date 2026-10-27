@@ -122,6 +122,15 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 #legend.folded #legend-name { display: inline; }
 .st-label { font: 11px/1 var(--font); color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff; pointer-events: none; white-space: nowrap; }
 .legend-title { font-size: 13px; color: var(--fg); margin-bottom: 4px; }
+/* 色階說明 ⓘ:點了才出現(往上、往左展開,避免超出右下角) */
+.info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 6px;
+  vertical-align: 1px; border: 1px solid var(--muted); border-radius: 50%; color: var(--muted); cursor: pointer;
+  font: italic 700 10px/1 Georgia, serif; user-select: none; }
+.info:hover, .info.open { color: var(--fg); border-color: var(--fg); }
+.info-pop { display: none; position: absolute; right: -8px; bottom: calc(100% + 6px); width: 280px; z-index: 10; padding: 6px 9px;
+  background: var(--bg-solid); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: var(--fg); font: 12px/1.6 var(--font); text-align: left; white-space: normal; cursor: auto; }
+.info.open .info-pop { display: block; }
 .legend-bar { display: flex; }
 .legend-bar span { width: 22px; height: 14px; flex-shrink: 0; }
 .legend-labels { display: flex; font-size: 11px; color: var(--muted); margin-top: 2px; }
