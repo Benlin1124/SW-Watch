@@ -104,6 +104,24 @@
         </div>
       </div>
 
+      <div class="layer" data-layer="wind">
+        <label class="layer-head" title="ECMWF 10 m 風預報的流動粒子；ECMWF 開著跟它的時刻，否則跟時間軸（兩個預報時刻之間內插）">
+          <input type="checkbox" id="chk-wind">
+          <span class="layer-name">風場動畫</span>
+          <span class="layer-time" id="time-wind">--</span>
+        </label>
+        <div class="layer-opts">
+          <label>顏色
+            <select id="wind-color">
+              <option value="white">白</option>
+              <option value="black">黑</option>
+              <option value="speed">依風級</option>
+            </select>
+          </label>
+          <label>密度 <input type="range" id="wind-density" min="25" max="300" value="100"></label>
+        </div>
+      </div>
+
       <div class="layer" data-layer="stations">
         <label class="layer-head">
           <input type="checkbox" id="chk-stations" checked>

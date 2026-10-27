@@ -167,6 +167,13 @@ export class Capture {
       box.remove();
     }
 
+    // 1b. 風場動畫:擷取當下畫面上的粒子(螢幕解析度,放大到輸出尺寸)
+    const wc = map.getContainer().querySelector('.wind-canvas');
+    if (wc && wc.style.display !== 'none') {
+      const r = wc.width / mr.width;
+      ctx.drawImage(wc, (fr.left - mr.left) * r, (fr.top - mr.top) * r, fr.width * r, fr.height * r, 0, 0, W, H);
+    }
+
     // 2. HTML 標示(測站數值、颱風名稱與時間):照螢幕上相對擷取框的位置畫,大小乘 k
     for (const el of map.getContainer().querySelectorAll('.maplibregl-marker')) {
       const r = el.getBoundingClientRect();

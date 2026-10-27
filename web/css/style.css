@@ -15,6 +15,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg-solid); color: var(--fg); font: 13px/1.4 var(--font); }
 #map { position: absolute; inset: 0; }
+.wind-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 
 button, select, input { font: inherit; color: inherit; }
 button, select {
