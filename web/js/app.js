@@ -734,6 +734,7 @@ function bindEcmwfUI() {
   const apply = () => { updateLegend(); render(); };
   $('chk-ecmwf').onchange = (e) => { ecmwf.setVisible(e.target.checked); apply(); };
   $('op-ecmwf').oninput = (e) => ecmwf.setOpacity(e.target.value / 100);
+  $('ec-arrows').onchange = (e) => ecmwf.setArrows(e.target.checked);
   $('ec-var').onchange = (e) => { ecmwf.variable = e.target.value; syncEcmwfUI(); apply(); };
   $('ec-rain').onchange = (e) => { ecmwf.rainHours = +e.target.value; apply(); };
   $('ec-init').onchange = (e) => { ecmwf.init = e.target.value; apply(); };

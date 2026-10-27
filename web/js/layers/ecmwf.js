@@ -55,6 +55,7 @@ export class EcmwfLayer {
   variable = 'rain';
   rainHours = 3;
   follow = false;            // 對齊時間軸:預報時刻跟著時間軸 T
+  showArrows = true;         // 風 / 浪的方向箭頭
   shown = null;              // { key, init, step, field, label }
   cache = new Map();         // `${init}/${var}` → Promise<Uint16Array>
   frames = new Map();        // key → Promise<畫好的圖>
@@ -79,7 +80,7 @@ export class EcmwfLayer {
       paint: { 'raster-opacity': this.opacity, 'raster-resampling': 'linear', 'raster-fade-duration': 0 } }, beforeId);
     m.addSource('ecmwf-arrows', { type: 'geojson', data: EMPTY });
     m.addLayer({ id: 'ecmwf-arrows', type: 'symbol', source: 'ecmwf-arrows', layout: {
-      visibility: this.visible ? 'visible' : 'none',
+      visibility: this.visible && this.showArrows ? 'visible' : 'none',
       'icon-image': 'st-arrow', 'icon-rotate': ['get', 'dir'], 'icon-rotation-alignment': 'map',
       'icon-allow-overlap': false, 'icon-padding': 0,
       'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.3, 8, 0.45, 11, 0.6] },
@@ -283,7 +284,13 @@ export class EcmwfLayer {
 
   setVisible(v) {
     this.visible = v;
-    for (const id of ['ecmwf', 'ecmwf-arrows']) this.map.setLayoutProperty(id, 'visibility', v ? 'visible' : 'none');
+    this.map.setLayoutProperty('ecmwf', 'visibility', v ? 'visible' : 'none');
+    this.map.setLayoutProperty('ecmwf-arrows', 'visibility', v && this.showArrows ? 'visible' : 'none');
+  }
+
+  setArrows(on) {
+    this.showArrows = on;
+    this.map.setLayoutProperty('ecmwf-arrows', 'visibility', this.visible && on ? 'visible' : 'none');
   }
 
   setOpacity(v) {
