@@ -21,7 +21,9 @@ import io
 import json
 import math
 import shutil
+import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 
@@ -154,12 +156,20 @@ def load_band(stamp, band, keys, lons, lats, cal):
     from satpy import Scene
     # satpy 依 dask 的 array.chunk-size 切塊;預設一塊約 120 MB(B03 2200×14300),只用到一角也整塊算 → 改小省記憶體
     dask.config.set({"array.chunk-size": "16MiB"})
-    tmp = config.CACHE_DIR / "himawari" / f"{stamp}_{band}"
-    tmp.mkdir(parents=True, exist_ok=True)
+    # 每次呼叫自己一個資料夾:同時有別的程序(另一個排程、手動補抓)做同一時次頻道,結束時的 rmtree 才不會刪到對方的檔
+    root = config.CACHE_DIR / "himawari"
+    root.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=f"{stamp}_{band}_", dir=root))
     local = [str(tmp / k.rsplit("/", 1)[1]) for k in keys]
     try:
         fs().get(keys, local)
-        mb = sum((tmp / k.rsplit("/", 1)[1]).stat().st_size for k in keys) / 1e6
+        for k, f in zip(keys, local):                     # 批次下載偶爾少一個檔卻不報錯 → 逐一補,再缺就放棄這次
+            if not Path(f).exists():
+                log.warning("satellite %s %s 分段沒下載到,重抓 %s", band, stamp, k.rsplit("/", 1)[1])
+                fs().get_file(k, f)
+            if not Path(f).exists():
+                raise RuntimeError(f"分段下載失敗:{k}")
+        mb = sum(Path(f).stat().st_size for f in local) / 1e6
         # mask_space 會為整個分段算經緯度(B03 要好幾 GB);對照表本來就只取地球上的點,不需要
         scn = Scene(reader="ahi_hsd", filenames=local, reader_kwargs={"mask_space": False})
         scn.load([band], calibration=cal)
