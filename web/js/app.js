@@ -627,6 +627,7 @@ function bindStationUI() {
   const apply = async () => {
     const v = STATION_VARS[vSel.value];
     const statSel = $('st-stat'), hSel = $('st-hours');
+    $('st-rain-scale-row').hidden = !v.rain;
     // 過去最大 / 最小:有預先統計的變數;區段累積:雨量
     for (const o of statSel.options) o.disabled = o.value === 'sum' ? !v.rain : o.value !== 'now' && !v.agg;
     if (statSel.selectedOptions[0].disabled) statSel.value = 'now';
@@ -655,6 +656,7 @@ function bindStationUI() {
   $('st-cend').onchange = apply;
   $('st-cend-clear').onclick = () => { $('st-cend').value = ''; apply(); };
   vSel.onchange = apply;
+  $('st-rain-scale').onchange = (e) => { stations.rainScale = e.target.value; stations.applyStyle(); updateLegend(); };
   $('st-stat').onchange = apply;
   $('st-hours').onchange = apply;
   $('op-stations').oninput = (e) => stations.setOpacity(e.target.value / 100);
@@ -743,6 +745,7 @@ function syncEcmwfUI() {
   }
   sel.value = ecmwf.pickedStep ?? ecmwf.step ?? ecmwf.defaultStep(init);
   $('ec-rain').hidden = ecmwf.variable !== 'rain';
+  $('ec-rain-scale-row').hidden = ecmwf.variable !== 'rain';
 }
 
 function bindEcmwfUI() {
@@ -752,6 +755,7 @@ function bindEcmwfUI() {
   $('ec-arrows').onchange = (e) => ecmwf.setArrows(e.target.checked);
   $('ec-var').onchange = (e) => { ecmwf.variable = e.target.value; syncEcmwfUI(); apply(); };
   $('ec-rain').onchange = (e) => { ecmwf.rainHours = +e.target.value; apply(); };
+  $('ec-rain-scale').onchange = (e) => { ecmwf.rainScale = e.target.value; apply(); };
   $('ec-init').onchange = (e) => { ecmwf.init = e.target.value; apply(); };
   $('ec-step').onchange = (e) => { ecmwf.step = +e.target.value; setFollow(false); apply(); };
   const move = (d) => {

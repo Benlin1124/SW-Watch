@@ -74,6 +74,7 @@ export class StationLayer {
   visible = true;
   opacity = 1;
   variable = 'temp';
+  rainScale = 'rain';       // 雨量色階:rain 小間距 / rainLarge 大間距
   stat = 'now';            // now | max | min | sum(區段累積雨量)
   hours = 1;               // 1–72,或 'custom' 自訂區段
   custom = { start: '', end: '' };   // 自訂區段(UTC stamp);end 空白 = 跟著時間軸
@@ -157,8 +158,11 @@ export class StationLayer {
     m.on('moveend', () => this.drawLabels());
   }
 
+  /** 色階;雨量依面板「間距」選小 / 大間距 */
+  get scale() { return SCALES[this.v.rain ? this.rainScale : this.v.scale]; }
+
   applyStyle() {
-    const color = stepExpr(SCALES[this.v.scale]);
+    const color = stepExpr(this.scale);
     this.map.setPaintProperty('st-pt', 'circle-color', color);
     this.map.setPaintProperty('st-arrow', 'icon-color', color);
     // 雨量 0 畫小灰點(有回報 0 和沒有測站分得出來);其他變數 0 也是正常值
@@ -401,10 +405,10 @@ export class StationLayer {
   }
 
   legend() {
-    const s = SCALES[this.v.scale];
+    const s = this.scale;
     const title = this.customMode ? this.customTitle() : this.aggMode ? `${this.v.name} 過去 ${this.hours} 小時${this.stat === 'max' ? '最大' : '最小'}` : this.v.name;
     if (this.v.scale === 'wind') return beaufortLegendHTML(`測站 ${title}（蒲福風級）`, s.colors);
-    return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks);
+    return legendHTML(`測站 ${title} (${this.v.unit})`, s.levels, s.colors, 0, 22, s.ticks, s.openTop);
   }
 }
 

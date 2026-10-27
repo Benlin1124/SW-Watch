@@ -75,6 +75,12 @@
         </label>
         <div class="layer-opts">
           <label>變數 <select id="st-var"></select></label>
+          <label id="st-rain-scale-row">雨量間距
+            <select id="st-rain-scale">
+              <option value="rain">小間距（0.5–≧300）</option>
+              <option value="rainLarge">大間距（0.5–≧1500）</option>
+            </select>
+          </label>
           <label>顯示
             <select id="st-stat">
               <option value="now">當前值</option>
@@ -181,6 +187,12 @@
               <option value="3">3 小時</option><option value="6">6 小時</option>
               <option value="12">12 小時</option><option value="24">24 小時</option>
               <option value="0">起報後累積</option>
+            </select>
+          </label>
+          <label id="ec-rain-scale-row">雨量間距
+            <select id="ec-rain-scale">
+              <option value="rain">小間距（0.5–≧300）</option>
+              <option value="rainLarge">大間距（0.5–≧1500）</option>
             </select>
           </label>
           <label>初始 <select id="ec-init"></select></label>

@@ -37,10 +37,12 @@ export const infoHTML = (text) => `<span class="info" tabindex="0" role="button"
 /** 在色階 HTML 的第一個標題(legend-title)後面加 ⓘ */
 export const withInfo = (html, text) => html.replace('</div>', `${infoHTML(text)}</div>`);
 
-export function legendHTML(title, levels, colors, from = 1, w = 22, ticks = null) {
-  const cols = colors.slice(from), labs = levels.slice(from, colors.length + 1);
-  const need = Math.max(...labs.map((v) => String(v).length)) * 6.5 + 6;     // 11px 字一個標籤要的寬度
-  w = ticks ? Math.max(6, Math.floor(460 / cols.length)) : Math.max(w, Math.min(need, Math.floor(460 / cols.length)));
+/** openTop:最後一色沒有上界(雨量),最後一個標籤加 ≧ */
+export function legendHTML(title, levels, colors, from = 1, w = 22, ticks = null, openTop = false) {
+  const cols = colors.slice(from), labs = levels.slice(from, colors.length + 1).map((v, i, a) => (openTop && i === a.length - 1 ? `≧${v}` : v));
+  const need = Math.max(...(openTop ? labs.slice(0, -1) : labs).map((v) => String(v).length)) * 6.5 + 6;   // 11px 字一個標籤要的寬度(≧ 那個在最右邊,不算)
+  const max = openTop ? 580 : 460;                                            // 雨量 17 級每格都標,寬一點
+  w = ticks ? Math.max(6, Math.floor(max / cols.length)) : Math.max(w, Math.min(need, Math.floor(max / cols.length)));
   const every = Math.ceil(need / w);
   const show = (v, i) => (ticks ? ticks.includes(v) : i < cols.length && !(i % every));
   const bar = cols.map((c) => `<span style="background:${c};width:${w}px"></span>`).join('');
@@ -87,11 +89,16 @@ export function beaufortLegendHTML(title, colors) {
 
 const range = (a, b, step) => Array.from({ length: Math.round((b - a) / step) + 1 }, (_, i) => +(a + i * step).toFixed(1));
 
+const RAIN_COLORS = ['#c1c2c2', '#9bffff', '#00cfff', '#0198ff', '#0165ff', '#309901', '#32ff00', '#f8ff00', '#ffcb00',
+  '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'];
+
 export const SCALES = {
-  // 氣象署雨量色階(使用者提供):levels[k] = 第 k 色下界,0.5–1 灰、最後一色 ≥ 300;測站與 ECMWF 預報共用
+  // 氣象署雨量色階(使用者提供):levels[k] = 第 k 色下界,0.5 起灰、最後一色開放(≧);測站與 ECMWF 預報共用
+  // rain = 小間距(≧ 300),rainLarge = 大間距(≧ 1500,颱風累積雨量);面板「間距」切換
   rain: { levels: [0.5, 1, 2, 5, 10, 15, 20, 30, 40, 50, 70, 90, 110, 130, 150, 200, 300],
-    colors: ['#c1c2c2', '#9bffff', '#00cfff', '#0198ff', '#0165ff', '#309901', '#32ff00', '#f8ff00', '#ffcb00',
-      '#ff9a00', '#fa0300', '#cc0003', '#a00000', '#98009a', '#c304cc', '#f805f3', '#fecbff'], min: 0.5 },
+    colors: RAIN_COLORS, min: 0.5, openTop: true },
+  rainLarge: { levels: [0.5, 10, 20, 60, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1500],
+    colors: RAIN_COLORS, min: 0.5, openTop: true },
   // 溫度:使用者提供的色階圖取色;0°C 以下每 2 度一色、0–40°C 每 1 度一色,40 以上用最後一色
   temp: { levels: [...range(-14, -2, 2), ...range(0, 40, 1)],
     colors: ['#3c016e', '#5a009e', '#6d00be', '#8200e5', '#9910fe', '#a42dfd', '#bf69fd',

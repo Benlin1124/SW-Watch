@@ -47,6 +47,7 @@ export class EcmwfLayer {
   step = null;               // 預報時距(小時);null = 自動選最接近現在的
   variable = 'rain';
   rainHours = 3;
+  rainScale = 'rain';        // 雨量色階:rain 小間距 / rainLarge 大間距
   follow = false;            // 對齊時間軸:預報時刻跟著時間軸 T
   showArrows = true;         // 風 / 浪的方向箭頭
   shown = null;              // { key, init, step, field, label }
@@ -107,7 +108,7 @@ export class EcmwfLayer {
     if (step == null) return null;
     if (!this.steps.includes(step)) step = this.defaultStep(init);
     this.pickedStep = step;
-    return `${init}|${step}|${this.variable}|${this.rainHours}`;
+    return `${init}|${step}|${this.variable}|${this.rainHours}|${this.rainScale}`;
   }
 
   data(init, v) {
@@ -165,7 +166,7 @@ export class EcmwfLayer {
   }
 
   scale(variable) {
-    if (variable === 'rain') return SCALES.rain;             // 各時段同一套(氣象署,≥ 300 最後一色)
+    if (variable === 'rain') return SCALES[this.rainScale];  // 氣象署色階,面板「間距」切換小 / 大
     if (variable === 't2') return SCALES.temp;
     if (variable === 'msl') return SCALES.pres;
     if (variable === 'swh') return SCALES.wave;
@@ -258,7 +259,7 @@ export class EcmwfLayer {
 
   /** 播放前先把整段畫好(目前的初始、變數),回報進度 */
   async prefetch(onProgress) {
-    const init = this.activeInit, keys = this.steps.map((s) => `${init}|${s}|${this.variable}|${this.rainHours}`);
+    const init = this.activeInit, keys = this.steps.map((s) => `${init}|${s}|${this.variable}|${this.rainHours}|${this.rainScale}`);
     let done = 0;
     for (const k of keys) {
       try { await this.frame(k); } catch { /* 缺檔:播放時跳過 */ }
@@ -306,7 +307,7 @@ export class EcmwfLayer {
     const { variable, sc, label, init, step } = this.shown;
     const title = `ECMWF ${label}（${fmtEcInit(init)} +${step}h）`;
     if (variable === 'wind' || variable === 'gust') return beaufortLegendHTML(`${title}（蒲福風級）`, sc.colors);
-    const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks);
+    const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks, sc.openTop);
     if (variable === 'swh') {
       const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
       return `${withInfo(html, WAVE_NOTE)}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>`;
