@@ -133,7 +133,7 @@ const stations = new StationLayer(map);
 const card = new StationCard(stations, { ec: ecmwf });
 stations.onSelect = (id) => openStation(id, false);
 const marine = new MarineLayer(map);
-const mCard = new MarineCard(marine);
+const mCard = new MarineCard(marine, { ec: ecmwf });
 marine.onSelect = (id) => { card.close(); fcCard.close(); mCard.open(id, state.T); };
 const fcCard = new ForecastCard(ecmwf, map, { onOpen: () => { card.close(); mCard.close(); } });   // onPick 在 bindEcmwfUI 設定
 const LAYERS = [satellite, ecmwf, radar, stations, marine, typhoon, ens];

@@ -6,18 +6,16 @@ import { bfLabel } from './colormaps.js';
 import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
-import { COLORS, pointSeries } from './forecast_card.js';
-import { MODELS } from './layers/ecmwf.js';
+import { FC_HOURS, mergeOverlay, overlayLines } from './forecast_card.js';
 
 const REFETCH_MS = 5 * 60e3;
 const HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 240];
 const hoursLabel = (h) => (h >= 168 ? `${h / 24} 天` : `${h} 小時`);
-const FC_HOURS = { 0: '不疊預報', 24: '預報 1 天', 72: '預報 3 天', 168: '預報 7 天' };
 // 分頁 → 疊加的模式變數(溼度模式沒有);氣壓:測站氣壓 ↔ 模式海平面氣壓換算到測站海拔;雨量:平均每小時雨量畫在 1 小時雨量的軸
 const FC_LINES = {
   temp: [{ v: 't2', label: '' }],
   pres: [{ v: 'pstn', label: '' }],
-  wind: [{ v: 'wind', label: ' 平均風' }, { v: 'gust', label: ' 陣風' }],
+  wind: [{ v: 'wind', label: ' 平均風' }, { v: 'gust', label: ' 陣風', dash: [2, 3] }],
   rain: [{ v: 'rain1', label: ' 每小時', scale: 'r1h' }],
 };
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
@@ -165,9 +163,7 @@ export class StationCard {
     const fcLines = end === latest && this.fcHours && this.ec ? FC_LINES[this.tab] ?? [] : [];
     const fcEnd = fcLines.length ? end + this.fcHours * 3600 : end;
     this.range = [end - H, fcEnd];
-    const fcJobs = fcLines.flatMap((l) => Object.keys(MODELS).map((m) => ({ m, l,
-      p: pointSeries(this.ec, m, l.v, info.lon, info.lat, info.alt ?? 0).catch(() => null) })));
-    const fc = (await Promise.all(fcJobs.map((j) => j.p))).map((s, k) => ({ ...fcJobs[k], s })).filter((j) => j.s?.ys.some((y) => y != null));
+    const fc = fcLines.length ? await overlayLines(this.ec, fcLines, info.lon, info.lat, info.alt ?? 0) : [];
     if (this.id !== id || seq !== this.drawSeq) return;
     const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
     const xs = keep.map((i) => xsAll[i]);
@@ -200,29 +196,9 @@ export class StationCard {
       data.push(keep.map((i) => st[s.key][i]));
       if (!scales[s.scale ?? 'y']) scales[s.scale ?? 'y'] = { auto: true, range: s.bars || s.scale === 'r1h' ? (u, lo, hi) => [0, Math.max(hi, 1)] : undefined };
     }
-    // 預報線:x 和觀測取聯集(預報時刻都在整點,和觀測重疊處不會讓觀測斷開)
-    if (fc.length) {
-      const all = [...new Set([...xs, ...fc.flatMap((j) => j.s.xs.filter((x) => x > end - H && x <= fcEnd))])].sort((a, b) => a - b);
-      const at = new Map(all.map((x, i) => [x, i]));
-      for (let c = 1; c < data.length; c++) {
-        const col = new Array(all.length).fill(null);
-        xs.forEach((x, i) => { col[at.get(x)] = data[c][i]; });
-        data[c] = col;
-      }
-      data[0] = all;
-      for (const { m, l, s } of fc) {
-        const col = new Array(all.length).fill(null);
-        s.xs.forEach((x, k) => { if (at.has(x)) col[at.get(x)] = s.ys[k]; });
-        data.push(col);
-        const unit = tab.series[0].unit, wind = this.tab === 'wind';
-        series.push({
-          label: `${MODELS[m].name}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.v === 'gust' ? [2, 3] : [5, 3],
-          scale: l.scale ?? 'y', spanGaps: true, points: { show: false },
-          paths: l.v === 'rain1' ? uPlot.paths.stepped({ align: -1 }) : undefined,
-          value: (u, v) => (v == null ? '—' : wind ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v.toFixed(1)} ${l.scale ? 'mm/h' : unit}`),
-        });
-      }
-    }
+    const unit = tab.series[0].unit, wind = this.tab === 'wind';
+    mergeOverlay(data, series, fc, end - H, fcEnd,
+      (v, l) => (wind ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v.toFixed(1)} ${l.scale ? 'mm/h' : unit}`));
     axes.push({ ...axisStyle, scale: 'y', label: `${tab.series[0].unit}`, size: 50 });
     if (scales.r1h) axes.push({ ...axisStyle, scale: 'r1h', side: 1, label: '1 小時 mm', grid: { show: false }, size: 50 });
 

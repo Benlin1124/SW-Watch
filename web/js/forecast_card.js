@@ -241,3 +241,38 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
   ys = ys.map((y) => (Number.isNaN(y) ? null : y));
   return { init, xs, ys, coast };
 }
+
+// ── 測站 / 海象資訊卡疊加預報(虛線)──
+export const FC_HOURS = { 0: '不疊預報', 24: '預報 1 天', 72: '預報 3 天', 168: '預報 7 天' };
+
+/** lines [{ v, label, scale?, dash? }] × 各模式最新一報 → 有值的 [{ m, l, s }] */
+export async function overlayLines(ec, lines, lon, lat, alt = 0) {
+  const jobs = lines.flatMap((l) => Object.keys(MODELS).map((m) => ({ m, l, p: pointSeries(ec, m, l.v, lon, lat, alt).catch(() => null) })));
+  return (await Promise.all(jobs.map((j) => j.p))).map((s, k) => ({ ...jobs[k], s })).filter((j) => j.s?.ys.some((y) => y != null));
+}
+
+/** 預報線併進 uPlot 的 data / series:x 和觀測取聯集(只留 from < x ≤ to;預報都在整點,觀測不會斷開)
+ *  fmtValue(v, l) → 圖例的數值文字 */
+export function mergeOverlay(data, series, fc, from, to, fmtValue) {
+  if (!fc.length) return;
+  const xs = data[0];
+  const all = [...new Set([...xs, ...fc.flatMap((j) => j.s.xs.filter((x) => x > from && x <= to))])].sort((a, b) => a - b);
+  const at = new Map(all.map((x, i) => [x, i]));
+  for (let c = 1; c < data.length; c++) {
+    const col = new Array(all.length).fill(null);
+    xs.forEach((x, i) => { col[at.get(x)] = data[c][i]; });
+    data[c] = col;
+  }
+  data[0] = all;
+  for (const { m, l, s } of fc) {
+    const col = new Array(all.length).fill(null);
+    s.xs.forEach((x, k) => { if (at.has(x)) col[at.get(x)] = s.ys[k]; });
+    data.push(col);
+    series.push({
+      label: `${MODELS[m].name}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
+      scale: l.scale ?? 'y', spanGaps: true, points: { show: false },
+      paths: l.v === 'rain1' ? uPlot.paths.stepped({ align: -1 }) : undefined,
+      value: (u, v) => (v == null ? '—' : fmtValue(v, l)),
+    });
+  }
+}

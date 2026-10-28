@@ -5,6 +5,7 @@ import { beaufort, beaufortLegendHTML, bfLabel, legendHTML, SCALES, stepExpr, wi
 import { addMin, diffMin, fmtTW, latestLE } from '../time.js';
 import { arrowImage } from './stations.js';
 import * as prefs from '../prefs.js';
+import { FC_HOURS, mergeOverlay, overlayLines } from '../forecast_card.js';
 
 // dir:方向欄位;flip:資料是「來的方向」(浪、風)→ 箭頭畫成去的方向;海流本來就是流去的方向
 export const MARINE_VARS = {
@@ -413,7 +414,7 @@ const hoursLabel = (h) => (h >= 168 ? `${h / 24} 天` : `${h} 小時`);
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
 const TABS = {
   wave: { name: '浪', series: [{ key: 'wave_h', label: '浪高', unit: 'm', stroke: '#1e88e5', zero: true },
-    { key: 'wave_per', label: '週期', unit: 's', stroke: '#ab47bc', scale: 'per' }] },
+    { key: 'wave_per', label: '週期', unit: 's', stroke: '#f06292', scale: 'per' }] },   // 不用紫色:和 AIFS 預報線分開
   tide: { name: '潮位', series: [{ key: 'tide', label: '潮高', unit: 'm', stroke: '#26a69a' }] },
   wind: { name: '風', series: [{ key: 'ws', label: '風速', unit: 'm/s', stroke: '#26a69a', wind: true },
     { key: 'gust', label: '最大陣風', unit: 'm/s', stroke: '#ffca28', wind: true }] },
@@ -421,6 +422,13 @@ const TABS = {
     { key: 'temp', label: '氣溫', unit: '°C', stroke: '#ff7043' }] },
   cur: { name: '海流', series: [{ key: 'cur_spd', label: '表層流速', unit: 'm/s', stroke: '#5c6bc0', zero: true }] },
   pres: { name: '氣壓', series: [{ key: 'pres', label: '氣壓', unit: 'hPa', stroke: '#ab47bc' }] },
+};
+// 疊加預報(虛線,各模式最新一報、最近格點;浮標近岸沒有海浪值時取外海格點):浪高、風、氣溫、海平面氣壓
+const FC_LINES = {
+  wave: [{ v: 'swh', label: ' 浪高' }],
+  wind: [{ v: 'wind', label: ' 平均風' }, { v: 'gust', label: ' 陣風', dash: [2, 3] }],
+  temp: [{ v: 't2', label: ' 氣溫' }],
+  pres: [{ v: 'msl', label: '' }],
 };
 const VAR_TAB = { wave_h: 'wave', wave_per: 'wave', tide: 'tide', ws: 'wind', gust: 'wind', sst: 'temp', temp: 'temp',
   cur_spd: 'cur', pres: 'pres' };
@@ -434,9 +442,12 @@ export class MarineCard {
   recent = null;             // { at, promise }
   hours = CARD_HOURS.includes(prefs.get('mrCardHours')) ? prefs.get('mrCardHours') : 48;   // 圖表時段
   range = null;              // 圖上的時間範圍 [起, 迄](UTC 秒)
+  fcHours = FC_HOURS[prefs.get('mrCardFc')] ? prefs.get('mrCardFc') : 72;   // 疊加預報幾小時(0 = 不疊)
+  drawSeq = 0;
 
-  constructor(layer) {
+  constructor(layer, { ec } = {}) {
     this.layer = layer;
+    this.ec = ec;              // 模式預報圖層
     this.el.querySelector('#mc-close').onclick = () => this.close();
     const tabs = this.el.querySelector('.sc-tabs');
     tabs.innerHTML = Object.entries(TABS).map(([k, t]) => `<button data-tab="${k}">${t.name}</button>`).join('');
@@ -448,6 +459,12 @@ export class MarineCard {
     hSel.value = this.hours;
     hSel.onchange = () => { this.hours = +hSel.value; prefs.set('mrCardHours', this.hours); this.drawChart(); };
     tabs.appendChild(hSel);
+    const fSel = document.createElement('select');
+    fSel.title = '疊加模式預報（虛線）：各模式最新一報在這個站位置的預報';
+    fSel.innerHTML = Object.entries(FC_HOURS).map(([h, name]) => `<option value="${h}">${name}</option>`).join('');
+    fSel.value = this.fcHours;
+    fSel.onchange = () => { this.fcHours = +fSel.value; prefs.set('mrCardFc', this.fcHours); this.drawChart(); };
+    tabs.appendChild(fSel);
   }
 
   series() {
@@ -495,6 +512,7 @@ export class MarineCard {
   }
 
   async drawChart() {
+    const seq = ++this.drawSeq;
     const box = this.el.querySelector('#mc-chart'), note = this.el.querySelector('#mc-note'), id = this.id;
     let d;
     try {
@@ -527,11 +545,21 @@ export class MarineCard {
     const t0 = toSec(d.start), xsAll = Array.from({ length: d.n }, (_, i) => t0 + i * d.step * 60);
     const H = this.hours * 3600, latest = toSec(d.time), T = this.T && toSec(this.T);
     const end = T && T <= latest - H ? Math.min(latest, T + H / 2) : latest;
-    this.range = [end - H, end];
+    // 疊加預報:只在看最新時段時;圖往後延伸 fcHours
+    const fcLines = end === latest && this.fcHours && this.ec ? FC_LINES[this.tab] ?? [] : [];
+    const fcEnd = fcLines.length ? end + this.fcHours * 3600 : end;
+    this.range = [end - H, fcEnd];
+    const info = this.layer.all.get(id);
+    const fc = fcLines.length ? await overlayLines(this.ec, fcLines, info.lon, info.lat) : [];
+    if (this.id !== id || seq !== this.drawSeq) return;
     const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
     const xs = keep.map((i) => xsAll[i]);
     const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end))}`;
-    note.textContent = `${hoursLabel(this.hours)}（${endTxt}），每小時一筆；斷開處為缺漏` + (xs.length < this.hours ? '；較早的資料已過保留期限' : '');
+    const coast = fc.some((j) => j.s.coast);
+    const fcNote = !fcLines.length ? (end !== latest && this.fcHours ? '；看過去時段不疊預報' : this.fcHours && !FC_LINES[this.tab] ? '；模式沒有這一項' : '')
+      : !fc.length ? '；這裡沒有模式預報'
+        : `；虛線 = 模式預報（各模式最新一報、最近格點${coast ? '；近岸沒有海浪值，取最近的外海格點' : ''}${this.tab === 'pres' ? '；海平面氣壓' : ''}）`;
+    note.textContent = `${hoursLabel(this.hours)}（${endTxt}），每小時一筆；斷開處為缺漏` + (xs.length < this.hours ? '；較早的資料已過保留期限' : '') + fcNote;
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };
     const tick = (t) => { const s = fmtTW(stampOf(t), 'dh'); return s.endsWith('00時') ? s.replace('00時', '') : s.replace(/^\d+日/, ''); };
@@ -544,6 +572,9 @@ export class MarineCard {
       // 浪高、流速從 0 起畫(浪高至少到 3 m,看得到小浪、中浪分界)
       scales[s.scale ?? 'y'] ??= s.zero ? { auto: true, range: (u, lo, hi) => [0, Math.max(hi * 1.1, s.key === 'wave_h' ? 3 : 0.5)] } : { auto: true };
     }
+    const wind = this.tab === 'wind';
+    mergeOverlay(data, series, fc, end - H, fcEnd, (v) => (wind ? `${v.toFixed(1)}（${bfLabel(v)}級）`
+      : this.tab === 'wave' && waveClass(v) ? `${v.toFixed(1)} m（${waveClass(v)}）` : `${v.toFixed(1)} ${used[0].unit}`));
     axes.push({ ...axisStyle, scale: 'y', label: used[0].scale ? '' : used[0].unit, size: 50 });
     if (scales.per) axes.push({ ...axisStyle, scale: 'per', side: 1, label: '週期 s', grid: { show: false }, size: 45 });
     const cardT = () => this.T, waveTab = this.tab === 'wave';
