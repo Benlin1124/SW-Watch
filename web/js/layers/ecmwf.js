@@ -1,8 +1,10 @@
 // ECMWF IFS 預報(台灣附近,pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風、浪高、尖峰週期
 // 每個起報、每個變數一個檔(全部預報時刻);換時刻不用再下載。
 // 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大 4 倍做雙線性內插再上色
+// 海浪(浪高、週期、波向):陸地沒值 → 往陸地外推 FILL_ITERS 格,畫完再用底圖陸地挖掉(海岸不再是方塊鋸齒)
 import { DATA_BASE_URL } from '../config.js';
 import { getIndex } from '../data.js';
+import { landMask } from '../land.js';
 import { beaufortLegendHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, fmtTW } from '../time.js';
 import { EMPTY_PNG } from './radar.js';
@@ -27,7 +29,10 @@ const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(一報 29 個�
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 const latOf = (y) => (Math.atan(Math.exp(y)) * 360) / Math.PI - 90;
-const WAVE_NOTE = '示性波高、尖峰週期：ECMWF 海浪模式（0.1°，近岸與港內沒有值）；箭頭 = 浪前進方向。';
+const WAVE_VARS = new Set(['swh', 'mwd', 'pp1d']);
+const FILL_ITERS = 3;              // 海浪往陸地外推幾格(0.1° 一格)
+const WAVE_NOTE = '示性波高、尖峰週期：ECMWF 海浪模式（0.1°）；箭頭 = 浪前進方向。模式在近岸約 10 公里內沒有值，'
+  + '這段用外海的值往岸邊外推、再依底圖海岸線裁切，只是讓圖連到海岸，不是真的近岸浪況（點擊查值會標「近岸外推」）。港內、海灣沒有值。';
 export const fmtEcInit = (s) => `${s.slice(4, 6)}/${s.slice(6, 8)} ${s.slice(8, 10)}Z`;
 
 function packHex(hex) {
@@ -53,6 +58,8 @@ export class EcmwfLayer {
   shown = null;              // { key, init, step, field, label }
   cache = new Map();         // `${init}/${var}` → Promise<Uint16Array>
   frames = new Map();        // key → Promise<畫好的圖>
+  land = null;               // 陸地遮罩(land.js);載入失敗 → null,海浪照原本方塊邊緣畫
+  coast = null;              // 外推出來的格(Uint8Array,1 = 近岸外推)
 
   constructor(map) { this.map = map; }
 
@@ -64,6 +71,8 @@ export class EcmwfLayer {
 
   async load() {
     this.index = await getIndex(this.path);
+    const g = this.index.grid;
+    this.land = await landMask(g.west, g.south, g.east, g.north).catch((e) => { console.warn('陸地遮罩載入失敗', e); return null; });
   }
 
   addTo(beforeId) {
@@ -134,7 +143,47 @@ export class EcmwfLayer {
       const r = raw[k * n + i];
       out[i] = r === spec.nodata ? NaN : r * spec.scale + spec.offset;
     }
+    if (WAVE_VARS.has(v)) this.fillCoast(out, v === 'mwd');
     return out;
+  }
+
+  /** 海浪往陸地外推:無值的格取周圍 8 格有值的平均,重複 FILL_ITERS 次;波向(circ)用單位向量平均 */
+  fillCoast(a, circ) {
+    const { nx, ny } = this.index.grid;
+    const parts = circ ? [a.map((d) => Math.sin((d * Math.PI) / 180)), a.map((d) => Math.cos((d * Math.PI) / 180))] : [a];
+    const filled = new Uint8Array(a.length);
+    for (let it = 0; it < FILL_ITERS; it++) {
+      const add = [];
+      for (let y = 0; y < ny; y++) {
+        for (let x = 0; x < nx; x++) {
+          const i = y * nx + x;
+          if (!Number.isNaN(parts[0][i])) continue;
+          const sum = parts.map(() => 0);
+          let n = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const xx = x + dx, yy = y + dy, j = yy * nx + xx;
+              if (xx < 0 || yy < 0 || xx >= nx || yy >= ny || Number.isNaN(parts[0][j])) continue;
+              parts.forEach((p, k) => { sum[k] += p[j]; });
+              n++;
+            }
+          }
+          if (n) add.push([i, sum.map((s) => s / n)]);
+        }
+      }
+      if (!add.length) break;
+      for (const [i, m] of add) { parts.forEach((p, k) => { p[i] = m[k]; }); filled[i] = 1; }
+    }
+    if (circ) for (let i = 0; i < a.length; i++) if (filled[i]) a[i] = ((Math.atan2(parts[0][i], parts[1][i]) * 180) / Math.PI + 360) % 360;
+    this.coast = filled;                    // 陸地格固定,每個變數、每個時刻都一樣
+  }
+
+  /** 經緯度落在外推格(近岸外推)上 */
+  coastAt(lon, lat) {
+    const g = this.index?.grid;
+    if (!this.coast || !g) return false;
+    const ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
+    return ix >= 0 && iy >= 0 && ix < g.nx && iy < g.ny && this.coast[iy * g.nx + ix] === 1;
   }
 
   /** 目前選的變數在第 step 小時的場;回傳 { field, u, v, label } */
@@ -174,7 +223,7 @@ export class EcmwfLayer {
     return SCALES.wind;
   }
 
-  async render(f, sc) {
+  async render(f, sc, mask = false) {
     const g = this.index.grid, W = g.nx * UP, H = g.ny * UP;
     const packed = sc.colors.map(packHex);
     const color = (x) => {
@@ -200,17 +249,24 @@ export class EcmwfLayer {
       }
     }
     ctx.putImageData(img, 0, 0);
+    if (mask && this.land) {                  // 挖掉陸地(和底圖海岸線同一份)
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = '#000';
+      this.land.fill(ctx, (lon) => ((lon - g.west) / (g.east - g.west)) * W, (lat) => ((yN - mercY(lat)) / (yN - yS)) * H);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
     return URL.createObjectURL(blob);
   }
 
-  arrows(u, v) {
-    const g = this.index.grid, features = [];
+  arrows(u, v, mask = false) {
+    const g = this.index.grid, features = [], land = mask ? this.land : null;
     for (let y = 0; y < g.ny; y += ARROW_EVERY) {
       for (let x = 0; x < g.nx; x += ARROW_EVERY) {
         const i = y * g.nx + x, uu = u[i], vv = v[i];
-        if (Number.isNaN(uu) || Number.isNaN(vv)) continue;
-        features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [g.lon0 + x * g.dx, g.lat0 + y * g.dy] },
+        const lon = g.lon0 + x * g.dx, lat = g.lat0 + y * g.dy;
+        if (Number.isNaN(uu) || Number.isNaN(vv) || land?.isLand(lon, lat)) continue;
+        features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] },
           properties: { dir: (Math.atan2(uu, vv) * 180) / Math.PI, ws: Math.hypot(uu, vv) } });   // 風吹向的方向
       }
     }
@@ -241,9 +297,9 @@ export class EcmwfLayer {
       const [init, s, variable, rh] = key.split('|'), step = +s;
       const p = (async () => {
         const r = await this.field(init, step, variable, +rh);
-        const sc = this.scale(variable);
-        return { init, step, variable, field: r.field, label: r.label, sc, url: await this.render(r.field, sc),
-          arrows: r.u ? this.arrows(r.u, r.v) : EMPTY };
+        const sc = this.scale(variable), mask = WAVE_VARS.has(variable);
+        return { init, step, variable, field: r.field, label: r.label, sc, url: await this.render(r.field, sc, mask),
+          arrows: r.u ? this.arrows(r.u, r.v, mask) : EMPTY };
       })();
       p.catch(() => this.frames.delete(key));
       this.frames.set(key, p);
@@ -295,11 +351,12 @@ export class EcmwfLayer {
     const g = this.index.grid;
     const ix = Math.round((lng - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
     if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
-    const x = this.shown.field[iy * g.nx + ix];
-    if (Number.isNaN(x)) return null;
-    const v = this.shown.variable, unit = EC_VARS[v].unit;
+    const x = this.shown.field[iy * g.nx + ix], v = this.shown.variable, wave = WAVE_VARS.has(v);
+    if (Number.isNaN(x) || (wave && this.land?.isLand(lng, lat))) return null;
+    const unit = EC_VARS[v].unit;
     const cls = v === 'swh' && waveClass(x) ? `（${waveClass(x)}）` : '';
-    return `ECMWF ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}`;
+    const ext = wave && this.coastAt(lng, lat) ? '（近岸外推）' : '';
+    return `ECMWF ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}${ext}`;
   }
 
   legend() {

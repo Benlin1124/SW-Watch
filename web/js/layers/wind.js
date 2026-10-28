@@ -4,7 +4,8 @@
 // 每種一張 canvas,在地圖之上、不接滑鼠事件。粒子用螢幕座標的速度移動(和縮放無關)。
 //   風(kind wind):10 m 風 u10 / v10,粒子留尾跡、逐格淡出。
 //   浪(kind wave):浪前進方向(mwd 來向轉 180°),畫成往前凸的波峰弧線,不留尾跡、淡入淡出;
-//     弧長隨浪高(swh)、速度隨尖峰週期(pp1d,深水波速和週期成正比)。陸地無資料 → 不畫。
+//     弧長隨浪高(swh)、速度隨尖峰週期(pp1d,深水波速和週期成正比)。近岸用 ECMWF 圖層外推的值,
+//     碰到底圖陸地(land.js)才消失 → 浪峰一路走到海岸線。
 import { beaufort, beaufortLegendHTML, infoHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, diffMin, fmtTW, nowStamp } from '../time.js';
 import { fmtEcInit } from './ecmwf.js';
@@ -157,6 +158,7 @@ export class WindLayer {
     if (!f || !g) return null;
     const fx = (lon - g.lon0) / g.dx, fy = (lat - g.lat0) / g.dy;
     if (fx < 0 || fy < 0 || fx > g.nx - 1 || fy > g.ny - 1) return null;
+    if (this.kind === 'wave' && this.ec.land?.isLand(lon, lat)) return null;
     const x0 = Math.min(Math.floor(fx), g.nx - 2), y0 = Math.min(Math.floor(fy), g.ny - 2), tx = fx - x0, ty = fy - y0;
     const i = y0 * g.nx + x0, j = i + g.nx, out = {};
     for (const [name, a] of Object.entries(f)) {
@@ -180,7 +182,8 @@ export class WindLayer {
     if (!s) return null;
     if (this.kind === 'wind') return `風場 ${dirName(-s.u, -s.v)}風 ${Math.hypot(s.u, s.v).toFixed(1)} m/s`;
     const c = waveClass(s.h);
-    return `海浪 ${s.h.toFixed(1)} m${c ? `（${c}）` : ''} 來自${dirName(-s.x, -s.y)} ${s.t.toFixed(1)} s`;
+    const ext = this.ec.coastAt(lng, lat) ? '（近岸外推）' : '';
+    return `海浪 ${s.h.toFixed(1)} m${c ? `（${c}）` : ''} 來自${dirName(-s.x, -s.y)} ${s.t.toFixed(1)} s${ext}`;
   }
 
   // ── 粒子 ──
