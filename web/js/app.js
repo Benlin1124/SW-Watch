@@ -721,11 +721,12 @@ function bindSatUI() {
   $('op-satellite').oninput = (e) => satellite.setOpacity(e.target.value / 100);
 }
 
-// ── ECMWF 預報 ──
+// ── 模式預報(ECMWF / 氣象署 3 km)──
 const ecStepLabel = (init, s) => `${fmtTW(ecmwf.validOf(init, s))}（+${s}h）`;
 
 /** 初始時間、預報時刻選單(資料更新時重建) */
 function fillEcmwfPanel() {
+  for (const o of $('ec-model').options) o.disabled = !ecmwf.idx(o.value);   // 沒資料的模式不能選
   if (!ecmwf.index) return;
   const iSel = $('ec-init'), init = ecmwf.activeInit;
   iSel.innerHTML = ecmwf.inits.map((i) => `<option value="${i}">${fmtEcInit(i)}</option>`).join('');
@@ -744,6 +745,13 @@ function syncEcmwfUI() {
     sel.dataset.init = init;
   }
   sel.value = ecmwf.pickedStep ?? ecmwf.step ?? ecmwf.defaultStep(init);
+  $('ec-model').value = ecmwf.model;
+  for (const o of $('ec-var').options) o.hidden = o.disabled = !ecmwf.vars.includes(o.value);   // 3 km 沒有陣風、海浪
+  $('ec-var').value = ecmwf.variable;
+  const minStep = ecmwf.steps[1] - ecmwf.steps[0];            // 雨量時段不能比預報間隔短(3 km 沒有 3 小時)
+  for (const o of $('ec-rain').options) o.hidden = o.disabled = +o.value > 0 && +o.value < minStep;
+  if (ecmwf.rainHours > 0 && ecmwf.rainHours < minStep) ecmwf.rainHours = minStep;
+  $('ec-rain').value = ecmwf.rainHours;
   $('ec-rain').hidden = ecmwf.variable !== 'rain';
   $('ec-rain-scale-row').hidden = ecmwf.variable !== 'rain';
 }
@@ -753,6 +761,12 @@ function bindEcmwfUI() {
   $('chk-ecmwf').onchange = (e) => { ecmwf.setVisible(e.target.checked); apply(); };
   $('op-ecmwf').oninput = (e) => ecmwf.setOpacity(e.target.value / 100);
   $('ec-arrows').onchange = (e) => ecmwf.setArrows(e.target.checked);
+  $('ec-model').onchange = (e) => {
+    if (!ecmwf.idx(e.target.value)) { e.target.value = ecmwf.model; return; }
+    ecmwf.setModel(e.target.value);
+    fillEcmwfPanel();
+    apply();
+  };
   $('ec-var').onchange = (e) => { ecmwf.variable = e.target.value; syncEcmwfUI(); apply(); };
   $('ec-rain').onchange = (e) => { ecmwf.rainHours = +e.target.value; apply(); };
   $('ec-rain-scale').onchange = (e) => { ecmwf.rainScale = e.target.value; apply(); };
@@ -790,7 +804,7 @@ function bindEcmwfUI() {
     playing = true;
     setFollow(false);
     $('ec-play').classList.add('on');
-    await ecmwf.prefetch((d, n) => toast(`載入 ECMWF ${d}/${n}`, d === n ? 600 : 0));
+    await ecmwf.prefetch((d, n) => toast(`載入${ecmwf.name} ${d}/${n}`, d === n ? 600 : 0));
     const st = ecmwf.steps;
     const tick = async () => {
       if (!playing) return;
@@ -802,7 +816,7 @@ function bindEcmwfUI() {
     };
     tick();
   };
-  for (const id of ['ec-var', 'ec-rain', 'ec-init', 'ec-step', 'chk-ecmwf']) $(id).addEventListener('change', ecPause);
+  for (const id of ['ec-model', 'ec-var', 'ec-rain', 'ec-init', 'ec-step', 'chk-ecmwf']) $(id).addEventListener('change', ecPause);
 }
 
 function bindWindUI() {

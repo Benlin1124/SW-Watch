@@ -169,10 +169,16 @@
       <div class="layer" data-layer="ecmwf">
         <label class="layer-head">
           <input type="checkbox" id="chk-ecmwf">
-          <span class="layer-name">ECMWF 預報</span>
+          <span class="layer-name">模式預報</span>
           <span class="layer-time" id="time-ecmwf">--</span>
         </label>
         <div class="layer-opts">
+          <label title="ECMWF 0.1°（約 10 km）每 3 小時，有陣風、海浪；氣象署 WRF 3 km 每 6 小時，地形細">模式
+            <select id="ec-model">
+              <option value="ecmwf">ECMWF（0.1°，每 3 小時）</option>
+              <option value="wrf">氣象署 WRF 3 km（每 6 小時）</option>
+            </select>
+          </label>
           <label>變數
             <select id="ec-var">
               <option value="rain">降雨</option>
@@ -214,7 +220,7 @@
       </div>
 
       <div class="layer" data-layer="wind">
-        <label class="layer-head" title="ECMWF 10 m 風預報的流動粒子；ECMWF 開著跟它的時刻，否則跟時間軸（兩個預報時刻之間內插）">
+        <label class="layer-head" title="模式預報（ECMWF 或氣象署 3 km，跟著模式預報選的模式）10 m 風的流動粒子；模式預報開著跟它的時刻，否則跟時間軸（兩個預報時刻之間內插）">
           <input type="checkbox" id="chk-wind">
           <span class="layer-name">風場動畫</span>
           <span class="layer-time" id="time-wind">--</span>

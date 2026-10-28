@@ -1025,3 +1025,13 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 新增 web/js/land.js:載入 land.json、只留範圍內多邊形(590 個),各自 evenodd 填色;另畫一張 0.01° 點陣給 isLand() 查表。
 - 陸地上不畫箭頭、點擊不顯示值;外推格點擊顯示「近岸外推」;海浪動畫碰到底圖陸地才消失,浪峰走到海岸線。ⓘ 說明寫明外推只是讓圖連到海岸,不是近岸實際浪況。
 - land.json 載入失敗時照舊(方塊邊緣)。
+## 2026-10-28 氣象署 WRF 3 km 加入模式預報
+- 使用者要評估氣象署 3 km 並加入,只抓降雨、溫度、風 u/v、海平面氣壓 5 欄。
+- 資料:開放資料 M-A0064-000…084(每 6 小時,15 檔)。fileapi 只接受 format=JSON,json 裡寫 S3 固定網址 Model/M-A0064-xxx.grb2;直接讀 S3(公開、不計會員次數)。每檔約 180 MB、78 欄(11 層高空 + 地面),grid_simple 24 bit,Lambert(LoV 120、Latin 10/40)1158×673、3 km。S3 只留最新一報、逐檔覆蓋(18Z 報 +0h 約 4.9 小時、+84h 約 6.1 小時上架)。
+- 實測:tp 的 stepRange 是 0-6、0-84(起報後累積,不用自己加總);風 uvRelativeToGrid = 0(地理方向);沒有陣風、回波、雲量。
+- pipeline/fetch_wrf.py:15 個 json 起報時間都相同才算整報上完;每檔依序 Range 讀每欄開頭 512 byte(第 0–4 段)認欄位(discipline / category / number / 層面類型 / 層值),8 檔同時讀;只下載 5 欄(約 2.3 MB/欄),一報約 175 MB、本機實測 28 秒。下載期間發現檔案已換下一報 → 丟錯下次再試。
+- 內插:pyproj lcc 算 0.03° 經緯度點在 Lambert 網格的位置,雙線性;用 ecCodes 經緯度驗證誤差 < 2e-5°。範圍同 ECMWF(501×368),5 欄共約 12 MB/報。
+- ecCodes 第一次載入定義檔不是執行緒安全(多執行緒同時解碼 → flex scanner 錯誤),解碼加鎖、下載仍並行。
+- 排程每 10 分檢查(:06…:56)+ 啟動時一次;cleanup 跳過 wrf,改用 fetch_ecmwf.cleanup(layer) 依 ECMWF_KEEP_DAYS 刪。
+- 網頁:ECMWF 圖層改名「模式預報」,加「模式」選單(ECMWF / 氣象署 WRF 3 km,沒資料的不能選)。EcmwfLayer 改成多模式(indexes、idx(m)、stepsOf / initsOf、cache 與畫好的圖 key 含模式);3 km 隱藏陣風、浪高、尖峰週期與 3 小時雨量(雨量時段起點取之前最近的時刻)。畫圖放大倍數依格距(約 0.0125°/像素:ECMWF 8 倍、3 km 2 倍),箭頭約 0.1° 一個。
+- 風場動畫跟著選的模式(圖層顯示另一個模式時對齊它的時間);海浪動畫固定 ECMWF。

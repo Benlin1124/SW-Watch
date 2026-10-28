@@ -237,11 +237,11 @@ def run(now=None):
     return "same", prev, prev
 
 
-def cleanup():
-    """刪除超過保留天數的起報(本機與 R2)。"""
+def cleanup(layer=LAYER, name="ECMWF"):
+    """刪除超過保留天數的起報(本機與 R2);氣象署 WRF(fetch_wrf)同格式、同保留天數,也用這個。"""
     cutoff = stamp_of(datetime.now(timezone.utc) - timedelta(days=config.ECMWF_KEEP_DAYS))
-    d = layer_dir(LAYER)
-    idx = read_index(LAYER)
+    d = layer_dir(layer)
+    idx = read_index(layer)
     drop = [t for t in idx["times"] if t < cutoff]
     for t in drop:
         for f in (d / t).glob("*"):
@@ -252,7 +252,7 @@ def cleanup():
         idx["latest"] = idx["times"][-1] if idx["times"] else None
         idx["fetched"] = {t: v for t, v in idx.get("fetched", {}).items() if t not in drop}
         save_json(d / "index.json", idx)
-        log.info("ECMWF 清除 %d 報", len(drop))
+        log.info("%s 清除 %d 報", name, len(drop))
 
 
 if __name__ == "__main__":

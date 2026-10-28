@@ -16,7 +16,7 @@ from logging.handlers import TimedRotatingFileHandler
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from . import (cleanup, config, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
-               fetch_stations, fetch_typhoon, r2)
+               fetch_stations, fetch_typhoon, fetch_wrf, r2)
 from .common import read_status, record_status, stamp_dt
 
 log = logging.getLogger("pipeline")
@@ -146,6 +146,25 @@ def safe_ecmwf():
         _ecmwf_lock.release()
 
 
+_wrf_lock = threading.Lock()
+
+
+def safe_wrf():
+    """氣象署 WRF 3 km:每 10 分檢查 S3 上 15 個時刻檔是否都換成新的一報(起報後約 5–6 小時);一報約 175 MB、半分鐘。
+    S3 只留最新一報,漏抓就補不回來,所以檢查頻率不能太低。"""
+    if not _wrf_lock.acquire(blocking=False):
+        return
+    try:
+        status, stamp, prev = fetch_wrf.run()
+        if status == "new":
+            record_status("wrf", status, stamp, prev)
+    except Exception as e:
+        log.exception("wrf 失敗")
+        record_status("wrf", "error", error=f"{type(e).__name__}: {e}")
+    finally:
+        _wrf_lock.release()
+
+
 def safe_r2_flush():
     try:
         n, d = r2.flush()
@@ -189,6 +208,8 @@ def main():
     sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
     sched.add_job(safe_ecmwf, "cron", minute="4,14,24,34,44,54", id="ecmwf", max_instances=1, coalesce=True)
     sched.add_job(safe_ecmwf, "date", run_date=datetime.now(timezone.utc), id="ecmwf_start")
+    sched.add_job(safe_wrf, "cron", minute="6,16,26,36,46,56", id="wrf", max_instances=1, coalesce=True)
+    sched.add_job(safe_wrf, "date", run_date=datetime.now(timezone.utc), id="wrf_start")
     sched.add_job(safe_satellite, "cron", minute="*", id="satellite", max_instances=1, coalesce=True,
                   misfire_grace_time=50)
     if r2.enabled():

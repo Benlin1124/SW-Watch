@@ -1,6 +1,7 @@
-// 風場 / 海浪動畫(設計log「風場動畫」「海浪動畫」):ECMWF 預報驅動的流動粒子,疊在所有圖層上
-// 不用新資料:直接讀 ECMWF 圖層的檔。時間:ECMWF 圖層開著 → 跟它顯示的時刻;沒開 → 跟時間軸 T,
-// 取 T 之前最近一報、在前後兩個預報時刻(每 3 小時)之間線性內插,播放時平順變化。
+// 風場 / 海浪動畫(設計log「風場動畫」「海浪動畫」):模式預報驅動的流動粒子,疊在所有圖層上
+// 不用新資料:直接讀模式預報圖層的檔。風跟著圖層選的模式(ECMWF / 氣象署 3 km),浪只有 ECMWF。
+// 時間:圖層開著 → 跟它顯示的時刻(另一個模式就對齊同一個時間);沒開 → 跟時間軸 T,
+// 取 T 之前最近一報、在前後兩個預報時刻(ECMWF 每 3 小時、3 km 每 6 小時)之間線性內插,播放時平順變化。
 // 每種一張 canvas,在地圖之上、不接滑鼠事件。粒子用螢幕座標的速度移動(和縮放無關)。
 //   風(kind wind):10 m 風 u10 / v10,粒子留尾跡、逐格淡出。
 //   浪(kind wave):浪前進方向(mwd 來向轉 180°),畫成往前凸的波峰弧線,不留尾跡、淡入淡出;
@@ -8,7 +9,7 @@
 //     碰到底圖陸地(land.js)才消失 → 浪峰一路走到海岸線。
 import { beaufort, beaufortLegendHTML, infoHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, diffMin, fmtTW, nowStamp } from '../time.js';
-import { fmtEcInit } from './ecmwf.js';
+import { fmtEcInit, MODELS } from './ecmwf.js';
 import { waveClass } from './marine.js';
 
 const KINDS = {
@@ -30,7 +31,7 @@ const MAX_N = 6000;
 const SLICES_MAX = 8;
 const COLORS = { white: 'rgba(255,255,255,0.9)', black: 'rgba(25,25,25,0.85)' };
 const ALPHAS = [0.25, 0.5, 0.75, 1];          // 浪:淡入淡出分 4 級(同級一起畫)
-const TIME_NOTE = 'ECMWF 圖層開著時跟它的預報時刻；沒開時跟時間軸，在前後兩個預報時刻（每 3 小時）之間內插。這是預報，不是觀測。';
+const TIME_NOTE = '模式預報圖層開著時跟它的預報時刻；沒開時跟時間軸，在前後兩個預報時刻之間內插。這是預報，不是觀測。';
 const DIRS = ['北', '北北東', '東北', '東北東', '東', '東南東', '東南', '南南東', '南', '南南西', '西南', '西南西', '西', '西北西', '西北', '北北西'];
 const dirName = (x, y) => DIRS[Math.round((((Math.atan2(x, y) * 180) / Math.PI + 360) % 360) / 22.5) % 16];
 const levelOf = (levels, x) => { let i = 0; while (i + 1 < levels.length && x >= levels[i + 1]) i++; return i; };
@@ -41,7 +42,7 @@ export class WindLayer {
   density = 1;
   f = null;                  // 目前顯示的場(已內插):風 { u, v };浪 { x, y, t, h }(x、y = 浪前進方向單位向量)
   shown = null;              // { key, init, hours, exact }
-  slices = new Map();        // `${init}/${k}` → Promise<場>
+  slices = new Map();        // `${模式}/${init}/${k}` → Promise<場>
   particles = [];
 
   constructor(map, ecmwf, kind = 'wind') {
@@ -52,7 +53,8 @@ export class WindLayer {
     this.K = KINDS[kind];
   }
 
-  get index() { return this.ec.index; }
+  get model() { return this.kind === 'wave' ? 'ecmwf' : this.ec.model; }
+  get index() { return this.ec.idx(this.model); }
 
   addTo() {
     const m = this.map, cv = document.createElement('canvas');
@@ -85,13 +87,16 @@ export class WindLayer {
   setDensity(d) { this.density = d; this.reseed(); }
 
   // ── 時間 ──
-  /** 要顯示的起報與預報小時;ECMWF 開著就跟它,否則跟時間軸(不同步時用現在) */
+  /** 要顯示的起報與預報小時;模式預報開著就跟它,否則跟時間軸(不同步時用現在) */
   target(T) {
-    const ec = this.ec, steps = ec.steps;
-    if (!ec.index || !steps.length) return null;
-    if (ec.visible && ec.shown) return { init: ec.shown.init, hours: ec.shown.step };
+    const ec = this.ec, m = this.model, steps = ec.stepsOf(m);
+    if (!ec.idx(m) || !steps.length) return null;
+    if (ec.visible && ec.shown) {
+      if (ec.shown.model === m) return { init: ec.shown.init, hours: ec.shown.step };
+      T = ec.validOf(ec.shown.init, ec.shown.step);           // 圖層顯示另一個模式:對齊它的時間
+    }
     T = T ?? nowStamp();
-    const inits = ec.inits;                                    // 新 → 舊
+    const inits = ec.initsOf(m);                               // 新 → 舊
     const init = inits.find((i) => i <= T) ?? inits[inits.length - 1];
     if (!init) return null;
     const h = Math.min(Math.max(diffMin(T, init) / 60, steps[0]), steps[steps.length - 1]);
@@ -99,10 +104,10 @@ export class WindLayer {
   }
 
   /** 第 k 步的場;浪的方向先轉成單位向量,內插才不會在 0° / 360° 出錯 */
-  slice(init, k) {
-    const key = `${init}/${k}`;
+  slice(m, init, k) {
+    const key = `${m}/${init}/${k}`;
     if (!this.slices.has(key)) {
-      const p = Promise.all(this.K.vars.map((v) => this.ec.slice(init, v, k))).then(([a, b, c]) => {
+      const p = Promise.all(this.K.vars.map((v) => this.ec.slice(init, v, k, m))).then(([a, b, c]) => {
         if (this.kind === 'wind') return { u: a, v: b };
         const rad = b.map((d) => ((d + 180) * Math.PI) / 180);
         return { x: rad.map(Math.sin), y: rad.map(Math.cos), t: c, h: a };
@@ -118,17 +123,17 @@ export class WindLayer {
     if (!this.visible) return;
     const t = this.target(T);
     if (!t) { this.f = null; this.shown = null; return; }
-    const key = `${t.init}|${t.hours}`;
+    const m = this.model, key = `${m}|${t.init}|${t.hours}`;
     if (this.shown?.key === key) return;
     this.wanted = key;
-    const steps = this.ec.steps;
+    const steps = this.ec.stepsOf(m);
     let k1 = steps.findIndex((s) => s >= t.hours);
     if (k1 < 0) k1 = steps.length - 1;
     const k0 = steps[k1] === t.hours ? k1 : Math.max(k1 - 1, 0);
     const w = k0 === k1 ? 0 : (t.hours - steps[k0]) / (steps[k1] - steps[k0]);
     let a, b;
     try {
-      [a, b] = await Promise.all([this.slice(t.init, k0), this.slice(t.init, k1)]);
+      [a, b] = await Promise.all([this.slice(m, t.init, k0), this.slice(m, t.init, k1)]);
     } catch (e) {
       if (this.wanted === key) { this.f = null; this.shown = null; }   // 舊報沒有這個變數(例如海浪加入前)
       throw e;
@@ -141,7 +146,7 @@ export class WindLayer {
       f[name] = out;
     }
     this.f = f;
-    this.shown = { key, init: t.init, hours: t.hours, exact: w === 0 };
+    this.shown = { key, model: m, init: t.init, hours: t.hours, exact: w === 0 };
     if (!this.particles.length) this.reseed();
   }
 
@@ -154,7 +159,7 @@ export class WindLayer {
   // ── 取值 ──
   /** 經緯度上各欄的值(雙線性內插);格外或任一角無資料(浪的陸地)→ null */
   sample(lon, lat) {
-    const g = this.ec.index?.grid, f = this.f;
+    const g = this.index?.grid, f = this.f;
     if (!f || !g) return null;
     const fx = (lon - g.lon0) / g.dx, fy = (lat - g.lat0) / g.dy;
     if (fx < 0 || fy < 0 || fx > g.nx - 1 || fy > g.ny - 1) return null;
@@ -189,7 +194,7 @@ export class WindLayer {
   // ── 粒子 ──
   /** 畫面與 ECMWF 範圍交集(螢幕座標);沒有交集 → null */
   box() {
-    const g = this.ec.index?.grid;
+    const g = this.index?.grid;
     if (!g) return null;
     const m = this.map, a = m.project([g.lon0, g.lat0 + (g.ny - 1) * g.dy]), b = m.project([g.lon0 + (g.nx - 1) * g.dx, g.lat0]);
     const x0 = Math.max(Math.min(a.x, b.x), 0), x1 = Math.min(Math.max(a.x, b.x), this.W);
@@ -294,13 +299,14 @@ export class WindLayer {
 
   legend() {
     const s = this.shown, when = s ? `（${fmtEcInit(s.init)} +${Math.round(s.hours * 10) / 10}h）` : '（無資料）';
+    const src = MODELS[s?.model ?? this.model].name;
     if (this.kind === 'wave') {
       const title = `海浪動畫：ECMWF 海浪預報${when}`, note = `波峰往浪前進方向移動；越長浪越高、越快週期越長。${TIME_NOTE}`;
       return this.color === 'speed'
         ? withInfo(legendHTML(`${title} 波峰顏色 = 浪高 (m)`, SCALES.wave.levels, SCALES.wave.colors, 0, 22, SCALES.wave.ticks), note)
         : `<div class="legend-title">${title}${infoHTML(note)}</div>`;
     }
-    const title = `風場動畫：ECMWF 10 m 風預報${when}`, note = `粒子順著風吹去的方向流動，越快風越大。${TIME_NOTE}`;
+    const title = `風場動畫：${src} 10 m 風預報${when}`, note = `粒子順著風吹去的方向流動，越快風越大。${TIME_NOTE}`;
     return this.color === 'speed' ? withInfo(beaufortLegendHTML(`${title} 粒子顏色（蒲福風級）`, SCALES.wind.colors), note)
       : `<div class="legend-title">${title}${infoHTML(note)}</div>`;
   }

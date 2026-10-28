@@ -1,6 +1,8 @@
-// ECMWF IFS 預報(台灣附近,pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風、浪高、尖峰週期
-// 每個起報、每個變數一個檔(全部預報時刻);換時刻不用再下載。
-// 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大 4 倍做雙線性內插再上色
+// 模式預報圖層(台灣附近),可切換模式:
+//   ecmwf:ECMWF IFS 0.1°、每 3 小時(pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風、浪高、尖峰週期
+//   wrf:氣象署 WRF 3 km(重新內插成 0.03°)、每 6 小時(pipeline/fetch_wrf.py):降雨、溫度、海平面氣壓、平均風
+// 兩種檔案格式相同:每個起報、每個變數一個檔(全部預報時刻);換時刻不用再下載。
+// 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大(約 0.0125° 一像素)做雙線性內插再上色
 // 海浪(浪高、週期、波向):陸地沒值 → 往陸地外推 FILL_ITERS 格,畫完再用底圖陸地挖掉(海岸不再是方塊鋸齒)
 import { DATA_BASE_URL } from '../config.js';
 import { getIndex } from '../data.js';
@@ -20,12 +22,16 @@ export const EC_VARS = {
   swh: { name: '浪高', unit: 'm' },
   pp1d: { name: '尖峰週期', unit: 's' },
 };
+export const MODELS = {
+  ecmwf: { name: 'ECMWF', path: 'ecmwf', vars: ['rain', 't2', 'msl', 'wind', 'gust', 'swh', 'pp1d'] },
+  wrf: { name: '氣象署 3km', path: 'wrf', vars: ['rain', 't2', 'msl', 'wind'] },
+};
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
 
-const UP = 8;                      // 畫圖放大倍數(色塊邊界才不會有鋸齒)
-const ARROW_EVERY = 1;             // 每格(0.1°)都放風向箭頭,重疊的由地圖自動略過 → 放大越密
+const PX_DEG = 0.0125;              // 畫圖每像素約幾度(ECMWF 放大 8 倍、3 km 放大 2 倍;色塊邊界才不會有鋸齒)
+const ARROW_DEG = 0.1;             // 箭頭間距約 0.1°,重疊的由地圖自動略過 → 放大越密
 const CACHE_MAX = 24;
-const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(一報 29 個時刻,夠播兩個變數)
+const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(ECMWF 一報 29 個時刻,夠播兩個變數)
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 const latOf = (y) => (Math.atan(Math.exp(y)) * 360) / Math.PI - 90;
@@ -42,12 +48,11 @@ function packHex(hex) {
 
 export class EcmwfLayer {
   key = 'ecmwf';
-  name = 'ECMWF 預報';
-  path = 'ecmwf';
   cadence = null;
   visible = false;
   opacity = 0.8;
-  index = null;
+  model = 'ecmwf';           // MODELS 的 key
+  indexes = {};              // 模式 → index.json
   init = '';                 // '' = 最新一報
   step = null;               // 預報時距(小時);null = 自動選最接近現在的
   variable = 'rain';
@@ -56,23 +61,40 @@ export class EcmwfLayer {
   follow = false;            // 對齊時間軸:預報時刻跟著時間軸 T
   showArrows = true;         // 風 / 浪的方向箭頭
   shown = null;              // { key, init, step, field, label }
-  cache = new Map();         // `${init}/${var}` → Promise<Uint16Array>
+  cache = new Map();         // `${模式}/${init}/${var}` → Promise<Uint16Array>
   frames = new Map();        // key → Promise<畫好的圖>
   land = null;               // 陸地遮罩(land.js);載入失敗 → null,海浪照原本方塊邊緣畫
   coast = null;              // 外推出來的格(Uint8Array,1 = 近岸外推)
 
   constructor(map) { this.map = map; }
 
+  get name() { return `${MODELS[this.model].name} 預報`; }
   get times() { return []; }                 // 不參與時間軸(預報時間在未來)
+  get index() { return this.indexes[this.model] ?? null; }
+  idx(m = this.model) { return this.indexes[m] ?? null; }
+  initsOf(m = this.model) { return [...(this.idx(m)?.times ?? [])].reverse(); }   // 新 → 舊
+  stepsOf(m = this.model) { return this.idx(m)?.steps ?? []; }
   get latest() { return this.index?.latest ?? null; }
-  get inits() { return [...(this.index?.times ?? [])].reverse(); }
+  get inits() { return this.initsOf(); }
   get activeInit() { return this.inits.includes(this.init) ? this.init : this.latest; }
-  get steps() { return this.index?.steps ?? []; }
+  get steps() { return this.stepsOf(); }
+  get vars() { return MODELS[this.model].vars; }
 
   async load() {
-    this.index = await getIndex(this.path);
-    const g = this.index.grid;
-    this.land = await landMask(g.west, g.south, g.east, g.north).catch((e) => { console.warn('陸地遮罩載入失敗', e); return null; });
+    const got = await Promise.allSettled(Object.entries(MODELS).map(async ([m, d]) => [m, await getIndex(d.path)]));
+    for (const r of got) if (r.status === 'fulfilled') this.indexes[r.value[0]] = r.value[1];
+    if (!Object.keys(this.indexes).length) throw got[0].reason;
+    const g = (this.indexes.ecmwf ?? Object.values(this.indexes)[0]).grid;
+    this.land ??= await landMask(g.west, g.south, g.east, g.north).catch((e) => { console.warn('陸地遮罩載入失敗', e); return null; });
+  }
+
+  /** 換模式:起報、時刻回到自動;這個模式沒有的變數改成降雨 */
+  setModel(m) {
+    if (!MODELS[m] || m === this.model) return;
+    this.model = m;
+    this.init = '';
+    this.step = null;
+    if (!this.vars.includes(this.variable)) this.variable = 'rain';
   }
 
   addTo(beforeId) {
@@ -90,8 +112,8 @@ export class EcmwfLayer {
     paint: { 'icon-color': '#263238', 'icon-halo-color': '#ffffff', 'icon-halo-width': 1, 'icon-opacity': this.opacity } }, beforeId);
   }
 
-  corners() {
-    const g = this.index?.grid;
+  corners(m = this.shown?.model ?? this.model) {
+    const g = this.idx(m)?.grid;
     return g && [[g.west, g.north], [g.east, g.north], [g.east, g.south], [g.west, g.south]];
   }
 
@@ -117,14 +139,16 @@ export class EcmwfLayer {
     if (step == null) return null;
     if (!this.steps.includes(step)) step = this.defaultStep(init);
     this.pickedStep = step;
-    return `${init}|${step}|${this.variable}|${this.rainHours}|${this.rainScale}`;
+    return this.frameKey(init, step);
   }
 
-  data(init, v) {
-    const key = `${init}/${v}`;
+  frameKey(init, step) { return `${this.model}|${init}|${step}|${this.variable}|${this.rainHours}|${this.rainScale}`; }
+
+  data(init, v, m = this.model) {
+    const key = `${m}/${init}/${v}`;
     if (!this.cache.has(key)) {
-      const spec = this.index.vars[v];
-      const p = fetch(new URL(`${this.path}/${init}/${v}.bin.gz`, DATA_BASE_URL).href)
+      const spec = this.idx(m).vars[v];
+      const p = fetch(new URL(`${MODELS[m].path}/${init}/${v}.bin.gz`, DATA_BASE_URL).href)
         .then((r) => { if (!r.ok) throw new Error(`${key} ${r.status}`); return r.arrayBuffer(); })
         .then(gunzip)
         .then((buf) => ({ raw: new Uint16Array(buf), spec }));
@@ -136,20 +160,20 @@ export class EcmwfLayer {
   }
 
   /** 第 k 步的實際值(Float32,NaN = 無資料) */
-  async slice(init, v, k) {
-    const { raw, spec } = await this.data(init, v);
-    const n = this.index.grid.nx * this.index.grid.ny, out = new Float32Array(n);
+  async slice(init, v, k, m = this.model) {
+    const { raw, spec } = await this.data(init, v, m);
+    const g = this.idx(m).grid, n = g.nx * g.ny, out = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const r = raw[k * n + i];
       out[i] = r === spec.nodata ? NaN : r * spec.scale + spec.offset;
     }
-    if (WAVE_VARS.has(v)) this.fillCoast(out, v === 'mwd');
+    if (WAVE_VARS.has(v)) this.fillCoast(out, g, v === 'mwd');
     return out;
   }
 
   /** 海浪往陸地外推:無值的格取周圍 8 格有值的平均,重複 FILL_ITERS 次;波向(circ)用單位向量平均 */
-  fillCoast(a, circ) {
-    const { nx, ny } = this.index.grid;
+  fillCoast(a, g, circ) {
+    const { nx, ny } = g;
     const parts = circ ? [a.map((d) => Math.sin((d * Math.PI) / 180)), a.map((d) => Math.cos((d * Math.PI) / 180))] : [a];
     const filled = new Uint8Array(a.length);
     for (let it = 0; it < FILL_ITERS; it++) {
@@ -175,26 +199,28 @@ export class EcmwfLayer {
       for (const [i, m] of add) { parts.forEach((p, k) => { p[i] = m[k]; }); filled[i] = 1; }
     }
     if (circ) for (let i = 0; i < a.length; i++) if (filled[i]) a[i] = ((Math.atan2(parts[0][i], parts[1][i]) * 180) / Math.PI + 360) % 360;
-    this.coast = filled;                    // 陸地格固定,每個變數、每個時刻都一樣
+    this.coast = filled;                    // 陸地格固定,每個變數、每個時刻都一樣(只有 ECMWF 有海浪)
   }
 
   /** 經緯度落在外推格(近岸外推)上 */
   coastAt(lon, lat) {
-    const g = this.index?.grid;
+    const g = this.idx('ecmwf')?.grid;
     if (!this.coast || !g) return false;
     const ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
     return ix >= 0 && iy >= 0 && ix < g.nx && iy < g.ny && this.coast[iy * g.nx + ix] === 1;
   }
 
-  /** 目前選的變數在第 step 小時的場;回傳 { field, u, v, label } */
-  async field(init, step, variable, rainHours) {
-    const k = this.steps.indexOf(step);
+  /** 模式 m 的變數在第 step 小時的場;回傳 { field, u, v, label } */
+  async field(m, init, step, variable, rainHours) {
+    const steps = this.stepsOf(m), k = steps.indexOf(step);
+    const slice = (v, kk) => this.slice(init, v, kk, m);
     if (variable === 'rain') {
       const w = rainHours || step;                  // 0 = 起報後累積
-      const from = Math.max(step - w, 0), k0 = this.steps.indexOf(from);
-      const a = await this.slice(init, 'tp', k);
+      // 時段起點取 step - w 之前(含)最近的時刻(3 km 每 6 小時:選 3 小時會變成 6 小時)
+      const from = [...steps].reverse().find((s) => s <= Math.max(step - w, 0)) ?? 0, k0 = steps.indexOf(from);
+      const a = await slice('tp', k);
       if (from > 0) {
-        const b = await this.slice(init, 'tp', k0);
+        const b = await slice('tp', k0);
         for (let i = 0; i < a.length; i++) a[i] = Math.max(a[i] - b[i], 0);
       }
       const span = step - from;
@@ -202,16 +228,16 @@ export class EcmwfLayer {
       return { field: a, label };
     }
     if (variable === 'wind' || variable === 'gust') {
-      const [u, v] = await Promise.all([this.slice(init, 'u10', k), this.slice(init, 'v10', k)]);
-      const f = variable === 'gust' ? await this.slice(init, 'gust', k) : u.map((x, i) => Math.hypot(x, v[i]));
+      const [u, v] = await Promise.all([slice('u10', k), slice('v10', k)]);
+      const f = variable === 'gust' ? await slice('gust', k) : u.map((x, i) => Math.hypot(x, v[i]));
       return { field: f, u, v, label: variable === 'gust' ? '陣風（該時刻前 1 小時最大）' : '10 m 平均風' };
     }
     if (variable === 'swh' || variable === 'pp1d') {     // 海浪:箭頭畫浪前進方向(mwd 是來向,轉 180°)
-      const [f, d] = await Promise.all([this.slice(init, variable, k), this.slice(init, 'mwd', k)]);
+      const [f, d] = await Promise.all([slice(variable, k), slice('mwd', k)]);
       const rad = d.map((x) => ((x + 180) * Math.PI) / 180);
       return { field: f, u: rad.map(Math.sin), v: rad.map(Math.cos), label: variable === 'swh' ? '示性波高' : '尖峰週期' };
     }
-    return { field: await this.slice(init, variable, k), label: EC_VARS[variable].name };
+    return { field: await slice(variable, k), label: EC_VARS[variable].name };
   }
 
   scale(variable) {
@@ -223,8 +249,8 @@ export class EcmwfLayer {
     return SCALES.wind;
   }
 
-  async render(f, sc, mask = false) {
-    const g = this.index.grid, W = g.nx * UP, H = g.ny * UP;
+  async render(f, g, sc, mask = false) {
+    const UP = Math.max(2, Math.round(g.dx / PX_DEG)), W = g.nx * UP, H = g.ny * UP;
     const packed = sc.colors.map(packHex);
     const color = (x) => {
       if (Number.isNaN(x) || (sc.min != null && x < sc.min)) return 0;
@@ -259,10 +285,10 @@ export class EcmwfLayer {
     return URL.createObjectURL(blob);
   }
 
-  arrows(u, v, mask = false) {
-    const g = this.index.grid, features = [], land = mask ? this.land : null;
-    for (let y = 0; y < g.ny; y += ARROW_EVERY) {
-      for (let x = 0; x < g.nx; x += ARROW_EVERY) {
+  arrows(u, v, g, mask = false) {
+    const features = [], land = mask ? this.land : null, every = Math.max(1, Math.round(ARROW_DEG / g.dx));
+    for (let y = 0; y < g.ny; y += every) {
+      for (let x = 0; x < g.nx; x += every) {
         const i = y * g.nx + x, uu = u[i], vv = v[i];
         const lon = g.lon0 + x * g.dx, lat = g.lat0 + y * g.dy;
         if (Number.isNaN(uu) || Number.isNaN(vv) || land?.isLand(lon, lat)) continue;
@@ -279,14 +305,14 @@ export class EcmwfLayer {
     const src = this.map.getSource('ecmwf'), arr = this.map.getSource('ecmwf-arrows');
     if (!key) {
       if (!this.shown) return;
-      src.updateImage({ url: EMPTY_PNG, coordinates: this.corners() });
+      src.updateImage({ url: EMPTY_PNG, coordinates: this.corners(this.model) });
       arr.setData(EMPTY);
       this.shown = null;
       return;
     }
     const f = await this.frame(key);
     if (this.wanted !== key) return;
-    src.updateImage({ url: f.url, coordinates: this.corners() });
+    src.updateImage({ url: f.url, coordinates: this.corners(f.model) });
     arr.setData(f.arrows);
     this.shown = { key, ...f };
   }
@@ -294,12 +320,12 @@ export class EcmwfLayer {
   /** 一張畫好的圖(場、色階、PNG、箭頭);留著給播放重複用 */
   frame(key) {
     if (!this.frames.has(key)) {
-      const [init, s, variable, rh] = key.split('|'), step = +s;
+      const [model, init, s, variable, rh] = key.split('|'), step = +s;
       const p = (async () => {
-        const r = await this.field(init, step, variable, +rh);
-        const sc = this.scale(variable), mask = WAVE_VARS.has(variable);
-        return { init, step, variable, field: r.field, label: r.label, sc, url: await this.render(r.field, sc, mask),
-          arrows: r.u ? this.arrows(r.u, r.v, mask) : EMPTY };
+        const r = await this.field(model, init, step, variable, +rh);
+        const g = this.idx(model).grid, sc = this.scale(variable), mask = WAVE_VARS.has(variable);
+        return { model, init, step, variable, field: r.field, label: r.label, sc, url: await this.render(r.field, g, sc, mask),
+          arrows: r.u ? this.arrows(r.u, r.v, g, mask) : EMPTY };
       })();
       p.catch(() => this.frames.delete(key));
       this.frames.set(key, p);
@@ -315,7 +341,7 @@ export class EcmwfLayer {
 
   /** 播放前先把整段畫好(目前的初始、變數),回報進度 */
   async prefetch(onProgress) {
-    const init = this.activeInit, keys = this.steps.map((s) => `${init}|${s}|${this.variable}|${this.rainHours}|${this.rainScale}`);
+    const init = this.activeInit, keys = this.steps.map((s) => this.frameKey(init, s));
     let done = 0;
     for (const k of keys) {
       try { await this.frame(k); } catch { /* 缺檔:播放時跳過 */ }
@@ -348,7 +374,7 @@ export class EcmwfLayer {
 
   valueAt(lng, lat) {
     if (!this.shown || !this.visible) return null;
-    const g = this.index.grid;
+    const g = this.idx(this.shown.model).grid;
     const ix = Math.round((lng - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
     if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
     const x = this.shown.field[iy * g.nx + ix], v = this.shown.variable, wave = WAVE_VARS.has(v);
@@ -356,13 +382,13 @@ export class EcmwfLayer {
     const unit = EC_VARS[v].unit;
     const cls = v === 'swh' && waveClass(x) ? `（${waveClass(x)}）` : '';
     const ext = wave && this.coastAt(lng, lat) ? '（近岸外推）' : '';
-    return `ECMWF ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}${ext}`;
+    return `${MODELS[this.shown.model].name} ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}${ext}`;
   }
 
   legend() {
-    if (!this.shown) return `<div class="legend-title">ECMWF 預報（無資料）</div>`;
-    const { variable, sc, label, init, step } = this.shown;
-    const title = `ECMWF ${label}（${fmtEcInit(init)} +${step}h）`;
+    if (!this.shown) return `<div class="legend-title">${this.name}（無資料）</div>`;
+    const { model, variable, sc, label, init, step } = this.shown;
+    const title = `${MODELS[model].name} ${label}（${fmtEcInit(init)} +${step}h）`;
     if (variable === 'wind' || variable === 'gust') return beaufortLegendHTML(`${title}（蒲福風級）`, sc.colors);
     const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks, sc.openTop);
     if (variable === 'swh') {
