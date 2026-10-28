@@ -93,8 +93,8 @@ export class WindLayer {
   // ── 時間 ──
   /** 要顯示的起報與預報小時;模式預報開著就跟它,否則跟時間軸(不同步時用現在) */
   target(T) {
-    const ec = this.ec, m = this.model, steps = ec.stepsOf(m);
-    if (!ec.idx(m) || !steps.length) return null;
+    const ec = this.ec, m = this.model;
+    if (!ec.idx(m)) return null;
     if (ec.visible && ec.shown) {
       if (ec.shown.model === m) return { init: ec.shown.init, hours: ec.shown.step };
       T = ec.validOf(ec.shown.init, ec.shown.step);           // 圖層顯示另一個模式:對齊它的時間
@@ -102,7 +102,8 @@ export class WindLayer {
     T = T ?? nowStamp();
     const inits = ec.initsOf(m);                               // 新 → 舊
     const init = inits.find((i) => i <= T) ?? inits[inits.length - 1];
-    if (!init) return null;
+    const steps = ec.stepsOf(m, init);
+    if (!init || !steps.length) return null;
     const h = Math.min(Math.max(diffMin(T, init) / 60, steps[0]), steps[steps.length - 1]);
     return { init, hours: h };
   }
@@ -131,7 +132,7 @@ export class WindLayer {
     const m = this.model, key = `${m}|${t.init}|${t.hours}`;
     if (this.shown?.key === key) return;
     this.wanted = key;
-    const steps = this.ec.stepsOf(m);
+    const steps = this.ec.stepsOf(m, t.init);
     let k1 = steps.findIndex((s) => s >= t.hours);
     if (k1 < 0) k1 = steps.length - 1;
     const k0 = steps[k1] === t.hours ? k1 : Math.max(k1 - 1, 0);

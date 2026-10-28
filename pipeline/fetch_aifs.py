@@ -1,11 +1,11 @@
-"""ECMWF AIFS(AI 模式,aifs-single)開放資料:降雨、2 m 溫度、10 m 風、海平面氣壓、海浪;0.25°、每 6 小時、0–84 小時,一天 4 報。
+"""ECMWF AIFS(AI 模式,aifs-single)開放資料:降雨、2 m 溫度、10 m 風、海平面氣壓、海浪;0.25°、每 6 小時、0–168 小時,只抓 00/12Z(和 IFS 一樣)。
   data/aifs/index.json              times = 起報時間(stamp);grid、vars、steps(格式同 data/ecmwf,網頁共用)
   data/aifs/{起報}/{變數}.bin.gz    uint16 (步數, ny, nx),第 0 列最南;實際值 = raw * scale + offset,65535 = 無資料
 路徑:{host}/{YYYYMMDD}/{HH}z/aifs-single/0p25/{oper|wave}/{YYYYMMDDHH}0000-{step}h-{oper|wave}-fc.{index|grib2},和 IFS 同站。
   tp 是起報後累積,單位已是 mm(kg m-2;IFS 的 tp 是 m)。
   海浪(stream wave):swh 浪高、mwd 平均波向(來向)、mwp 平均週期(沒有尖峰週期;陸地 = 無資料)。開放資料沒有陣風。
-下載:依 .index 用 HTTP Range 只抓 8 欄(每欄全球約 0.3–0.6 MB),一報約 55 MB;只留台灣附近(config.ECMWF_AREA)。
-排程每 10 分鐘檢查:84 小時檔上架了就抓(新的優先);起報 24 小時內漏掉的報重啟後會補。
+下載:依 .index 用 HTTP Range 只抓 8 欄(每欄全球約 0.3–0.6 MB),一報約 105 MB;只留台灣附近(config.ECMWF_AREA)。
+排程每 10 分鐘檢查:168 小時檔上架了就抓(新的優先);起報 24 小時內漏掉的報重啟後會補。
 手動:python -m pipeline.fetch_aifs [--init 2026102712]"""
 import argparse
 import gzip
@@ -19,12 +19,12 @@ import requests
 
 from . import config, r2
 from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_index, update_index
-from .fetch_ecmwf import HOSTS, _crop_slices, cleanup as _cleanup, stamp_of
+from .fetch_ecmwf import HOSTS, _crop_slices, cleanup as _cleanup, run_steps, stamp_of
 
 LAYER = "aifs"
 RES = 0.25
 STEPS = list(range(0, config.ECMWF_MAX_STEP + 1, 6))
-RUNS = (0, 6, 12, 18)
+RUNS = (0, 12)                 # 06/18Z 也有,和 IFS 一樣只抓 00/12Z
 WAIT_H = 4                     # 起報後幾小時才開始檢查
 # 變數 → (AIFS param, 換算, 量化 scale, offset, 單位, 名稱)
 VARS = {
@@ -118,7 +118,7 @@ def fetch_step(init, step, pool):
 def process(init):
     t0 = time.time()
     stamp = stamp_of(init)
-    log.info("AIFS %s 開始下載(%d 步,約 55 MB)", stamp, len(STEPS))
+    log.info("AIFS %s 開始下載(%d 步,約 105 MB)", stamp, len(STEPS))
     data = {k: [] for k in VARS}
     # ecCodes 第一次載入定義檔不是執行緒安全:先在主執行緒解一步(fetch_wrf 同樣的問題)
     with ThreadPoolExecutor(1) as one:
@@ -144,14 +144,15 @@ def process(init):
     out_dir = layer_dir(LAYER) / stamp
     for k, arrs in data.items():
         _atomic_write(out_dir / f"{k}.bin.gz", gzip.compress(quantize(np.stack(arrs), vars_[k]).tobytes(), 6))
-    update_index(LAYER, stamp, grid=grid, vars=vars_, steps=STEPS, name="ECMWF AIFS 預報",
+    update_index(LAYER, stamp, grid=grid, vars=vars_, steps=STEPS, nsteps=run_steps(LAYER, stamp, len(STEPS), grid),
+                 name="ECMWF AIFS 預報",
                  source="ECMWF open data AIFS single 0.25°(CC BY 4.0)")
     log.info("AIFS %s 完成:%d 步,%.0f 秒", stamp, len(STEPS), time.time() - t0)
     return stamp
 
 
 def candidates(now):
-    """保留期間內的 00/06/12/18Z 起報,新的在前。"""
+    """保留期間內的 RUNS 起報,新的在前。"""
     t = now.replace(minute=0, second=0, microsecond=0)
     t -= timedelta(hours=t.hour % 6)
     out = []

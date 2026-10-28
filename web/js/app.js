@@ -728,9 +728,9 @@ const ecStepLabel = (init, s) => `${fmtTW(ecmwf.validOf(init, s))}（+${s}h）`;
 function fillEcmwfPanel() {
   for (const o of $('ec-model').options) o.disabled = !ecmwf.idx(o.value);   // 沒資料的模式不能選
   if (!ecmwf.index) return;
-  const iSel = $('ec-init'), init = ecmwf.activeInit;
+  const iSel = $('ec-init');
   iSel.innerHTML = ecmwf.inits.map((i) => `<option value="${i}">${fmtEcInit(i)}</option>`).join('');
-  $('ec-step').innerHTML = ecmwf.steps.map((s) => `<option value="${s}">${ecStepLabel(init, s)}</option>`).join('');
+  $('ec-step').dataset.init = '';
   syncEcmwfUI();
 }
 
@@ -740,9 +740,10 @@ function syncEcmwfUI() {
   const init = ecmwf.activeInit;
   $('ec-init').value = init;
   const sel = $('ec-step');
-  if (sel.dataset.init !== init) {           // 換起報:時刻標籤跟著換
-    for (const o of sel.options) o.textContent = ecStepLabel(init, +o.value);
-    sel.dataset.init = init;
+  const key = `${ecmwf.model}|${init}`;
+  if (sel.dataset.init !== key) {            // 換模式、起報:時刻跟著換(舊報可能較短)
+    sel.innerHTML = ecmwf.steps.map((s) => `<option value="${s}">${ecStepLabel(init, s)}</option>`).join('');
+    sel.dataset.init = key;
   }
   sel.value = ecmwf.pickedStep ?? ecmwf.step ?? ecmwf.defaultStep(init);
   $('ec-model').value = ecmwf.model;

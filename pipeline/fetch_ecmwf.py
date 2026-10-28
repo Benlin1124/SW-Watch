@@ -1,4 +1,4 @@
-"""ECMWF IFS 0.1° 開放資料(台灣附近):氣壓、溫度、10 m 風、陣風、降雨、海浪;00/12Z 起報,0–84 小時每 3 小時。
+"""ECMWF IFS 0.1° 開放資料(台灣附近):氣壓、溫度、10 m 風、陣風、降雨、海浪;00/12Z 起報,0–168 小時(144 小時前每 3 小時、之後每 6 小時)。
 參考 風雨變化趨勢_精簡版.ipynb。
   data/ecmwf/index.json              times = 起報時間(stamp);grid、vars、steps
   data/ecmwf/{起報}/{變數}.bin.gz    uint16 (步數, ny, nx),第 0 列最南;實際值 = raw * scale + offset,65535 = 無資料
@@ -6,13 +6,14 @@
   msl  海平面氣壓 hPa
   t2   2 m 溫度 °C
   u10 / v10  10 m 風 m/s(平均風 = 合成風速)
-  gust 10 m 陣風 m/s:開放資料只有「預報時刻前 1 小時內最大」(10fg,step 範圍 t-1~t),3 小時之間的極值抓不到
+  gust 10 m 陣風 m/s:預報時刻前一段時間內最大:0–90 小時 = 前 1 小時(10fg)、93–144 小時 = 前 3 小時(10fg3)、
+       150 小時起 = 前 6 小時(10fg);0–90 小時兩個時刻之間的極值抓不到
   tp   起報後累積雨量 mm(前端相減得到 3/6/12/24 小時雨量)
   swh  示性波高 m、mwd 平均波向(來向,度)、pp1d 尖峰週期 s、mwp 平均週期 s:海浪模式(stream wave,同網格;陸地 = 無資料)
 下載:依 .index 用 HTTP Range 只抓需要的欄位(每欄全球 1–3.6 MB),解出後只留台灣附近。
-  每報約 29 步 ×(6 欄大氣 + 4 欄海浪)≈ 600 MB 下載;本機和 R2 每報只存約 5 MB。
+  每報 53 步 ×(6 欄大氣 + 4 欄海浪)≈ 1.1 GB 下載;本機和 R2 每報只存約 6 MB。
   來源:AWS 鏡像(免費),失敗改 ECMWF 官網。
-排程每 10 分鐘檢查一次:最新一報的 84 小時檔上架了就抓;重啟後會補保留期間內漏掉的報。
+排程每 10 分鐘檢查一次:最新一報的 168 小時檔上架了就抓;重啟後會補保留期間內漏掉的報。
 手動:python -m pipeline.fetch_ecmwf [--init 2026102200]"""
 import argparse
 import gzip
@@ -30,7 +31,7 @@ from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_ind
 
 LAYER = "ecmwf"
 HOSTS = ["https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com", "https://data.ecmwf.int/forecasts"]
-STEPS = list(range(0, config.ECMWF_MAX_STEP + 1, 3))
+STEPS = list(range(0, min(config.ECMWF_MAX_STEP, 144) + 1, 3)) + list(range(150, config.ECMWF_MAX_STEP + 1, 6))
 # 變數 → (ECMWF param, 換算, 量化 scale, offset, 單位, 名稱)
 VARS = {
     "msl": ("msl", lambda v: v / 100, 0.1, 800.0, "hPa", "海平面氣壓"),
@@ -46,6 +47,7 @@ VARS = {
 }
 WAVE = {"swh", "mwd", "pp1d", "mwp"}                # 這些在海浪模式的檔(stream wave),其餘在大氣(oper)
 STREAMS = ("oper", "wave")
+ALIAS = {"10fg": "10fg3"}                    # 93–144 小時的陣風叫 10fg3(前 3 小時最大)
 GIVEN_UP_PATH = config.CACHE_DIR / "ecmwf_given_up.json"
 
 
@@ -142,7 +144,7 @@ def fetch_step(init, step, pool):
                 entries[e["param"]] = e
     jobs = {}
     for var, (param, *_rest) in VARS.items():
-        e = entries.get(param)
+        e = entries.get(param) or entries.get(ALIAS.get(param))
         if e is not None and (e["stream"] == "wave") != (var in WAVE):
             e = None
         if e is None or e["_length"] < 1000:      # 0 小時的 tp / 10fg 只是空欄位
@@ -171,7 +173,7 @@ def grid_and_vars(shape):
 def process(init):
     """下載一報、存成每變數一個檔;任何一步失敗就整報放棄(下次排程再試)。"""
     t0 = time.time()
-    log.info("ECMWF %s 開始下載(%d 步,約 600 MB、15–20 分鐘)", stamp_of(init), len(STEPS))
+    log.info("ECMWF %s 開始下載(%d 步,約 1.1 GB、30–40 分鐘)", stamp_of(init), len(STEPS))
     data = {k: [] for k in VARS}
     with ThreadPoolExecutor(4) as pool:
         for step in STEPS:
@@ -189,10 +191,28 @@ def process(init):
         spec = dict(vars_[k], nodata=65535, dtype="uint16")
         raw = quantize(stack, spec)
         _atomic_write(out_dir / f"{k}.bin.gz", gzip.compress(raw.tobytes(), 6))
-    update_index(LAYER, stamp, grid=grid, vars=vars_, steps=STEPS, name="ECMWF IFS 預報",
+    update_index(LAYER, stamp, grid=grid, vars=vars_, steps=STEPS, nsteps=run_steps(LAYER, stamp, len(STEPS), grid),
+                 name="ECMWF IFS 預報",
                  source=f"ECMWF open data IFS {config.ECMWF_RESOL}(CC BY 4.0)")
     log.info("ECMWF %s 完成:%d 步,%.0f 秒", stamp, len(STEPS), time.time() - t0)
     return stamp
+
+
+def run_steps(layer, stamp, n, grid):
+    """index 的 nsteps = 每報實際有幾步(預報長度改過時,舊報比 steps 短;網頁只顯示前 nsteps 步)。
+    沒記錄的舊報看本機 msl.bin.gz 的大小。"""
+    idx = read_index(layer)
+    old = idx.get("nsteps", {})
+    out = {}
+    for t in idx["times"]:
+        if t in old:
+            out[t] = old[t]
+            continue
+        p = layer_dir(layer) / t / "msl.bin.gz"
+        if p.exists():
+            out[t] = len(gzip.decompress(p.read_bytes())) // (2 * grid["nx"] * grid["ny"])
+    out[stamp] = n
+    return out
 
 
 def _given_up():

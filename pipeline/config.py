@@ -86,7 +86,7 @@ SAT_KEEP_DAYS = int(os.environ.get("SAT_KEEP_DAYS", 5))   # 本機與 R2 衛星�
 ECMWF_RESOL = "0p1"                       # 0.1°;"0p25" = 0.25°
 ECMWF_AREA = (115.0, 17.0, 130.0, 28.0)   # lon_min, lat_min, lon_max, lat_max(151×111 格)
 ECMWF_RUNS = (0, 12)                      # 只抓 00、12Z(06/18Z 只到 90 小時,也可加)
-ECMWF_MAX_STEP = 84                       # 預報到幾小時(每 3 小時一步)
+ECMWF_MAX_STEP = 168                      # 預報到幾小時(IFS 144 小時前每 3 小時、之後每 6 小時;AIFS 每 6 小時)
 ECMWF_WAIT_H = 6                          # 起報後幾小時才開始檢查(通常 7–8 小時上架)
 ECMWF_KEEP_DAYS = int(os.environ.get("ECMWF_KEEP_DAYS", 3))
 

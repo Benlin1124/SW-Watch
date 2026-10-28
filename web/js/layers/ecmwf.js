@@ -85,11 +85,15 @@ export class EcmwfLayer {
   get index() { return this.indexes[this.model] ?? null; }
   idx(m = this.model) { return this.indexes[m] ?? null; }
   initsOf(m = this.model) { return [...(this.idx(m)?.times ?? [])].reverse(); }   // 新 → 舊
-  stepsOf(m = this.model) { return this.idx(m)?.steps ?? []; }
+  /** 起報 init 的預報時刻;預報長度改過時舊報較短(index 的 nsteps 記每報幾步,steps 是最長的) */
+  stepsOf(m = this.model, init) {
+    const x = this.idx(m), n = x?.nsteps?.[init];
+    return (n ? x.steps.slice(0, n) : x?.steps) ?? [];
+  }
   get latest() { return this.index?.latest ?? null; }
   get inits() { return this.initsOf(); }
   get activeInit() { return this.inits.includes(this.init) ? this.init : this.latest; }
-  get steps() { return this.stepsOf(); }
+  get steps() { return this.stepsOf(this.model, this.activeInit); }
   get vars() { return MODELS[this.model].vars; }
 
   async load() {
@@ -224,7 +228,7 @@ export class EcmwfLayer {
 
   /** 模式 m 的變數在第 step 小時的場;回傳 { field, u, v, label } */
   async field(m, init, step, variable, rainHours) {
-    const steps = this.stepsOf(m), k = steps.indexOf(step);
+    const steps = this.stepsOf(m, init), k = steps.indexOf(step);
     const slice = (v, kk) => this.slice(init, v, kk, m);
     if (variable === 'rain') {
       const w = rainHours || step;                  // 0 = 起報後累積
@@ -242,7 +246,7 @@ export class EcmwfLayer {
     if (variable === 'wind' || variable === 'gust') {
       const [u, v] = await Promise.all([slice('u10', k), slice('v10', k)]);
       const f = variable === 'gust' ? await slice('gust', k) : u.map((x, i) => Math.hypot(x, v[i]));
-      return { field: f, u, v, label: variable === 'gust' ? '陣風（該時刻前 1 小時最大）' : '10 m 平均風' };
+      return { field: f, u, v, label: variable === 'gust' ? `陣風（該時刻前 ${step <= 90 ? 1 : step <= 144 ? 3 : 6} 小時最大）` : '10 m 平均風' };
     }
     if (variable === 'swh' || variable === 'pp1d' || variable === 'mwp') {   // 海浪:箭頭畫浪前進方向(mwd 是來向,轉 180°)
       const [f, d] = await Promise.all([slice(variable, k), slice('mwd', k)]);
