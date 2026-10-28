@@ -23,12 +23,13 @@ const $ = (id) => document.getElementById(id);
 const BASE = new URL('../assets/basemap/', import.meta.url).href;
 // casing = 線條外圍的襯邊(和線條反差的顏色),疊在雷達、雲圖上也看得清楚
 const THEMES = {
-  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#222222', county: '#1a1a1a', km100: '#1565c0', casing: 'rgba(255,255,255,0.85)', grid: 'rgba(0,0,0,0.18)', imagery: false },
-  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#d5dbe3', border: '#f2f5f8', county: '#ffffff', km100: '#64b5f6', casing: 'rgba(0,0,0,0.6)', grid: 'rgba(255,255,255,0.12)', imagery: false },
-  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#ffffff', county: '#ffffff', km100: '#90caf9', casing: 'rgba(0,0,0,0.65)', grid: 'rgba(255,255,255,0.25)', imagery: true },
+  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#222222', county: '#1a1a1a', town: 'rgba(0,0,0,0.45)', km100: '#1565c0', casing: 'rgba(255,255,255,0.85)', grid: 'rgba(0,0,0,0.18)', imagery: false },
+  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#d5dbe3', border: '#f2f5f8', county: '#ffffff', town: 'rgba(255,255,255,0.45)', km100: '#64b5f6', casing: 'rgba(0,0,0,0.6)', grid: 'rgba(255,255,255,0.12)', imagery: false },
+  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#ffffff', county: '#ffffff', town: 'rgba(255,255,255,0.6)', km100: '#90caf9', casing: 'rgba(0,0,0,0.65)', grid: 'rgba(255,255,255,0.25)', imagery: true },
 };
 // 線寬隨縮放加粗(全區看得到,放大不會太細)
 const LINE_W = { coast: [1, 1.6, 2.6], borders: [1.3, 2, 3], county: [0.8, 1.4, 2.4], km100: [1, 1.5, 2.2] };   // 縮放 4、7、11
+const TOWN_ZOOM = 8.5;          // 鄉鎮界放大到這個縮放才顯示(也才下載 town.json)
 const zw = ([a, b, c], plus = 0) => ['interpolate', ['linear'], ['zoom'], 4, a + plus, 7, b + plus, 11, c + plus];
 
 /** 經緯網格:每 5° 一條(全部縮放),放大後加 1° 細線 */
@@ -72,6 +73,17 @@ function addOverlays(beforeId) {
   map.addSource('county', { type: 'geojson', data: `${BASE}taiwan.json` });
   map.addSource('km100', { type: 'geojson', data: `${BASE}km100.json` });   // NCDR 台灣周圍 100 公里線
   map.addSource('grid', { type: 'geojson', data: graticule() });
+  // 鄉鎮界(pipeline/build_basemap.py,只含縣市界以外的段):細線、在縣市界下面;放大到 TOWN_ZOOM 才載入
+  map.addSource('town', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'town', type: 'line', source: 'town', minzoom: TOWN_ZOOM, layout: { 'line-join': 'round' },
+    paint: { 'line-color': th.town, 'line-width': ['interpolate', ['linear'], ['zoom'], TOWN_ZOOM, 0.6, 12, 1.4] } }, beforeId);
+  const loadTown = () => {
+    if (map.getZoom() < TOWN_ZOOM - 0.5) return;
+    map.getSource('town').setData(`${BASE}town.json`);
+    map.off('zoomend', loadTown);
+  };
+  map.on('zoomend', loadTown);
+  loadTown();
   map.addLayer({ id: 'grid-minor', type: 'line', source: 'grid', minzoom: 5.5, filter: ['!', ['get', 'major']],
     paint: { 'line-color': th.grid, 'line-width': 0.5 } }, beforeId);
   map.addLayer({ id: 'grid-major', type: 'line', source: 'grid', filter: ['get', 'major'],
@@ -95,6 +107,7 @@ function setTheme(name) {
   map.setPaintProperty('coast', 'line-color', th.coast);
   map.setPaintProperty('borders', 'line-color', th.border);
   map.setPaintProperty('county', 'line-color', th.county);
+  map.setPaintProperty('town', 'line-color', th.town);
   map.setPaintProperty('km100', 'line-color', th.km100);
   for (const id of ['coast', 'borders', 'county', 'km100']) map.setPaintProperty(`${id}-casing`, 'line-color', th.casing);
   map.setPaintProperty('grid-major', 'line-color', th.grid);
@@ -1043,6 +1056,7 @@ function bindUI() {
   $('chk-county').onchange = (e) => {
     for (const id of ['county', 'county-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };
+  $('chk-town').onchange = (e) => map.setLayoutProperty('town', 'visibility', e.target.checked ? 'visible' : 'none');
   $('chk-km100').onchange = (e) => {
     for (const id of ['km100', 'km100-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };

@@ -1,5 +1,6 @@
 """產生素色向量底圖(仿 notebook 的 cartopy 底圖:淺灰陸地、白色海洋、黑色海岸線與縣市界)。
   Natural Earth 10m(公有領域)陸地 / 海岸線 / 國界 + 台灣縣市界(shp/TWN_CITY.shp 內政部;沒有就用 NCDR)、台灣周圍 100 公里線(km100)
+  + 鄉鎮界(town:shp/TWN_TOWN.shp 內政部,只留縣市界、海岸線以外的段;網頁放大後才顯示)
   台灣附近的海岸線、陸地改用縣市界外框(兩份來源位置不同,不換會畫出兩條海岸線)
   → web/assets/basemap/*.json(裁到西北太平洋、簡化、座標取 4 位小數)
 只需在更新底圖時執行一次:python -m pipeline.build_basemap [--src 已下載的目錄] [--only km100]"""
@@ -22,10 +23,12 @@ SOURCES = {
     "borders": (NE.format("ne_10m_admin_0_boundary_lines_land"), 0.01),
     "taiwan": (config.TAIWAN_GEOJSON_URL, 0.0005),
     "km100": ("https://watch.ncdr.nat.gov.tw/00_Wxmap/json/area/100KM.json", 0.002),
+    "town": (None, 0.0005),          # shp/TWN_TOWN.shp
 }
 
 
 TWN_CITY = config.ROOT / "shp" / "TWN_CITY.shp"     # 內政部縣市界(影片 radar_video 也用這份;shp/ 不進 git)
+TWN_TOWN = config.ROOT / "shp" / "TWN_TOWN.shp"     # 內政部鄉鎮市區界
 
 
 def load(name, url, src_dir):
@@ -92,6 +95,21 @@ def replace_taiwan(name, fc, tw):
     return {"type": "FeatureCollection", "features": feats}
 
 
+def build_town(tol):
+    """鄉鎮界線:各鄉鎮外框聯集,扣掉縣市界與海岸線(那些已有,疊兩次會變粗)。"""
+    import shapefile
+    def outlines(path):
+        r = shapefile.Reader(str(path), encoding="utf-8")
+        polys = [x.simplify(tol, preserve_topology=True) for s in r.shapes()
+                 for x in shapely.get_parts(shapely.make_valid(shape(s.__geo_interface__)))
+                 if x.geom_type in ("Polygon", "MultiPolygon")]
+        return shapely.union_all([p.boundary for p in polys])
+    town, county = outlines(TWN_TOWN), outlines(TWN_CITY)
+    g = shapely.line_merge(shapely.difference(town, county.buffer(tol * 2, quad_segs=2)))
+    g = shapely.set_precision(g, 0.0001)
+    return {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": mapping(g)}]}
+
+
 TW_PAD = 0.03        # 縣市聯集外擴(度,約 3 km):Natural Earth 的島 / 海岸線段一半以上在這範圍內就換成縣市界
 
 
@@ -105,7 +123,13 @@ def main():
     for name, (url, tol) in SOURCES.items():
         if a.only and name not in a.only:
             continue
-        fc = build(name, load(name, url, a.src), tol)
+        if name == "town":
+            if not TWN_TOWN.exists():
+                print("town: 沒有 shp/TWN_TOWN.shp,略過")
+                continue
+            fc = build_town(tol)
+        else:
+            fc = build(name, load(name, url, a.src), tol)
         if name in ("land", "coast"):
             fc = replace_taiwan(name, fc, tw)
         path = OUT / f"{name}.json"

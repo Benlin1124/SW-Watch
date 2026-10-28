@@ -1084,3 +1084,9 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 點圖(onPick):目前模式、起報跳到最接近的預報時刻,關閉對齊時間軸、停止播放。
 - MODELS.ecmwf 名稱 ECMWF → ECMWF IFS(圖例、讀值也跟著改)。
 - 實測(R2 資料):基隆外海浪高三模式;基隆陸地雨量表格、點 11/01 14:00 → AIFS +102h,圖例和白虛線同步。
+## 2026-10-28 鄉鎮界(放大才顯示)
+- build_basemap 加 town:shp/TWN_TOWN.shp(內政部 368 鄉鎮)各鄉鎮外框聯集,扣掉縣市界與海岸線(外擴 2×tol),簡化 0.0005°(約 50 m)→ web/assets/basemap/town.json 792 KB(gzip 約 150 KB)。shp/ 不進 git,重做要在有 shp 的這台跑:python -m pipeline.build_basemap --only town。
+- 網頁:town 圖層 minzoom 8.5(TOWN_ZOOM),細線、半透明,在縣市界下面;來源先給空的,縮放到 8 以上才 setData 載入 town.json(全台看時不下載)。三種底圖主題各有顏色。面板「鄉鎮界」可關。
+- 沒有字型(glyphs)所以不標鄉鎮名。
+- 實測:縮放 9.3 台中一帶鄉鎮界正常、縣市界蓋在上面。
+- 順便確認:R2 上 IFS 10/28 00Z 已是 53 步(168 小時),index nsteps 舊報 29、新報 53,10 個變數(含 mwp)都有。
