@@ -96,6 +96,12 @@ python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" 
   - 沒有金鑰的電腦只會存在本機。到排程電腦再執行一次同樣的指令，就會補上傳。
 - **事後重做**：`event_stats`、`radar_video`、`event_report` 都會自動讀 `archive/`。原始資料被清掉後，還是能重做統計和影片，可以加 `--local` 只用本機資料。
 
+## ECMWF AIFS（模式預報）
+
+`pipeline/fetch_aifs.py`（排程每 10 分檢查）抓 ECMWF 的 AI 模式 AIFS（aifs-single，開放資料，和 IFS 同站）：降雨、2 m 溫度、10 m 風、海平面氣壓，以及海浪（浪高、浪向、平均週期），0.25°、0–84 小時每 6 小時，一天 4 報（00/06/12/18Z）。
+- 用 HTTP Range 只抓 8 欄，一報約 55 MB；只留 ECMWF 範圍，格式同 `data/ecmwf`，存 `data/aifs/`，保留天數同 ECMWF。起報 24 小時內漏抓的報重啟後會補。
+- 網頁「模式預報」的「模式」選「ECMWF AIFS」：變數有降雨、溫度、氣壓、平均風、浪高、平均週期。開放資料沒有陣風、尖峰週期；雨量最短 6 小時。風場、海浪動畫都跟著它。
+
 ## 氣象署 WRF 3 km（模式預報）
 
 `pipeline/fetch_wrf.py`（排程每 10 分檢查）抓氣象署區域模式 3 公里（開放資料 M-A0064）：降雨、2 m 溫度、10 m 風、海平面氣壓，0–84 小時每 6 小時。

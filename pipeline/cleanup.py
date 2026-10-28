@@ -1,17 +1,18 @@
 """保留策略:測站、雷達、雨量等資料保留 KEEP_DAYS 天(預設 10),更舊的全刪(事件要永久保留用 event_archive);
-颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天;ECMWF、氣象署 WRF / 海浪只留 ECMWF_KEEP_DAYS 天;各站月 CSV(stations/series)永久保留。"""
+颱風資料永久保留;衛星只留 SAT_KEEP_DAYS 天;ECMWF(IFS、AIFS)、氣象署 WRF / 海浪只留 ECMWF_KEEP_DAYS 天;各站月 CSV(stations/series)永久保留。"""
 import json
 from datetime import datetime, timedelta, timezone
 
 from . import config
 from .common import log, remove, save_json
+from .fetch_aifs import cleanup as cleanup_aifs
 from .fetch_cwa_wave import cleanup as cleanup_cwawave
 from .fetch_ecmwf import cleanup as cleanup_ecmwf
 from .fetch_satellite import cleanup as cleanup_satellite
 from .fetch_wrf import cleanup as cleanup_wrf
 from .station_series import compress_old_months
 
-SKIP = ("typhoon", "ecmwf", "wrf", "cwawave")
+SKIP = ("typhoon", "ecmwf", "wrf", "cwawave", "aifs")
 
 
 def run():
@@ -36,6 +37,7 @@ def run():
     cleanup_ecmwf()
     cleanup_wrf()
     cleanup_cwawave()
+    cleanup_aifs()
 
 
 if __name__ == "__main__":

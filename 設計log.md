@@ -1060,3 +1060,11 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - app.js autoAnim():模式預報開著時,變數是浪高 / 尖峰週期 / 平均週期 → 勾海浪動畫、取消風場動畫;其他(降雨、溫度、氣壓、平均風、陣風)→ 勾風場動畫、取消海浪動畫。觸發:換變數、換模式、勾選模式預報。用一般的 change 事件(bubbles),圖層開關、面板收合、存設定都和手動一樣;之後仍可手動再改。
 - 重新整理還原設定時(restoring)不自動切換,照存檔的勾選。
 - 實測:圖層沒勾時換變數不動;勾選(浪高)→ 海浪開、風關;降雨 → 風開、浪關;尖峰週期 → 浪;平均風 → 風。
+## 2026-10-28 ECMWF AIFS 加入模式預報
+- 使用者要加 AIFS。開放資料 aifs-single/0p25,和 IFS 同站(AWS 鏡像 / data.ecmwf.int):{d}/{HH}z/aifs-single/0p25/{oper|wave}/{d}{HH}0000-{step}h-{stream}-fc.{index|grib2}。00/06/12/18Z 四報,每 6 小時一步(到 360 h,這裡只抓 84 h)。
+- 大氣(oper)sfc 有 2t、msl、10u/10v、tp、tcc/lcc/mcc/hcc、100 m 風、2d、sp、ssrd…;tp 是起報後累積(stepRange 0-6、0-84),單位 kg m-2 = mm(IFS 是 m)。開放資料沒有陣風(0 h、6 h、84 h 的 index 都沒有 fg 類欄位)。
+- 一開始以為沒有海浪;使用者提醒後查到另有 wave 資料流:swh、mwd、mwp(另有 h1012… 分頻浪高、cdww),沒有尖峰週期;陸地用 bitmap 缺值。
+- pipeline/fetch_aifs.py:沿用 fetch_ecmwf 的 HOSTS、_crop_slices、cleanup;8 欄(msl、t2、u10、v10、tp、swh、mwd、mwp),兩個資料流的 84 h index 都上架才抓;一報約 55 MB,本機 4 分多鐘,存約 270 KB(61×45 格)。起報 24 小時內漏掉的會補。第一步在單一執行緒解(ecCodes 定義檔載入不是執行緒安全)。
+- 排程每 10 分(:02…:52)+ 啟動一次(model_job);cleanup 同 ECMWF_KEEP_DAYS。
+- 網頁:模式選單加「ECMWF AIFS(AI 模式,0.25°,每 6 小時)」,ECMWF 改標「ECMWF IFS」。變數:降雨、溫度、氣壓、平均風、浪高、平均週期;海岸外推 / 裁切同其他海浪;風場、海浪動畫都跟著它(浪速用平均週期)。
+- 實測 10/27 18Z:+12h 浪高平均 2.7 m、平均週期 7.3 s(IFS 同時段相近);網頁浪高、平均週期、動畫正常。

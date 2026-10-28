@@ -173,9 +173,10 @@
           <span class="layer-time" id="time-ecmwf">--</span>
         </label>
         <div class="layer-opts">
-          <label title="ECMWF 0.1°（約 10 km）每 3 小時，有陣風、海浪；氣象署 WRF 3 km 每 6 小時，地形細；氣象署海浪 0.1° 逐時到 7 天">模式
+          <label title="ECMWF IFS 0.1°（約 10 km）每 3 小時，有陣風、海浪；ECMWF AIFS 是 AI 模式，0.25°（約 25 km）每 6 小時；氣象署 WRF 3 km 每 6 小時，地形細；氣象署海浪 0.1° 逐時到 7 天">模式
             <select id="ec-model">
-              <option value="ecmwf">ECMWF（0.1°，每 3 小時）</option>
+              <option value="ecmwf">ECMWF IFS（0.1°，每 3 小時）</option>
+              <option value="aifs">ECMWF AIFS（AI 模式，0.25°，每 6 小時）</option>
               <option value="wrf">氣象署 WRF 3 km（每 6 小時）</option>
               <option value="cwawave">氣象署海浪（0.1°，逐時 7 天）</option>
             </select>

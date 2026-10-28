@@ -1,5 +1,6 @@
 // 模式預報圖層(台灣附近),可切換模式:
 //   ecmwf:ECMWF IFS 0.1°、每 3 小時(pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風、浪高、尖峰 / 平均週期
+//   aifs:ECMWF AIFS(AI 模式)0.25°、每 6 小時(pipeline/fetch_aifs.py):降雨、溫度、海平面氣壓、平均風、浪高、平均週期
 //   wrf:氣象署 WRF 3 km(重新內插成 0.03°)、每 6 小時(pipeline/fetch_wrf.py):降雨、溫度、海平面氣壓、平均風
 //   cwawave:氣象署海浪模式 0.1°、逐時到 168 小時(pipeline/fetch_cwa_wave.py):浪高、平均週期(浪向畫箭頭)
 // 兩種檔案格式相同:每個起報、每個變數一個檔(全部預報時刻);換時刻不用再下載。
@@ -26,6 +27,7 @@ export const EC_VARS = {
 };
 export const MODELS = {
   ecmwf: { name: 'ECMWF', path: 'ecmwf', vars: ['rain', 't2', 'msl', 'wind', 'gust', 'swh', 'pp1d', 'mwp'] },
+  aifs: { name: 'ECMWF AIFS', path: 'aifs', vars: ['rain', 't2', 'msl', 'wind', 'swh', 'mwp'] },
   wrf: { name: '氣象署 3km', path: 'wrf', vars: ['rain', 't2', 'msl', 'wind'] },
   cwawave: { name: '氣象署海浪', path: 'cwawave', vars: ['swh', 'mwp'] },
 };
@@ -45,6 +47,7 @@ const COAST_NOTE = '模式在近岸約 10 公里內沒有值，這段用外海�
 const WAVE_NOTE = {
   ecmwf: `示性波高、尖峰週期、平均週期：ECMWF 海浪模式（0.1°，每 3 小時）；箭頭 = 浪前進方向。`
     + `尖峰週期 = 能量最大的波的週期；平均週期較短，可和氣象署海浪比較（2026-10-28 下午起的起報才有）。${COAST_NOTE}`,
+  aifs: `浪高、平均週期：ECMWF AIFS 海浪（0.25°，每 6 小時；開放資料沒有尖峰週期）；箭頭 = 浪前進方向。${COAST_NOTE}`,
   cwawave: '浪高、平均週期：氣象署海浪模式（0.1°，逐時到 7 天，只到 126°E）；箭頭 = 浪前進方向。'
     + `檔案的欄位說明是亂碼，週期和 ECMWF 比對後判斷是平均週期（比尖峰週期短）。${COAST_NOTE}`,
 };

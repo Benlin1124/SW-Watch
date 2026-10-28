@@ -15,7 +15,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import (cleanup, config, fetch_cwa_wave, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
+from . import (cleanup, config, fetch_aifs, fetch_cwa_wave, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
                fetch_stations, fetch_typhoon, fetch_wrf, r2)
 from .common import read_status, record_status, stamp_dt
 
@@ -147,7 +147,8 @@ def safe_ecmwf():
 
 
 def model_job(name, fn):
-    """S3 只留最新一報的模式(氣象署 WRF 3 km、海浪):每 10 分檢查,漏抓就補不回來,所以檢查頻率不能太低。
+    """其他模式預報,每 10 分檢查。氣象署 WRF 3 km、海浪:S3 只留最新一報,漏抓就補不回來,所以檢查頻率不能太低。
+    AIFS:大氣和海浪 84 小時檔都上架就抓(約 55 MB),起報 24 小時內漏的會補。
     WRF:15 個時刻檔都換成新的一報(起報後約 5–6 小時)才抓,約 175 MB、半分鐘。
     海浪:zip 的 ETag 變了才下載(約 58 MB、1 分鐘內)。啟動時那一次和定時的是不同工作,用鎖避免同時跑。"""
     lock = threading.Lock()
@@ -210,7 +211,8 @@ def main():
     sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
     sched.add_job(safe_ecmwf, "cron", minute="4,14,24,34,44,54", id="ecmwf", max_instances=1, coalesce=True)
     sched.add_job(safe_ecmwf, "date", run_date=datetime.now(timezone.utc), id="ecmwf_start")
-    for name, fn, minute in (("wrf", fetch_wrf.run, "6,16,26,36,46,56"), ("cwawave", fetch_cwa_wave.run, "8,18,28,38,48,58")):
+    for name, fn, minute in (("wrf", fetch_wrf.run, "6,16,26,36,46,56"), ("cwawave", fetch_cwa_wave.run, "8,18,28,38,48,58"),
+                             ("aifs", fetch_aifs.run, "2,12,22,32,42,52")):
         job = model_job(name, fn)
         sched.add_job(job, "cron", minute=minute, id=name, max_instances=1, coalesce=True)
         sched.add_job(job, "date", run_date=datetime.now(timezone.utc), id=f"{name}_start")
