@@ -8,9 +8,9 @@
   u10 / v10  10 m 風 m/s(平均風 = 合成風速)
   gust 10 m 陣風 m/s:開放資料只有「預報時刻前 1 小時內最大」(10fg,step 範圍 t-1~t),3 小時之間的極值抓不到
   tp   起報後累積雨量 mm(前端相減得到 3/6/12/24 小時雨量)
-  swh  示性波高 m、mwd 平均波向(來向,度)、pp1d 尖峰週期 s:海浪模式(stream wave,同網格;陸地 = 無資料)
+  swh  示性波高 m、mwd 平均波向(來向,度)、pp1d 尖峰週期 s、mwp 平均週期 s:海浪模式(stream wave,同網格;陸地 = 無資料)
 下載:依 .index 用 HTTP Range 只抓需要的欄位(每欄全球 1–3.6 MB),解出後只留台灣附近。
-  每報約 29 步 ×(6 欄大氣 + 3 欄海浪)≈ 570 MB 下載;本機和 R2 每報只存約 4–5 MB。
+  每報約 29 步 ×(6 欄大氣 + 4 欄海浪)≈ 600 MB 下載;本機和 R2 每報只存約 5 MB。
   來源:AWS 鏡像(免費),失敗改 ECMWF 官網。
 排程每 10 分鐘檢查一次:最新一報的 84 小時檔上架了就抓;重啟後會補保留期間內漏掉的報。
 手動:python -m pipeline.fetch_ecmwf [--init 2026102200]"""
@@ -42,8 +42,9 @@ VARS = {
     "swh": ("swh", None, 0.01, 0.0, "m", "示性波高"),
     "mwd": ("mwd", None, 0.01, 0.0, "°", "平均波向(來向)"),
     "pp1d": ("pp1d", None, 0.01, 0.0, "s", "尖峰週期"),
+    "mwp": ("mwp", None, 0.01, 0.0, "s", "平均週期"),
 }
-WAVE = {"swh", "mwd", "pp1d"}                # 這些在海浪模式的檔(stream wave),其餘在大氣(oper)
+WAVE = {"swh", "mwd", "pp1d", "mwp"}                # 這些在海浪模式的檔(stream wave),其餘在大氣(oper)
 STREAMS = ("oper", "wave")
 GIVEN_UP_PATH = config.CACHE_DIR / "ecmwf_given_up.json"
 
@@ -170,7 +171,7 @@ def grid_and_vars(shape):
 def process(init):
     """下載一報、存成每變數一個檔;任何一步失敗就整報放棄(下次排程再試)。"""
     t0 = time.time()
-    log.info("ECMWF %s 開始下載(%d 步,約 570 MB、15–20 分鐘)", stamp_of(init), len(STEPS))
+    log.info("ECMWF %s 開始下載(%d 步,約 600 MB、15–20 分鐘)", stamp_of(init), len(STEPS))
     data = {k: [] for k in VARS}
     with ThreadPoolExecutor(4) as pool:
         for step in STEPS:
