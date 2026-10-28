@@ -11,6 +11,7 @@ import { MARINE_VARS, MarineCard, MarineLayer } from './layers/marine.js';
 import { localToStamp, stampToLocal, twMidnight } from './layers/station_custom.js';
 import { StationCard } from './station_card.js';
 import { ForecastCard } from './forecast_card.js';
+import { townAt } from './town.js';
 import { defaultCfg, EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
 import { getJSON } from './data.js';
 import * as prefs from './prefs.js';
@@ -1077,7 +1078,8 @@ function bindUI() {
     const el = $('readout');
     el.style.display = 'block';
     const lng = ((e.lngLat.lng + 180) % 360 + 360) % 360 - 180;   // 地圖往東捲過 180° 時 lng 會超過 180
-    el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${Math.abs(lng).toFixed(3)}°${lng < 0 ? 'W' : 'E'}${v ? `　${v}` : ''}`;
+    const town = townAt(lng, e.lngLat.lat);                        // 台灣陸地上:縣市鄉鎮名
+    el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${Math.abs(lng).toFixed(3)}°${lng < 0 ? 'W' : 'E'}${town ? `　${town}` : ''}${v ? `　${v}` : ''}`;
   });
   map.on('mouseout', () => { $('readout').style.display = 'none'; });
   // 模式預報開著時,點地圖空白處(不是測站、浮標、颱風、系集的點)→ 該點的預報資訊卡

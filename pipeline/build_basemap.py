@@ -1,6 +1,7 @@
 """產生素色向量底圖(仿 notebook 的 cartopy 底圖:淺灰陸地、白色海洋、黑色海岸線與縣市界)。
   Natural Earth 10m(公有領域)陸地 / 海岸線 / 國界 + 台灣縣市界(shp/TWN_CITY.shp 內政部;沒有就用 NCDR)、台灣周圍 100 公里線(km100)
   + 鄉鎮界(town:shp/TWN_TOWN.shp 內政部,只留縣市界、海岸線以外的段;網頁放大後才顯示)
+  + 鄉鎮多邊形(town_names:縣市 c、鄉鎮 t,簡化較粗,網頁滑鼠讀值查鄉鎮名用)
   台灣附近的海岸線、陸地改用縣市界外框(兩份來源位置不同,不換會畫出兩條海岸線)
   → web/assets/basemap/*.json(裁到西北太平洋、簡化、座標取 4 位小數)
 只需在更新底圖時執行一次:python -m pipeline.build_basemap [--src 已下載的目錄] [--only km100]"""
@@ -24,6 +25,7 @@ SOURCES = {
     "taiwan": (config.TAIWAN_GEOJSON_URL, 0.0005),
     "km100": ("https://watch.ncdr.nat.gov.tw/00_Wxmap/json/area/100KM.json", 0.002),
     "town": (None, 0.0005),          # shp/TWN_TOWN.shp
+    "town_names": (None, 0.001),
 }
 
 
@@ -110,6 +112,21 @@ def build_town(tol):
     return {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": mapping(g)}]}
 
 
+def build_town_names(tol):
+    """鄉鎮多邊形 + 名稱(滑鼠讀值用,約 100 m 精度就夠)。"""
+    import shapefile
+    r = shapefile.Reader(str(TWN_TOWN), encoding="utf-8")
+    feats = []
+    for s, rec in zip(r.shapes(), r.records()):
+        g = shapely.make_valid(shape(s.__geo_interface__)).simplify(tol, preserve_topology=True)
+        g = shapely.set_precision(g, 0.0001)
+        polys = [x for x in shapely.get_parts(g) if x.geom_type == "Polygon" and not x.is_empty]
+        if polys:
+            feats.append({"type": "Feature", "properties": {"c": rec["COUNTYNAME"], "t": rec["TOWNNAME"]},
+                          "geometry": mapping(shapely.MultiPolygon(polys))})
+    return {"type": "FeatureCollection", "features": feats}
+
+
 TW_PAD = 0.03        # 縣市聯集外擴(度,約 3 km):Natural Earth 的島 / 海岸線段一半以上在這範圍內就換成縣市界
 
 
@@ -123,11 +140,11 @@ def main():
     for name, (url, tol) in SOURCES.items():
         if a.only and name not in a.only:
             continue
-        if name == "town":
+        if name in ("town", "town_names"):
             if not TWN_TOWN.exists():
-                print("town: 沒有 shp/TWN_TOWN.shp,略過")
+                print(f"{name}: 沒有 shp/TWN_TOWN.shp,略過")
                 continue
-            fc = build_town(tol)
+            fc = build_town(tol) if name == "town" else build_town_names(tol)
         else:
             fc = build(name, load(name, url, a.src), tol)
         if name in ("land", "coast"):

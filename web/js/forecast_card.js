@@ -5,6 +5,7 @@
 import { MODELS, fmtEcInit } from './layers/ecmwf.js';
 import { bfLabel } from './colormaps.js';
 import { toDate, toStamp, fmtTW } from './time.js';
+import { townAt } from './town.js';
 
 const COLORS = { ecmwf: '#ffb74d', aifs: '#ce93d8', wrf: '#4fc3f7', cwawave: '#81c784' };
 const WAVE = new Set(['swh', 'pp1d', 'mwp']);
@@ -59,7 +60,8 @@ export class ForecastCard {
     this.el.hidden = false;
     (this.marker ??= new maplibregl.Marker({ color: '#00e5ff', scale: 0.7 })).setLngLat([lon, lat]).addTo(this.map);
     this.el.querySelector('#fc-title').textContent = `預報　${lat.toFixed(2)}°N ${lon.toFixed(2)}°E`;
-    this.el.querySelector('#fc-sub').textContent = this.ec.land?.isLand(lon, lat) ? '陸地（沒有海浪）' : '海上';
+    const land = this.ec.land?.isLand(lon, lat);
+    this.el.querySelector('#fc-sub').textContent = `${townAt(lon, lat) || (land ? '陸地' : '海上')}${land ? '（沒有海浪）' : ''}`;
     const seq = ++this.seq;
     this.el.querySelector('#fc-now').innerHTML = '<div class="sc-nodata">載入中…</div>';
     await this.drawChart();
