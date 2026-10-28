@@ -1,5 +1,6 @@
 // 風場 / 海浪動畫(設計log「風場動畫」「海浪動畫」):模式預報驅動的流動粒子,疊在所有圖層上
-// 不用新資料:直接讀模式預報圖層的檔。風跟著圖層選的模式(ECMWF / 氣象署 3 km),浪只有 ECMWF。
+// 不用新資料:直接讀模式預報圖層的檔。風跟著圖層選的模式(ECMWF / 氣象署 3 km;選海浪時用 ECMWF),
+// 浪:選氣象署海浪就用它(週期是平均週期),其他用 ECMWF。
 // 時間:圖層開著 → 跟它顯示的時刻(另一個模式就對齊同一個時間);沒開 → 跟時間軸 T,
 // 取 T 之前最近一報、在前後兩個預報時刻(ECMWF 每 3 小時、3 km 每 6 小時)之間線性內插,播放時平順變化。
 // 每種一張 canvas,在地圖之上、不接滑鼠事件。粒子用螢幕座標的速度移動(和縮放無關)。
@@ -53,7 +54,10 @@ export class WindLayer {
     this.K = KINDS[kind];
   }
 
-  get model() { return this.kind === 'wave' ? 'ecmwf' : this.ec.model; }
+  get model() {
+    const m = this.ec.model, has = (v) => MODELS[m].vars.includes(v);
+    return (this.kind === 'wave' ? has('swh') : has('wind')) ? m : 'ecmwf';
+  }
   get index() { return this.ec.idx(this.model); }
 
   addTo() {
@@ -107,7 +111,8 @@ export class WindLayer {
   slice(m, init, k) {
     const key = `${m}/${init}/${k}`;
     if (!this.slices.has(key)) {
-      const p = Promise.all(this.K.vars.map((v) => this.ec.slice(init, v, k, m))).then(([a, b, c]) => {
+      const vars = this.K.vars.map((v) => (v === 'pp1d' && !this.ec.idx(m)?.vars?.pp1d ? 'mwp' : v));   // 氣象署海浪只有平均週期
+      const p = Promise.all(vars.map((v) => this.ec.slice(init, v, k, m))).then(([a, b, c]) => {
         if (this.kind === 'wind') return { u: a, v: b };
         const rad = b.map((d) => ((d + 180) * Math.PI) / 180);
         return { x: rad.map(Math.sin), y: rad.map(Math.cos), t: c, h: a };
@@ -187,7 +192,7 @@ export class WindLayer {
     if (!s) return null;
     if (this.kind === 'wind') return `風場 ${dirName(-s.u, -s.v)}風 ${Math.hypot(s.u, s.v).toFixed(1)} m/s`;
     const c = waveClass(s.h);
-    const ext = this.ec.coastAt(lng, lat) ? '（近岸外推）' : '';
+    const ext = this.ec.coastAt(lng, lat, this.model) ? '（近岸外推）' : '';
     return `海浪 ${s.h.toFixed(1)} m${c ? `（${c}）` : ''} 來自${dirName(-s.x, -s.y)} ${s.t.toFixed(1)} s${ext}`;
   }
 
@@ -301,7 +306,7 @@ export class WindLayer {
     const s = this.shown, when = s ? `（${fmtEcInit(s.init)} +${Math.round(s.hours * 10) / 10}h）` : '（無資料）';
     const src = MODELS[s?.model ?? this.model].name;
     if (this.kind === 'wave') {
-      const title = `海浪動畫：ECMWF 海浪預報${when}`, note = `波峰往浪前進方向移動；越長浪越高、越快週期越長。${TIME_NOTE}`;
+      const title = `海浪動畫：${src} 海浪預報${when}`, note = `波峰往浪前進方向移動；越長浪越高、越快週期越長。${TIME_NOTE}`;
       return this.color === 'speed'
         ? withInfo(legendHTML(`${title} 波峰顏色 = 浪高 (m)`, SCALES.wave.levels, SCALES.wave.colors, 0, 22, SCALES.wave.ticks), note)
         : `<div class="legend-title">${title}${infoHTML(note)}</div>`;

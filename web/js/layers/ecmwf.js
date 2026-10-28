@@ -1,6 +1,7 @@
 // 模式預報圖層(台灣附近),可切換模式:
 //   ecmwf:ECMWF IFS 0.1°、每 3 小時(pipeline/fetch_ecmwf.py):降雨、溫度、海平面氣壓、平均風、陣風、浪高、尖峰週期
 //   wrf:氣象署 WRF 3 km(重新內插成 0.03°)、每 6 小時(pipeline/fetch_wrf.py):降雨、溫度、海平面氣壓、平均風
+//   cwawave:氣象署海浪模式 0.1°、逐時到 168 小時(pipeline/fetch_cwa_wave.py):浪高、平均週期(浪向畫箭頭)
 // 兩種檔案格式相同:每個起報、每個變數一個檔(全部預報時刻);換時刻不用再下載。
 // 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大(約 0.0125° 一像素)做雙線性內插再上色
 // 海浪(浪高、週期、波向):陸地沒值 → 往陸地外推 FILL_ITERS 格,畫完再用底圖陸地挖掉(海岸不再是方塊鋸齒)
@@ -21,10 +22,12 @@ export const EC_VARS = {
   gust: { name: '陣風', unit: 'm/s' },
   swh: { name: '浪高', unit: 'm' },
   pp1d: { name: '尖峰週期', unit: 's' },
+  mwp: { name: '平均週期', unit: 's' },
 };
 export const MODELS = {
   ecmwf: { name: 'ECMWF', path: 'ecmwf', vars: ['rain', 't2', 'msl', 'wind', 'gust', 'swh', 'pp1d'] },
   wrf: { name: '氣象署 3km', path: 'wrf', vars: ['rain', 't2', 'msl', 'wind'] },
+  cwawave: { name: '氣象署海浪', path: 'cwawave', vars: ['swh', 'mwp'] },
 };
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
 
@@ -35,10 +38,15 @@ const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(ECMWF 一報 2
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 const latOf = (y) => (Math.atan(Math.exp(y)) * 360) / Math.PI - 90;
-const WAVE_VARS = new Set(['swh', 'mwd', 'pp1d']);
+const WAVE_VARS = new Set(['swh', 'mwd', 'pp1d', 'mwp']);
 const FILL_ITERS = 3;              // 海浪往陸地外推幾格(0.1° 一格)
-const WAVE_NOTE = '示性波高、尖峰週期：ECMWF 海浪模式（0.1°）；箭頭 = 浪前進方向。模式在近岸約 10 公里內沒有值，'
-  + '這段用外海的值往岸邊外推、再依底圖海岸線裁切，只是讓圖連到海岸，不是真的近岸浪況（點擊查值會標「近岸外推」）。港內、海灣沒有值。';
+const COAST_NOTE = '模式在近岸約 10 公里內沒有值，這段用外海的值往岸邊外推、再依底圖海岸線裁切，'
+  + '只是讓圖連到海岸，不是真的近岸浪況（點擊查值會標「近岸外推」）。港內、海灣沒有值。';
+const WAVE_NOTE = {
+  ecmwf: `示性波高、尖峰週期：ECMWF 海浪模式（0.1°，每 3 小時）；箭頭 = 浪前進方向。${COAST_NOTE}`,
+  cwawave: '浪高、平均週期：氣象署海浪模式（0.1°，逐時到 7 天，只到 126°E）；箭頭 = 浪前進方向。'
+    + `檔案的欄位說明是亂碼，週期和 ECMWF 比對後判斷是平均週期（比尖峰週期短）。${COAST_NOTE}`,
+};
 export const fmtEcInit = (s) => `${s.slice(4, 6)}/${s.slice(6, 8)} ${s.slice(8, 10)}Z`;
 
 function packHex(hex) {
@@ -64,7 +72,7 @@ export class EcmwfLayer {
   cache = new Map();         // `${模式}/${init}/${var}` → Promise<Uint16Array>
   frames = new Map();        // key → Promise<畫好的圖>
   land = null;               // 陸地遮罩(land.js);載入失敗 → null,海浪照原本方塊邊緣畫
-  coast = null;              // 外推出來的格(Uint8Array,1 = 近岸外推)
+  coasts = {};               // 模式 → 外推出來的格(Uint8Array,1 = 近岸外推)
 
   constructor(map) { this.map = map; }
 
@@ -94,7 +102,7 @@ export class EcmwfLayer {
     this.model = m;
     this.init = '';
     this.step = null;
-    if (!this.vars.includes(this.variable)) this.variable = 'rain';
+    if (!this.vars.includes(this.variable)) this.variable = this.vars[0];
   }
 
   addTo(beforeId) {
@@ -167,12 +175,12 @@ export class EcmwfLayer {
       const r = raw[k * n + i];
       out[i] = r === spec.nodata ? NaN : r * spec.scale + spec.offset;
     }
-    if (WAVE_VARS.has(v)) this.fillCoast(out, g, v === 'mwd');
+    if (WAVE_VARS.has(v)) this.fillCoast(out, g, v === 'mwd', m);
     return out;
   }
 
   /** 海浪往陸地外推:無值的格取周圍 8 格有值的平均,重複 FILL_ITERS 次;波向(circ)用單位向量平均 */
-  fillCoast(a, g, circ) {
+  fillCoast(a, g, circ, m) {
     const { nx, ny } = g;
     const parts = circ ? [a.map((d) => Math.sin((d * Math.PI) / 180)), a.map((d) => Math.cos((d * Math.PI) / 180))] : [a];
     const filled = new Uint8Array(a.length);
@@ -199,15 +207,15 @@ export class EcmwfLayer {
       for (const [i, m] of add) { parts.forEach((p, k) => { p[i] = m[k]; }); filled[i] = 1; }
     }
     if (circ) for (let i = 0; i < a.length; i++) if (filled[i]) a[i] = ((Math.atan2(parts[0][i], parts[1][i]) * 180) / Math.PI + 360) % 360;
-    this.coast = filled;                    // 陸地格固定,每個變數、每個時刻都一樣(只有 ECMWF 有海浪)
+    this.coasts[m] = filled;                // 陸地格固定,每個變數、每個時刻都一樣
   }
 
   /** 經緯度落在外推格(近岸外推)上 */
-  coastAt(lon, lat) {
-    const g = this.idx('ecmwf')?.grid;
-    if (!this.coast || !g) return false;
+  coastAt(lon, lat, m = 'ecmwf') {
+    const g = this.idx(m)?.grid, coast = this.coasts[m];
+    if (!coast || !g) return false;
     const ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
-    return ix >= 0 && iy >= 0 && ix < g.nx && iy < g.ny && this.coast[iy * g.nx + ix] === 1;
+    return ix >= 0 && iy >= 0 && ix < g.nx && iy < g.ny && coast[iy * g.nx + ix] === 1;
   }
 
   /** 模式 m 的變數在第 step 小時的場;回傳 { field, u, v, label } */
@@ -232,10 +240,10 @@ export class EcmwfLayer {
       const f = variable === 'gust' ? await slice('gust', k) : u.map((x, i) => Math.hypot(x, v[i]));
       return { field: f, u, v, label: variable === 'gust' ? '陣風（該時刻前 1 小時最大）' : '10 m 平均風' };
     }
-    if (variable === 'swh' || variable === 'pp1d') {     // 海浪:箭頭畫浪前進方向(mwd 是來向,轉 180°)
+    if (variable === 'swh' || variable === 'pp1d' || variable === 'mwp') {   // 海浪:箭頭畫浪前進方向(mwd 是來向,轉 180°)
       const [f, d] = await Promise.all([slice(variable, k), slice('mwd', k)]);
       const rad = d.map((x) => ((x + 180) * Math.PI) / 180);
-      return { field: f, u: rad.map(Math.sin), v: rad.map(Math.cos), label: variable === 'swh' ? '示性波高' : '尖峰週期' };
+      return { field: f, u: rad.map(Math.sin), v: rad.map(Math.cos), label: variable === 'swh' ? '示性波高' : EC_VARS[variable].name };
     }
     return { field: await slice(variable, k), label: EC_VARS[variable].name };
   }
@@ -245,7 +253,7 @@ export class EcmwfLayer {
     if (variable === 't2') return SCALES.temp;
     if (variable === 'msl') return SCALES.pres;
     if (variable === 'swh') return SCALES.wave;
-    if (variable === 'pp1d') return SCALES.period;
+    if (variable === 'pp1d' || variable === 'mwp') return SCALES.period;
     return SCALES.wind;
   }
 
@@ -381,7 +389,7 @@ export class EcmwfLayer {
     if (Number.isNaN(x) || (wave && this.land?.isLand(lng, lat))) return null;
     const unit = EC_VARS[v].unit;
     const cls = v === 'swh' && waveClass(x) ? `（${waveClass(x)}）` : '';
-    const ext = wave && this.coastAt(lng, lat) ? '（近岸外推）' : '';
+    const ext = wave && this.coastAt(lng, lat, this.shown.model) ? '（近岸外推）' : '';
     return `${MODELS[this.shown.model].name} ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}${ext}`;
   }
 
@@ -393,9 +401,9 @@ export class EcmwfLayer {
     const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks, sc.openTop);
     if (variable === 'swh') {
       const cls = WAVE_CLASSES.map(([lo, name], i) => `${name} ${lo}${WAVE_CLASSES[i + 1] ? `–${WAVE_CLASSES[i + 1][0]}` : ' 以上'}`);
-      return `${withInfo(html, WAVE_NOTE)}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>`;
+      return `${withInfo(html, WAVE_NOTE[model])}<div class="legend-labels" style="margin-top:4px">${cls.join('｜')} m</div>`;
     }
-    return variable === 'pp1d' ? withInfo(html, WAVE_NOTE) : html;
+    return variable === 'pp1d' || variable === 'mwp' ? withInfo(html, WAVE_NOTE[model]) : html;
   }
 }
 

@@ -173,10 +173,11 @@
           <span class="layer-time" id="time-ecmwf">--</span>
         </label>
         <div class="layer-opts">
-          <label title="ECMWF 0.1°（約 10 km）每 3 小時，有陣風、海浪；氣象署 WRF 3 km 每 6 小時，地形細">模式
+          <label title="ECMWF 0.1°（約 10 km）每 3 小時，有陣風、海浪；氣象署 WRF 3 km 每 6 小時，地形細；氣象署海浪 0.1° 逐時到 7 天">模式
             <select id="ec-model">
               <option value="ecmwf">ECMWF（0.1°，每 3 小時）</option>
               <option value="wrf">氣象署 WRF 3 km（每 6 小時）</option>
+              <option value="cwawave">氣象署海浪（0.1°，逐時 7 天）</option>
             </select>
           </label>
           <label>變數
@@ -188,6 +189,7 @@
               <option value="gust">陣風</option>
               <option value="swh">浪高</option>
               <option value="pp1d">尖峰週期</option>
+              <option value="mwp">平均週期</option>
             </select>
             <select id="ec-rain">
               <option value="3">3 小時</option><option value="6">6 小時</option>
@@ -213,7 +215,7 @@
           </div>
           <div class="ty-toggles">
             <label title="預報時刻跟著下方時間軸（時間軸停在哪就顯示那之前最近的時刻）"><input type="checkbox" id="ec-follow"> 對齊時間軸</label>
-            <label title="平均風、陣風畫風吹去的方向；浪高、尖峰週期畫浪前進方向"><input type="checkbox" id="ec-arrows" checked> 箭頭</label>
+            <label title="平均風、陣風畫風吹去的方向；浪高、週期畫浪前進方向"><input type="checkbox" id="ec-arrows" checked> 箭頭</label>
           </div>
           <label>透明度 <input type="range" id="op-ecmwf" min="0" max="100" value="80"></label>
         </div>

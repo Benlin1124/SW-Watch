@@ -15,7 +15,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import (cleanup, config, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
+from . import (cleanup, config, fetch_cwa_wave, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
                fetch_stations, fetch_typhoon, fetch_wrf, r2)
 from .common import read_status, record_status, stamp_dt
 
@@ -146,23 +146,25 @@ def safe_ecmwf():
         _ecmwf_lock.release()
 
 
-_wrf_lock = threading.Lock()
+def model_job(name, fn):
+    """S3 只留最新一報的模式(氣象署 WRF 3 km、海浪):每 10 分檢查,漏抓就補不回來,所以檢查頻率不能太低。
+    WRF:15 個時刻檔都換成新的一報(起報後約 5–6 小時)才抓,約 175 MB、半分鐘。
+    海浪:zip 的 ETag 變了才下載(約 58 MB、1 分鐘內)。啟動時那一次和定時的是不同工作,用鎖避免同時跑。"""
+    lock = threading.Lock()
 
-
-def safe_wrf():
-    """氣象署 WRF 3 km:每 10 分檢查 S3 上 15 個時刻檔是否都換成新的一報(起報後約 5–6 小時);一報約 175 MB、半分鐘。
-    S3 只留最新一報,漏抓就補不回來,所以檢查頻率不能太低。"""
-    if not _wrf_lock.acquire(blocking=False):
-        return
-    try:
-        status, stamp, prev = fetch_wrf.run()
-        if status == "new":
-            record_status("wrf", status, stamp, prev)
-    except Exception as e:
-        log.exception("wrf 失敗")
-        record_status("wrf", "error", error=f"{type(e).__name__}: {e}")
-    finally:
-        _wrf_lock.release()
+    def job():
+        if not lock.acquire(blocking=False):
+            return
+        try:
+            status, stamp, prev = fn()
+            if status == "new":
+                record_status(name, status, stamp, prev)
+        except Exception as e:
+            log.exception("%s 失敗", name)
+            record_status(name, "error", error=f"{type(e).__name__}: {e}")
+        finally:
+            lock.release()
+    return job
 
 
 def safe_r2_flush():
@@ -208,8 +210,10 @@ def main():
     sched.add_job(safe_ensemble, "cron", minute="7,22,37,52", id="ensemble", max_instances=1, coalesce=True)
     sched.add_job(safe_ecmwf, "cron", minute="4,14,24,34,44,54", id="ecmwf", max_instances=1, coalesce=True)
     sched.add_job(safe_ecmwf, "date", run_date=datetime.now(timezone.utc), id="ecmwf_start")
-    sched.add_job(safe_wrf, "cron", minute="6,16,26,36,46,56", id="wrf", max_instances=1, coalesce=True)
-    sched.add_job(safe_wrf, "date", run_date=datetime.now(timezone.utc), id="wrf_start")
+    for name, fn, minute in (("wrf", fetch_wrf.run, "6,16,26,36,46,56"), ("cwawave", fetch_cwa_wave.run, "8,18,28,38,48,58")):
+        job = model_job(name, fn)
+        sched.add_job(job, "cron", minute=minute, id=name, max_instances=1, coalesce=True)
+        sched.add_job(job, "date", run_date=datetime.now(timezone.utc), id=f"{name}_start")
     sched.add_job(safe_satellite, "cron", minute="*", id="satellite", max_instances=1, coalesce=True,
                   misfire_grace_time=50)
     if r2.enabled():

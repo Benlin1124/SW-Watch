@@ -1035,3 +1035,9 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 排程每 10 分檢查(:06…:56)+ 啟動時一次;cleanup 跳過 wrf,改用 fetch_ecmwf.cleanup(layer) 依 ECMWF_KEEP_DAYS 刪。
 - 網頁:ECMWF 圖層改名「模式預報」,加「模式」選單(ECMWF / 氣象署 WRF 3 km,沒資料的不能選)。EcmwfLayer 改成多模式(indexes、idx(m)、stepsOf / initsOf、cache 與畫好的圖 key 含模式);3 km 隱藏陣風、浪高、尖峰週期與 3 小時雨量(雨量時段起點取之前最近的時刻)。畫圖放大倍數依格距(約 0.0125°/像素:ECMWF 8 倍、3 km 2 倍),箭頭約 0.1° 一個。
 - 風場動畫跟著選的模式(圖層顯示另一個模式時對齊它的時間);海浪動畫固定 ECMWF。
+## 2026-10-28 氣象署海浪模式 F-A0020-001
+- 使用者要把氣象署海浪接進來。S3 公開網址 Forecast/F-A0020-001.zip(fileapi 只接受 format=ZIP,轉址到這裡),約 58 MB:169 時刻(0–168 h 逐時)× 3 變數(hs、dir、t)XML,每檔約 5 MB、陸地點不列;一天 4 報(看到 12Z、18Z),S3 只留最新。
+- 說明文字是亂碼(DatasetDescription、ElementDescription),所以和 ECMWF 10/27 12Z +12h 同時刻比對:浪高相關 0.89、平均 2.79 vs 2.94 m;浪向和 mwd 中位差 2°、全部 |差| < 45° → 來向;週期平均 6.8 vs 尖峰週期 8.4 s → 當平均週期(mwp)。Measures 寫 0.01m / 0.01s,但數值已是 m / s。InitialTime 是 UTC(+0h 的 DateTime 是台灣時間 +8)。
+- pipeline/fetch_cwa_wave.py:HEAD 比 ETag(存在 index.json),變了才下載;regex 解 XML(507 檔約 30 秒);只留 115–126°E、17–28°N(111×111,和 ECMWF 同格點);變數 swh / mwd / mwp,每報約 1.5 MB。排程每 10 分(:08…:58)+ 啟動一次;WRF 和海浪共用 model_job(各自的鎖);cleanup 同 ECMWF_KEEP_DAYS。
+- 網頁:模式選單加「氣象署海浪」(變數浪高、平均週期;169 個時刻逐時)。海岸外推 / 裁切同 ECMWF 海浪(近岸外推格依模式分開記)。ⓘ 說明依模式。setModel 換到沒有目前變數的模式時改用該模式第一個變數。
+- 動畫:海浪動畫在選氣象署海浪時用它(速度用平均週期),否則 ECMWF;風場動畫在選海浪模式時用 ECMWF(對齊圖層顯示的時間)。
