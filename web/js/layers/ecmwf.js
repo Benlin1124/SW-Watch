@@ -26,7 +26,7 @@ export const EC_VARS = {
   mwp: { name: '平均週期', unit: 's' },
 };
 export const MODELS = {
-  ecmwf: { name: 'ECMWF', path: 'ecmwf', vars: ['rain', 't2', 'msl', 'wind', 'gust', 'swh', 'pp1d', 'mwp'] },
+  ecmwf: { name: 'ECMWF IFS', path: 'ecmwf', vars: ['rain', 't2', 'msl', 'wind', 'gust', 'swh', 'pp1d', 'mwp'] },
   aifs: { name: 'ECMWF AIFS', path: 'aifs', vars: ['rain', 't2', 'msl', 'wind', 'swh', 'mwp'] },
   wrf: { name: '氣象署 3km', path: 'wrf', vars: ['rain', 't2', 'msl', 'wind'] },
   cwawave: { name: '氣象署海浪', path: 'cwawave', vars: ['swh', 'mwp'] },

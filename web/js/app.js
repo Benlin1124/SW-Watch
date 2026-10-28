@@ -1,6 +1,6 @@
 // SW-Watch 主程式:地圖、圖層面板、時間軸(同步 / 不同步、對齊播放)
 import { REFRESH_SEC, STEP_MIN, TIMELINE_DAYS } from './config.js';
-import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp } from './time.js';
+import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp, toDate } from './time.js';
 import { RadarLayer } from './layers/radar.js';
 import { SatelliteLayer } from './layers/satellite.js';
 import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
@@ -10,6 +10,7 @@ import { STATION_TYPES, STATION_VARS, StationLayer } from './layers/stations.js'
 import { MARINE_VARS, MarineCard, MarineLayer } from './layers/marine.js';
 import { localToStamp, stampToLocal, twMidnight } from './layers/station_custom.js';
 import { StationCard } from './station_card.js';
+import { ForecastCard } from './forecast_card.js';
 import { defaultCfg, EnsembleLayer, fmtInit, MODEL_COLORS, MODEL_NAMES } from './layers/ensemble.js';
 import { getJSON } from './data.js';
 import * as prefs from './prefs.js';
@@ -119,7 +120,8 @@ const card = new StationCard(stations);
 stations.onSelect = (id) => openStation(id, false);
 const marine = new MarineLayer(map);
 const mCard = new MarineCard(marine);
-marine.onSelect = (id) => { card.close(); mCard.open(id, state.T); };
+marine.onSelect = (id) => { card.close(); fcCard.close(); mCard.open(id, state.T); };
+const fcCard = new ForecastCard(ecmwf, map, { onOpen: () => { card.close(); mCard.close(); } });   // onPick 在 bindEcmwfUI 設定
 const LAYERS = [satellite, ecmwf, radar, stations, marine, typhoon, ens];
 // 衛星這一張還沒好:畫面維持上一張,時間欄先標要顯示的時間「載入中」(好了由 updateLayerTime 蓋掉)
 satellite.onLoading = (stamp) => {
@@ -191,6 +193,7 @@ async function render() {
   if (ecmwf.visible || wind.visible || waves.visible) updateLegend();        // ECMWF 圖例跟著變數、時刻、雨量時段
   card.update(state.T);
   mCard.update(state.T);
+  fcCard.update(state.T);
 }
 
 /** 風場 / 海浪動畫跟著 ECMWF 顯示的時刻或時間軸(不同步時用現在) */
@@ -788,6 +791,16 @@ function bindEcmwfUI() {
   $('ec-rain-scale').onchange = (e) => { ecmwf.rainScale = e.target.value; apply(); };
   $('ec-init').onchange = (e) => { ecmwf.init = e.target.value; apply(); };
   $('ec-step').onchange = (e) => { ecmwf.step = +e.target.value; setFollow(false); apply(); };
+  // 預報資訊卡點圖:目前的模式、起報跳到最接近那個時間的預報時刻(超出這一報的範圍就停在頭尾)
+  fcCard.onPick = (sec) => {
+    const init = ecmwf.activeInit, st = ecmwf.steps;
+    if (!init || !st.length) return;
+    const h = (sec * 1000 - toDate(init).getTime()) / 3600e3;
+    ecmwf.step = st.reduce((a, s) => (Math.abs(s - h) < Math.abs(a - h) ? s : a), st[0]);
+    ecPause();
+    setFollow(false);
+    apply();
+  };
   const move = (d) => {
     const st = ecmwf.steps, i = st.indexOf(ecmwf.pickedStep ?? ecmwf.step) + d;
     if (i < 0 || i >= st.length) return;
@@ -849,6 +862,7 @@ function openStation(id, fly = true) {
   if (!info) return;
   if (fly) map.flyTo({ center: [info.lon, info.lat], zoom: Math.max(map.getZoom(), 9) });
   mCard.close();
+  fcCard.close();
   card.open(id, state.T);
 }
 
@@ -1052,6 +1066,13 @@ function bindUI() {
     el.textContent = `${e.lngLat.lat.toFixed(3)}°N ${Math.abs(lng).toFixed(3)}°${lng < 0 ? 'W' : 'E'}${v ? `　${v}` : ''}`;
   });
   map.on('mouseout', () => { $('readout').style.display = 'none'; });
+  // 模式預報開著時,點地圖空白處(不是測站、浮標、颱風、系集的點)→ 該點的預報資訊卡
+  map.on('click', (e) => {
+    if (!ecmwf.visible || !ecmwf.index) return;
+    const p = e.point, box = [[p.x - 4, p.y - 4], [p.x + 4, p.y + 4]];
+    if (map.queryRenderedFeatures(box).some((f) => /^(st-|mr-|ty-|ens-)/.test(f.layer.id))) return;
+    fcCard.open(((e.lngLat.lng + 180) % 360 + 360) % 360 - 180, e.lngLat.lat, state.T);
+  });
   window.addEventListener('resize', () => refreshSlider());
 }
 
