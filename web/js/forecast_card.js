@@ -7,7 +7,7 @@ import { bfLabel } from './colormaps.js';
 import { toDate, toStamp, fmtTW } from './time.js';
 import { townAt } from './town.js';
 
-const COLORS = { ecmwf: '#ffb74d', aifs: '#ce93d8', wrf: '#4fc3f7', cwawave: '#81c784' };
+export const COLORS = { ecmwf: '#ffb74d', aifs: '#ce93d8', wrf: '#4fc3f7', cwawave: '#81c784' };
 const WAVE = new Set(['swh', 'pp1d', 'mwp']);
 const FILL_ITERS = 3;
 // 分頁:每條線 = 一個模式的一個量(dash = 虛線);rain6 = 前 6 小時雨量(階梯線,值畫在那 6 小時)
@@ -22,7 +22,7 @@ const TABS = {
 const VAR_TAB = { rain: 'rain', t2: 't2', msl: 'msl', wind: 'wind', gust: 'wind', swh: 'swh', pp1d: 'per', mwp: 'per' };
 const HAS = (m, v) => {
   const vars = MODELS[m].vars;
-  return v === 'rain6' ? vars.includes('rain') : vars.includes(v);
+  return v === 'rain6' || v === 'rain1' ? vars.includes('rain') : v === 'pstn' ? vars.includes('msl') : vars.includes(v);
 };
 const toSec = (s) => toDate(s).getTime() / 1000;
 const stampOf = (sec) => toStamp(new Date(sec * 1000));
@@ -84,53 +84,7 @@ export class ForecastCard {
     this.plot?.redraw(false);
   }
 
-  /** 模式 m 最新一報、變數 v 在這一點的時序 → { init, xs(UTC 秒), ys, coast } 或 null */
-  async series(m, v) {
-    const ec = this.ec, x = ec.idx(m), init = x?.latest;
-    if (!init || !HAS(m, v)) return null;
-    const g = x.grid, { lon, lat } = this.pt;
-    let ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
-    if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
-    const steps = ec.stepsOf(m, init), n = g.nx * g.ny;
-    const raw = async (name) => {
-      const { raw: r, spec } = await ec.data(init, name, m);
-      return (k, i) => { const q = r[k * n + i]; return q === spec.nodata || q === undefined ? NaN : q * spec.scale + spec.offset; };
-    };
-    let coast = false;
-    if (WAVE.has(v)) {
-      if (ec.land?.isLand(lon, lat)) return null;
-      const get = await raw(v);
-      if (Number.isNaN(get(0, iy * g.nx + ix))) {          // 近岸沒有值:找 FILL_ITERS 格內最近有值的格
-        let best = null;
-        for (let dy = -FILL_ITERS; dy <= FILL_ITERS; dy++) {
-          for (let dx = -FILL_ITERS; dx <= FILL_ITERS; dx++) {
-            const jx = ix + dx, jy = iy + dy, d = dx * dx + dy * dy;
-            if (jx < 0 || jy < 0 || jx >= g.nx || jy >= g.ny || (best && best.d <= d)) continue;
-            if (!Number.isNaN(get(0, jy * g.nx + jx))) best = { jx, jy, d };
-          }
-        }
-        if (!best) return null;
-        ({ jx: ix, jy: iy } = best);
-        coast = true;
-      }
-    }
-    const i = iy * g.nx + ix, t0 = toSec(init);
-    let xs = steps.map((s) => t0 + s * 3600), ys;
-    if (v === 'rain6') {
-      const tp = await raw('tp'), at = new Map(steps.map((s, k) => [s, k]));
-      const keep = steps.filter((s) => s >= 6 && s % 6 === 0 && at.has(s - 6));
-      xs = keep.map((s) => t0 + s * 3600);
-      ys = keep.map((s) => Math.max(tp(at.get(s), i) - tp(at.get(s - 6), i), 0));
-    } else if (v === 'wind') {
-      const [u, w] = await Promise.all([raw('u10'), raw('v10')]);
-      ys = steps.map((s, k) => Math.hypot(u(k, i), w(k, i)));
-    } else {
-      const get = await raw(v);
-      ys = steps.map((s, k) => get(k, i));
-    }
-    ys = ys.map((y) => (Number.isNaN(y) ? null : y));
-    return { init, xs, ys, coast };
-  }
+  series(m, v) { return pointSeries(this.ec, m, v, this.pt.lon, this.pt.lat); }
 
   /** 上半部:各模式最新一報的摘要表(模式一列) */
   async summary(seq) {
@@ -230,4 +184,60 @@ export class ForecastCard {
       if (i != null) this.onPick?.(u.data[0][i]);
     });
   }
+}
+
+/** 模式 m 最新一報、變數 v 在 (lon, lat) 的時序 → { init, xs(UTC 秒), ys, coast } 或 null(測站資訊卡也用)
+ *  rain6 = 前 6 小時雨量;rain1 = 每個預報間隔的平均每小時雨量;pstn = 海平面氣壓換算到高度 alt(m)的氣壓 */
+export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
+  const x = ec.idx(m), init = x?.latest;
+  if (!init || !HAS(m, v)) return null;
+  const g = x.grid;
+  let ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
+  if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
+  const steps = ec.stepsOf(m, init), n = g.nx * g.ny;
+  const raw = async (name) => {
+    const { raw: r, spec } = await ec.data(init, name, m);
+    return (k, i) => { const q = r[k * n + i]; return q === spec.nodata || q === undefined ? NaN : q * spec.scale + spec.offset; };
+  };
+  let coast = false;
+  if (WAVE.has(v)) {
+    if (ec.land?.isLand(lon, lat)) return null;
+    const get = await raw(v);
+    if (Number.isNaN(get(0, iy * g.nx + ix))) {          // 近岸沒有值:找 FILL_ITERS 格內最近有值的格
+      let best = null;
+      for (let dy = -FILL_ITERS; dy <= FILL_ITERS; dy++) {
+        for (let dx = -FILL_ITERS; dx <= FILL_ITERS; dx++) {
+          const jx = ix + dx, jy = iy + dy, d = dx * dx + dy * dy;
+          if (jx < 0 || jy < 0 || jx >= g.nx || jy >= g.ny || (best && best.d <= d)) continue;
+          if (!Number.isNaN(get(0, jy * g.nx + jx))) best = { jx, jy, d };
+        }
+      }
+      if (!best) return null;
+      ({ jx: ix, jy: iy } = best);
+      coast = true;
+    }
+  }
+  const i = iy * g.nx + ix, t0 = toSec(init);
+  let xs = steps.map((s) => t0 + s * 3600), ys;
+  if (v === 'rain6') {
+    const tp = await raw('tp'), at = new Map(steps.map((s, k) => [s, k]));
+    const keep = steps.filter((s) => s >= 6 && s % 6 === 0 && at.has(s - 6));
+    xs = keep.map((s) => t0 + s * 3600);
+    ys = keep.map((s) => Math.max(tp(at.get(s), i) - tp(at.get(s - 6), i), 0));
+  } else if (v === 'rain1') {
+    const tp = await raw('tp');
+    xs = xs.slice(1);
+    ys = steps.slice(1).map((s, k) => Math.max(tp(k + 1, i) - tp(k, i), 0) / (s - steps[k]));
+  } else if (v === 'pstn') {               // 測高公式:p = msl·exp(−g z / (Rd T)),T 取 2 m 溫度加半層的遞減率
+    const [p, t] = await Promise.all([raw('msl'), raw('t2')]);
+    ys = steps.map((s, k) => p(k, i) * Math.exp((-9.80665 * alt) / (287.05 * (t(k, i) + 273.15 + 0.00325 * alt))));
+  } else if (v === 'wind') {
+    const [u, w] = await Promise.all([raw('u10'), raw('v10')]);
+    ys = steps.map((s, k) => Math.hypot(u(k, i), w(k, i)));
+  } else {
+    const get = await raw(v);
+    ys = steps.map((s, k) => get(k, i));
+  }
+  ys = ys.map((y) => (Number.isNaN(y) ? null : y));
+  return { init, xs, ys, coast };
 }

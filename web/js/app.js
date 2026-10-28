@@ -130,7 +130,7 @@ const ens = new EnsembleLayer(map);
 // 系集各模式的設定(初始時間不存:下次打開已過時)
 for (const [m, c] of Object.entries(prefs.get('ensCfg') ?? {})) ens.cfg[m] = { ...defaultCfg(), ...c, init: '' };
 const stations = new StationLayer(map);
-const card = new StationCard(stations);
+const card = new StationCard(stations, { ec: ecmwf });
 stations.onSelect = (id) => openStation(id, false);
 const marine = new MarineLayer(map);
 const mCard = new MarineCard(marine);

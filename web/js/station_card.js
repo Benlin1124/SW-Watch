@@ -1,14 +1,25 @@
 // 測站資訊卡:點測站(或搜尋、排行榜)打開;顯示時間軸當下各變數,與折線圖(uPlot;1 小時到 10 天)
+// 疊加預報:各模式最新一報在測站位置(最近格點)的預報線,虛線接在觀測後面(forecast_card.pointSeries)
 // 時序資料:stations/recent/{縣市名 UTF-8 hex}.json.gz(pipeline/station_recent.py),一個縣市一個檔
 import { getJSON } from './data.js';
 import { bfLabel } from './colormaps.js';
 import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
+import { COLORS, pointSeries } from './forecast_card.js';
+import { MODELS } from './layers/ecmwf.js';
 
 const REFETCH_MS = 5 * 60e3;
 const HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 240];
 const hoursLabel = (h) => (h >= 168 ? `${h / 24} 天` : `${h} 小時`);
+const FC_HOURS = { 0: '不疊預報', 24: '預報 1 天', 72: '預報 3 天', 168: '預報 7 天' };
+// 分頁 → 疊加的模式變數(溼度模式沒有);氣壓:測站氣壓 ↔ 模式海平面氣壓換算到測站海拔;雨量:平均每小時雨量畫在 1 小時雨量的軸
+const FC_LINES = {
+  temp: [{ v: 't2', label: '' }],
+  pres: [{ v: 'pstn', label: '' }],
+  wind: [{ v: 'wind', label: ' 平均風' }, { v: 'gust', label: ' 陣風' }],
+  rain: [{ v: 'rain1', label: ' 每小時', scale: 'r1h' }],
+};
 const toSec = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12)) / 1000;
 const countyKey = (c) => [...new TextEncoder().encode(c || '其他')].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fmt = (x, d = 1) => (x == null ? '—' : (+x).toFixed(d));
@@ -35,17 +46,24 @@ export class StationCard {
   T = null;
   cache = new Map();         // 縣市 → { at, promise }
   plot = null;
+  drawSeq = 0;
   hours = HOURS.includes(prefs.get('cardHours')) ? prefs.get('cardHours') : 72;   // 圖表時段
   range = null;              // 圖上的時間範圍 [起, 迄](UTC 秒)
+  fcHours = FC_HOURS[prefs.get('cardFc')] ? prefs.get('cardFc') : 72;   // 疊加預報幾小時(0 = 不疊)
 
-  constructor(layer, { onClose } = {}) {
+  constructor(layer, { onClose, ec } = {}) {
     this.layer = layer;
     this.onClose = onClose;
+    this.ec = ec;              // 模式預報圖層(取各模式 index / 資料)
     this.el.querySelector('#sc-close').onclick = () => this.close();
     const hSel = this.el.querySelector('#sc-hours');
     hSel.innerHTML = HOURS.map((h) => `<option value="${h}">${hoursLabel(h)}</option>`).join('');
     hSel.value = this.hours;
     hSel.onchange = () => { this.hours = +hSel.value; prefs.set('cardHours', this.hours); this.drawChart(); };
+    const fSel = this.el.querySelector('#sc-fc');
+    fSel.innerHTML = Object.entries(FC_HOURS).map(([h, name]) => `<option value="${h}">${name}</option>`).join('');
+    fSel.value = this.fcHours;
+    fSel.onchange = () => { this.fcHours = +fSel.value; prefs.set('cardFc', this.fcHours); this.drawChart(); };
     for (const b of this.el.querySelectorAll('[data-tab]')) {
       b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
     }
@@ -115,6 +133,7 @@ export class StationCard {
   }
 
   async drawChart() {
+    const seq = ++this.drawSeq;
     for (const b of this.el.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === this.tab);
     const box = this.el.querySelector('#sc-chart'), note = this.el.querySelector('#sc-note');
     const id = this.id, info = this.layer.all.get(id);
@@ -142,14 +161,24 @@ export class StationCard {
     // 時段:結尾 = 最新資料;時間軸在這段之前時,改成讓時間軸落在中間
     const H = this.hours * 3600, latest = toSec(d.time), T = this.T && toSec(this.T);
     const end = T && T <= latest - H ? Math.min(latest, T + H / 2) : latest;
-    this.range = [end - H, end];
+    // 疊加預報:只在看最新時段時;圖往後延伸 fcHours
+    const fcLines = end === latest && this.fcHours && this.ec ? FC_LINES[this.tab] ?? [] : [];
+    const fcEnd = fcLines.length ? end + this.fcHours * 3600 : end;
+    this.range = [end - H, fcEnd];
+    const fcJobs = fcLines.flatMap((l) => Object.keys(MODELS).map((m) => ({ m, l,
+      p: pointSeries(this.ec, m, l.v, info.lon, info.lat, info.alt ?? 0).catch(() => null) })));
+    const fc = (await Promise.all(fcJobs.map((j) => j.p))).map((s, k) => ({ ...fcJobs[k], s })).filter((j) => j.s?.ys.some((y) => y != null));
+    if (this.id !== id || seq !== this.drawSeq) return;
     const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
     const xs = keep.map((i) => xsAll[i]);
     const t10 = toSec(d.t10.start);
     const miss = [...d.have].filter((c, i) => c === '0' && t10 + i * 600 > end - H && t10 + i * 600 <= end).length;
     const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end), 'hm')}`;
+    const fcNote = !fcLines.length ? (end !== latest && this.fcHours ? '；看過去時段不疊預報' : this.fcHours && !FC_LINES[this.tab] ? '；模式沒有濕度' : '')
+      : !fc.length ? '；這裡沒有模式預報'
+        : `；虛線 = 模式預報（各模式最新一報、最近格點${this.tab === 'pres' ? '，海平面氣壓換算到測站海拔' : ''}${this.tab === 'rain' ? '，平均每小時雨量' : ''}${this.tab === 'temp' ? '，未做高度修正' : ''}）`;
     note.textContent = `${hoursLabel(this.hours)}（${endTxt}）`
-      + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '');
+      + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '') + fcNote;
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };
@@ -170,6 +199,29 @@ export class StationCard {
       });
       data.push(keep.map((i) => st[s.key][i]));
       if (!scales[s.scale ?? 'y']) scales[s.scale ?? 'y'] = { auto: true, range: s.bars || s.scale === 'r1h' ? (u, lo, hi) => [0, Math.max(hi, 1)] : undefined };
+    }
+    // 預報線:x 和觀測取聯集(預報時刻都在整點,和觀測重疊處不會讓觀測斷開)
+    if (fc.length) {
+      const all = [...new Set([...xs, ...fc.flatMap((j) => j.s.xs.filter((x) => x > end - H && x <= fcEnd))])].sort((a, b) => a - b);
+      const at = new Map(all.map((x, i) => [x, i]));
+      for (let c = 1; c < data.length; c++) {
+        const col = new Array(all.length).fill(null);
+        xs.forEach((x, i) => { col[at.get(x)] = data[c][i]; });
+        data[c] = col;
+      }
+      data[0] = all;
+      for (const { m, l, s } of fc) {
+        const col = new Array(all.length).fill(null);
+        s.xs.forEach((x, k) => { if (at.has(x)) col[at.get(x)] = s.ys[k]; });
+        data.push(col);
+        const unit = tab.series[0].unit, wind = this.tab === 'wind';
+        series.push({
+          label: `${MODELS[m].name}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.v === 'gust' ? [2, 3] : [5, 3],
+          scale: l.scale ?? 'y', spanGaps: true, points: { show: false },
+          paths: l.v === 'rain1' ? uPlot.paths.stepped({ align: -1 }) : undefined,
+          value: (u, v) => (v == null ? '—' : wind ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v.toFixed(1)} ${l.scale ? 'mm/h' : unit}`),
+        });
+      }
     }
     axes.push({ ...axisStyle, scale: 'y', label: `${tab.series[0].unit}`, size: 50 });
     if (scales.r1h) axes.push({ ...axisStyle, scale: 'r1h', side: 1, label: '1 小時 mm', grid: { show: false }, size: 50 });
