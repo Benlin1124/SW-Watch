@@ -756,18 +756,33 @@ function syncEcmwfUI() {
   $('ec-rain-scale-row').hidden = ecmwf.variable !== 'rain';
 }
 
+let restoring = false;           // 還原上次設定中:不自動切換動畫(照存檔的勾選)
+
+/** 模式預報開著時:天氣參數自動開風場動畫、海浪參數(浪高、週期)自動開海浪動畫,另一個關掉 */
+function autoAnim() {
+  if (restoring || !ecmwf.visible) return;
+  const wave = ['swh', 'pp1d', 'mwp'].includes(ecmwf.variable);
+  for (const [id, on] of [['chk-wind', !wave], ['chk-wave', wave]]) {
+    const el = $(id);
+    if (el.checked === on) continue;
+    el.checked = on;
+    el.dispatchEvent(new Event('change', { bubbles: true }));   // 圖層處理、面板收合、存設定都照手動勾選
+  }
+}
+
 function bindEcmwfUI() {
   const apply = () => { updateLegend(); render(); };
-  $('chk-ecmwf').onchange = (e) => { ecmwf.setVisible(e.target.checked); apply(); };
+  $('chk-ecmwf').onchange = (e) => { ecmwf.setVisible(e.target.checked); autoAnim(); apply(); };
   $('op-ecmwf').oninput = (e) => ecmwf.setOpacity(e.target.value / 100);
   $('ec-arrows').onchange = (e) => ecmwf.setArrows(e.target.checked);
   $('ec-model').onchange = (e) => {
     if (!ecmwf.idx(e.target.value)) { e.target.value = ecmwf.model; return; }
     ecmwf.setModel(e.target.value);
     fillEcmwfPanel();
+    autoAnim();
     apply();
   };
-  $('ec-var').onchange = (e) => { ecmwf.variable = e.target.value; syncEcmwfUI(); apply(); };
+  $('ec-var').onchange = (e) => { ecmwf.variable = e.target.value; syncEcmwfUI(); autoAnim(); apply(); };
   $('ec-rain').onchange = (e) => { ecmwf.rainHours = +e.target.value; apply(); };
   $('ec-rain-scale').onchange = (e) => { ecmwf.rainScale = e.target.value; apply(); };
   $('ec-init').onchange = (e) => { ecmwf.init = e.target.value; apply(); };
@@ -1055,7 +1070,9 @@ map.on('load', async () => {
   stations.addTo('ens-members');
   marine.addTo('ens-members');
   setTheme('light');
+  restoring = true;
   prefs.restoreControls();     // 上次的設定(重新整理後還原)
+  restoring = false;
   prefs.watchControls();
   updateLegend();
   await render();
