@@ -6,7 +6,8 @@
 // 每種一張 canvas,在地圖之上、不接滑鼠事件。粒子用螢幕座標的速度移動(和縮放無關)。
 //   風(kind wind):10 m 風 u10 / v10,粒子留尾跡、逐格淡出。
 //   浪(kind wave):浪前進方向(mwd 來向轉 180°),畫成往前凸的波峰弧線,不留尾跡、淡入淡出;
-//     弧長隨浪高(swh)、速度隨尖峰週期(pp1d,深水波速和週期成正比)。近岸用 ECMWF 圖層外推的值,
+//     弧長隨浪高(swh)、速度隨週期(深水波速和週期成正比):模式預報選了尖峰 / 平均週期就用那個,
+//     否則 ECMWF 用尖峰週期、氣象署海浪用平均週期(它只有這個);舊報沒有平均週期就改用尖峰週期。近岸用 ECMWF 圖層外推的值,
 //     碰到底圖陸地(land.js)才消失 → 浪峰一路走到海岸線。
 import { beaufort, beaufortLegendHTML, infoHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, diffMin, fmtTW, nowStamp } from '../time.js';
@@ -33,6 +34,7 @@ const SLICES_MAX = 8;
 const COLORS = { white: 'rgba(255,255,255,0.9)', black: 'rgba(25,25,25,0.85)' };
 const ALPHAS = [0.25, 0.5, 0.75, 1];          // 浪:淡入淡出分 4 級(同級一起畫)
 const TIME_NOTE = '模式預報圖層開著時跟它的預報時刻；沒開時跟時間軸，在前後兩個預報時刻之間內插。這是預報，不是觀測。';
+const PERIOD_NAME = { pp1d: '尖峰週期', mwp: '平均週期' };
 const DIRS = ['北', '北北東', '東北', '東北東', '東', '東南東', '東南', '南南東', '南', '南南西', '西南', '西南西', '西', '西北西', '西北', '北北西'];
 const dirName = (x, y) => DIRS[Math.round((((Math.atan2(x, y) * 180) / Math.PI + 360) % 360) / 22.5) % 16];
 const levelOf = (levels, x) => { let i = 0; while (i + 1 < levels.length && x >= levels[i + 1]) i++; return i; };
@@ -107,15 +109,27 @@ export class WindLayer {
     return { init, hours: h };
   }
 
+  /** 浪的速度用哪個週期:模式預報選了週期(同模式)就跟它,否則有尖峰週期用尖峰週期 */
+  period(m) {
+    const v = this.ec.variable, has = (x) => !!this.ec.idx(m)?.vars?.[x];
+    if (PERIOD_NAME[v] && this.ec.model === m && has(v)) return v;
+    return has('pp1d') ? 'pp1d' : 'mwp';
+  }
+
   /** 第 k 步的場;浪的方向先轉成單位向量,內插才不會在 0° / 360° 出錯 */
-  slice(m, init, k) {
-    const key = `${m}/${init}/${k}`;
+  slice(m, init, k, per = 'pp1d') {
+    const key = `${m}/${init}/${k}/${per}`;
     if (!this.slices.has(key)) {
-      const vars = this.K.vars.map((v) => (v === 'pp1d' && !this.ec.idx(m)?.vars?.pp1d ? 'mwp' : v));   // 氣象署海浪只有平均週期
-      const p = Promise.all(vars.map((v) => this.ec.slice(init, v, k, m))).then(([a, b, c]) => {
+      const get = (v) => this.ec.slice(init, v, k, m);
+      const vars = this.K.vars.map((v) => (v === 'pp1d' ? per : v));
+      const p = Promise.all(vars.map(get)).catch((e) => {
+        if (per !== 'mwp' || !this.ec.idx(m)?.vars?.pp1d) throw e;          // 舊報沒有平均週期 → 尖峰週期
+        return Promise.all(this.K.vars.map(get)).then((r) => { r.per = 'pp1d'; return r; });
+      }).then((r) => {
+        const [a, b, c] = r;
         if (this.kind === 'wind') return { u: a, v: b };
         const rad = b.map((d) => ((d + 180) * Math.PI) / 180);
-        return { x: rad.map(Math.sin), y: rad.map(Math.cos), t: c, h: a };
+        return { x: rad.map(Math.sin), y: rad.map(Math.cos), t: c, h: a, per: r.per ?? per };
       });
       p.catch(() => this.slices.delete(key));
       this.slices.set(key, p);
@@ -128,7 +142,7 @@ export class WindLayer {
     if (!this.visible) return;
     const t = this.target(T);
     if (!t) { this.f = null; this.shown = null; return; }
-    const m = this.model, key = `${m}|${t.init}|${t.hours}`;
+    const m = this.model, per = this.kind === 'wave' ? this.period(m) : '', key = `${m}|${t.init}|${t.hours}|${per}`;
     if (this.shown?.key === key) return;
     this.wanted = key;
     const steps = this.ec.stepsOf(m);
@@ -138,7 +152,7 @@ export class WindLayer {
     const w = k0 === k1 ? 0 : (t.hours - steps[k0]) / (steps[k1] - steps[k0]);
     let a, b;
     try {
-      [a, b] = await Promise.all([this.slice(m, t.init, k0), this.slice(m, t.init, k1)]);
+      [a, b] = await Promise.all([this.slice(m, t.init, k0, per), this.slice(m, t.init, k1, per)]);
     } catch (e) {
       if (this.wanted === key) { this.f = null; this.shown = null; }   // 舊報沒有這個變數(例如海浪加入前)
       throw e;
@@ -146,12 +160,13 @@ export class WindLayer {
     if (this.wanted !== key) return;
     const f = {};
     for (const [name, x0] of Object.entries(a)) {
+      if (name === 'per') continue;
       const x1 = b[name], out = new Float32Array(x0.length);
       for (let i = 0; i < x0.length; i++) out[i] = x0[i] * (1 - w) + x1[i] * w;
       f[name] = out;
     }
     this.f = f;
-    this.shown = { key, model: m, init: t.init, hours: t.hours, exact: w === 0 };
+    this.shown = { key, model: m, init: t.init, hours: t.hours, exact: w === 0, per: a.per };
     if (!this.particles.length) this.reseed();
   }
 
@@ -193,7 +208,7 @@ export class WindLayer {
     if (this.kind === 'wind') return `風場 ${dirName(-s.u, -s.v)}風 ${Math.hypot(s.u, s.v).toFixed(1)} m/s`;
     const c = waveClass(s.h);
     const ext = this.ec.coastAt(lng, lat, this.model) ? '（近岸外推）' : '';
-    return `海浪 ${s.h.toFixed(1)} m${c ? `（${c}）` : ''} 來自${dirName(-s.x, -s.y)} ${s.t.toFixed(1)} s${ext}`;
+    return `海浪 ${s.h.toFixed(1)} m${c ? `（${c}）` : ''} 來自${dirName(-s.x, -s.y)} ${PERIOD_NAME[this.shown?.per] ?? '週期'} ${s.t.toFixed(1)} s${ext}`;
   }
 
   // ── 粒子 ──
@@ -276,8 +291,8 @@ export class WindLayer {
       const q = m.project([lon, lat]);
       if (q.x < b.x0 || q.x > b.x1 || q.y < b.y0 || q.y > b.y1) { this.spawn(p, b); continue; }
       if (wave) {
-        // 波峰:垂直前進方向的弧,往前凸;半長 3–23 px 隨浪高;淡入淡出
-        const n = Math.hypot(vx, vy) || 1, dx = vx / n, dy = -vy / n, L = 3 + 2.5 * Math.min(s.h, 8);
+        // 波峰:垂直前進方向的弧,往前凸;半長 2–14 px 隨浪高;淡入淡出
+        const n = Math.hypot(vx, vy) || 1, dx = vx / n, dy = -vy / n, L = 2 + 1.5 * Math.min(s.h, 8);
         const a = Math.min(Math.floor(Math.sin((Math.PI * p.age) / p.max) * ALPHAS.length), ALPHAS.length - 1);
         const c = bySpeed ? levelOf(SCALES.wave.levels, s.h) : 0;
         const pa = path(c * ALPHAS.length + a);
@@ -306,7 +321,8 @@ export class WindLayer {
     const s = this.shown, when = s ? `（${fmtEcInit(s.init)} +${Math.round(s.hours * 10) / 10}h）` : '（無資料）';
     const src = MODELS[s?.model ?? this.model].name;
     if (this.kind === 'wave') {
-      const title = `海浪動畫：${src} 海浪預報${when}`, note = `波峰往浪前進方向移動；越長浪越高、越快週期越長。${TIME_NOTE}`;
+      const title = `海浪動畫：${src} 海浪預報${when}`, note = `波峰往浪前進方向移動；越長浪越高、越快週期越長（速度用${PERIOD_NAME[s?.per] ?? '週期'}，`
+        + `模式預報選尖峰 / 平均週期時跟著切換）。${TIME_NOTE}`;
       return this.color === 'speed'
         ? withInfo(legendHTML(`${title} 波峰顏色 = 浪高 (m)`, SCALES.wave.levels, SCALES.wave.colors, 0, 22, SCALES.wave.ticks), note)
         : `<div class="legend-title">${title}${infoHTML(note)}</div>`;
