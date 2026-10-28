@@ -84,6 +84,10 @@ function sdfIcon(points) {
 const svgShape = (name, fill = '#9e9e9e') => `<svg width="16" height="16" viewBox="0 0 32 32" style="vertical-align:-3px">
   <polygon points="${SHAPES[name].map((p) => p.join(',')).join(' ')}" fill="${fill}" stroke="${MARINE_HALO}" stroke-width="3"/></svg>`;
 
+/** 站的基本資料(快照的一列) */
+const baseOf = (r, f) => ({ id: r[f.id], name: r[f.name], type: r[f.type], county: r[f.county] ?? '', area: r[f.area] ?? '',
+  lon: r[f.lon], lat: r[f.lat] });
+
 export class MarineLayer {
   key = 'marine';
   name = '海象';
@@ -176,6 +180,7 @@ export class MarineLayer {
           if (!snap) return;
           const f = Object.fromEntries(snap.fields.map((k, j) => [k, j]));
           for (const r of snap.rows) {
+            if (!this.all.has(r[f.id])) this.all.set(r[f.id], baseOf(r, f));   // 只出現在較早快照的站也要畫
             const x = r[f[this.variable]];
             if (x == null) continue;
             const c = values.get(r[f.id]);
@@ -208,11 +213,15 @@ export class MarineLayer {
     }
   }
 
-  /** 同步:時間軸所在整點(之前 1 小時內最近的一筆) */
+  /** 同步:時間軸所在整點(之前 1 小時內最近的一筆)。
+   * 最大 / 最小:只要區段內有快照就用最近那筆當終點(每小時一筆晚 20–40 分上架,
+   * 時間軸在現在時最新一筆常超過 1 小時,原本會整層沒資料) */
   pick(T, sync) {
     if (!sync) return this.latest;
     const t = latestLE(this.times, T);
-    return t && diffMin(T, t) < 60 ? t : null;
+    if (!t) return null;
+    const limit = !this.aggMode ? 60 : this.hours === 'custom' ? Infinity : this.hours * 60;
+    return diffMin(T, t) < limit ? t : null;
   }
 
   fetch(path) {
@@ -246,11 +255,7 @@ export class MarineLayer {
         agg = { start, end, note: '', missing: e.expected - e.found, values: e.values };
       }
     }
-    for (const r of snap.rows) {
-      const base = { id: r[f.id], name: r[f.name], type: r[f.type], county: r[f.county] ?? '', area: r[f.area] ?? '',
-        lon: r[f.lon], lat: r[f.lat] };
-      this.all.set(base.id, base);
-    }
+    for (const r of snap.rows) this.all.set(r[f.id], baseOf(r, f));
     const rows = agg ? [...agg.values].map(([id, e]) => [this.all.get(id), e]).filter(([b]) => b)
       : snap.rows.map((r) => [this.all.get(r[f.id]), { x: r[f[this.variable]], dir: v.dir ? r[f[v.dir]] : null, lv: r[f.tide_lv] }]);
     for (const [base, e] of rows) {
