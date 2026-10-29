@@ -4,8 +4,8 @@
 來源:cwaopendata S3 公開網址 Model/M-A0064-{step:03d}.grb2(fileapi 只是轉址到這裡,不計會員次數)。
   每個時刻一個檔約 180 MB(11 層高空 + 地面共 78 欄),S3 只留最新一報、逐檔覆蓋(起報後約 5–6 小時上完)。
   用 HTTP Range 讀每欄開頭幾百 byte 認欄位,只下載需要的 5 欄(每欄約 2.3 MB)→ 一報約 175 MB 下載。
-網格:原始是 Lambert 投影 1158×673(3 km),雙線性內插到 0.03° 經緯度、範圍 config.TW_AREA(台灣附近),
-  本機和 R2 每報約 10 MB。風是地理方向(uvRelativeToGrid = 0),不用轉。
+網格:原始是 Lambert 投影 1158×673(3 km,約 102.8–140.9°E、13.6–33.5°N),雙線性內插到 0.03° 經緯度;
+  範圍 = 原始網格的經緯度外框(由投影參數算,約 1270×660 格),外框四角不在原始網格內的格點 = 無資料。風是地理方向(uvRelativeToGrid = 0),不用轉。
   tp:每個檔已是起報後累積(stepRange 0-6、0-84…),和 ECMWF 一樣由網頁相減得到各時段雨量。
 排程每 10 分鐘檢查:15 個檔的 json(各 1 KB)起報時間都相同、而且比已抓的新 → 抓。
 手動:python -m pipeline.fetch_wrf"""
@@ -17,15 +17,16 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import requests
 
-from . import config, r2
+from . import r2
 from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_index, update_index
-from .fetch_ecmwf import cleanup as _cleanup
+from .fetch_ecmwf import cleanup as _cleanup, legacy_grids
 
 LAYER = "wrf"
 CODE = "M-A0064"
 S3 = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Model"
 STEPS = list(range(0, 85, 6))
 RES = 0.03
+ORIGIN = (115.0, 17.0)          # 格點基準(經、緯)
 # 變數 → ((discipline, category, number, 第一層面類型, 層值), 換算, 量化 scale, offset, 單位, 名稱)
 VARS = {
     "msl": ((0, 3, 1, 101, None), lambda v: v / 100, 0.1, 800.0, "hPa", "海平面氣壓"),
@@ -104,7 +105,8 @@ def scan(step, want):
 
 
 class Regrid:
-    """Lambert 網格 → 0.03° 經緯度(範圍同 ECMWF)的雙線性內插;第一次用一欄的投影參數建表。"""
+    """Lambert 網格 → 0.03° 經緯度(原始網格的外框)的雙線性內插;第一次用一欄的投影參數建表。
+    w、s = 西南角格點;外框裡不在原始網格內的格點 = NaN。"""
 
     def __init__(self, h):
         import eccodes
@@ -117,13 +119,23 @@ class Regrid:
         p = Proj(proj="lcc", lat_1=g("Latin1InDegrees"), lat_2=g("Latin2InDegrees"), lat_0=g("LaDInDegrees"),
                  lon_0=g("LoVInDegrees"), R=r)
         x0, y0 = p(g("longitudeOfFirstGridPointInDegrees"), g("latitudeOfFirstGridPointInDegrees"))
-        w, s, e, n = config.TW_AREA
+        dx, dy = g("DxInMetres"), g("DyInMetres")
+        # 外框:原始網格四邊逐點反投影(Lambert 的邊在經緯度上是弧線,極值不一定在角上),往內縮到格點上
+        # 格點以 115°E、17°N 為基準(和改範圍前的檔同一組格點)
+        ei, ej = np.arange(self.ni), np.arange(self.nj)
+        bi = np.concatenate([ei, ei, np.zeros(self.nj), np.full(self.nj, self.ni - 1)])
+        bj = np.concatenate([np.zeros(self.ni), np.full(self.ni, self.nj - 1), ej, ej])
+        blon, blat = p(x0 + bi * dx, y0 + bj * dy, inverse=True)
+        ox, oy = ORIGIN
+        w, s = ox + np.ceil((blon.min() - ox) / RES) * RES, oy + np.ceil((blat.min() - oy) / RES) * RES
+        e, n = ox + np.floor((blon.max() - ox) / RES) * RES, oy + np.floor((blat.max() - oy) / RES) * RES
+        self.w, self.s = round(float(w), 2), round(float(s), 2)
         self.nx, self.ny = round((e - w) / RES) + 1, round((n - s) / RES) + 1
-        lon, lat = np.meshgrid(w + np.arange(self.nx) * RES, s + np.arange(self.ny) * RES)
+        lon, lat = np.meshgrid(self.w + np.arange(self.nx) * RES, self.s + np.arange(self.ny) * RES)
         x, y = p(lon, lat)
-        fi, fj = (x - x0) / g("DxInMetres"), (y - y0) / g("DyInMetres")
-        if fi.min() < 0 or fj.min() < 0 or fi.max() > self.ni - 1 or fj.max() > self.nj - 1:
-            raise RuntimeError("WRF 網格沒有涵蓋 TW_AREA")
+        fi, fj = (x - x0) / dx, (y - y0) / dy
+        self.out = (fi < 0) | (fj < 0) | (fi > self.ni - 1) | (fj > self.nj - 1)
+        fi, fj = np.clip(fi, 0, self.ni - 1), np.clip(fj, 0, self.nj - 1)
         self.i0 = np.minimum(fi.astype(int), self.ni - 2)
         self.j0 = np.minimum(fj.astype(int), self.nj - 2)
         self.ti, self.tj = (fi - self.i0).astype(np.float32), (fj - self.j0).astype(np.float32)
@@ -131,8 +143,10 @@ class Regrid:
     def __call__(self, v):
         v = v.reshape(self.nj, self.ni)
         i, j, ti, tj = self.i0, self.j0, self.ti, self.tj
-        return ((v[j, i] * (1 - ti) + v[j, i + 1] * ti) * (1 - tj)
-                + (v[j + 1, i] * (1 - ti) + v[j + 1, i + 1] * ti) * tj).astype(np.float32)
+        out = ((v[j, i] * (1 - ti) + v[j, i + 1] * ti) * (1 - tj)
+               + (v[j + 1, i] * (1 - ti) + v[j + 1, i + 1] * ti) * tj).astype(np.float32)
+        out[self.out] = np.nan
+        return out
 
 
 _regrid = None
@@ -182,8 +196,8 @@ def process(init):
                 v = jobs[(s, k)].result() if (s, k) in jobs else None
                 data[k].append(conv(v) if conv and v is not None else v)
     shape = data["msl"][0].shape
-    data["tp"][0] = np.zeros(shape, np.float32)
-    w, s, _e, _n = config.TW_AREA
+    data["tp"][0] = np.where(_regrid.out, np.nan, 0).astype(np.float32)
+    w, s = _regrid.w, _regrid.s
     ny, nx = shape
     grid = grid_spec(w, s, RES, nx, ny, np.uint16, 1, 0, "")
     grid.update(west=w - RES / 2, east=w + (nx - 0.5) * RES, south=s - RES / 2, north=s + (ny - 0.5) * RES)
@@ -195,7 +209,7 @@ def process(init):
     for k, arrs in data.items():
         raw = quantize(np.stack(arrs), vars_[k])
         _atomic_write(out_dir / f"{k}.bin.gz", gzip.compress(raw.tobytes(), 6))
-    update_index(LAYER, init, grid=grid, vars=vars_, steps=STEPS, name="氣象署 WRF 3 km",
+    update_index(LAYER, init, grid=grid, grids=legacy_grids(LAYER, grid), vars=vars_, steps=STEPS, name="氣象署 WRF 3 km",
                  source="中央氣象署 區域預報模式 WRF 3 公里(M-A0064,政府資料開放授權)")
     log.info("WRF 3km %s 完成:%.0f 秒", init, time.time() - t0)
     return init

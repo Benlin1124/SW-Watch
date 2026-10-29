@@ -7,7 +7,7 @@
 檔案說明(DatasetDescription、ElementDescription)是亂碼,欄位意義用和 ECMWF 同時刻比對確認:
   WaveDirection 和 ECMWF mwd 中位差 2°(來向);WavePeriod 平均比 ECMWF 尖峰週期短約 1.6 s → 當平均週期;
   Measures 寫 0.01m / 0.01s,但數值已是 m / s。
-範圍:原始 109.9–126.1°E、9.4–36.1°N;只留和 ECMWF 範圍(config.TW_AREA)重疊的 115–126°E、17–28°N。
+範圍:資料有值的 110–126°E、9.5–36°N 全部保留(AREA,163 × 268 格)。
 手動:python -m pipeline.fetch_cwa_wave"""
 import gzip
 import io
@@ -18,14 +18,14 @@ import zipfile
 import numpy as np
 import requests
 
-from . import config, r2
+from . import r2
 from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_index, save_json, update_index
-from .fetch_ecmwf import cleanup as _cleanup
+from .fetch_ecmwf import cleanup as _cleanup, legacy_grids
 
 LAYER = "cwawave"
 URL = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Forecast/F-A0020-001.zip"
 RES = 0.1
-EAST = 126.0                   # 資料最東到 126°E
+AREA = (110.0, 9.5, 126.0, 36.0)   # 資料有值的範圍(西、南、東、北格點)
 # 變數 → (XML 檔名代號, 量化 scale, offset, 單位, 名稱)
 VARS = {
     "swh": ("hs", 0.01, 0.0, "m", "浪高"),
@@ -53,7 +53,7 @@ def parse(zf, grid_shape):
     if not steps or any(sorted(files.get(code, {})) != steps for code, *_ in VARS.values()):
         raise RuntimeError("F-A0020-001 zip 內各變數時刻不一致")
     ny, nx = grid_shape
-    w, s, _e, _n = config.TW_AREA
+    w, s, _e, _n = AREA
     init, out = None, {}
     for var, (code, *_r) in VARS.items():
         arr = np.full((len(steps), ny, nx), np.nan, np.float32)
@@ -73,8 +73,8 @@ def parse(zf, grid_shape):
 
 
 def grid_and_vars():
-    w, s, _e, n = config.TW_AREA
-    nx, ny = round((EAST - w) / RES) + 1, round((n - s) / RES) + 1
+    w, s, e, n = AREA
+    nx, ny = round((e - w) / RES) + 1, round((n - s) / RES) + 1
     g = grid_spec(w, s, RES, nx, ny, np.uint16, 1, 0, "")
     g.update(west=w - RES / 2, east=w + (nx - 0.5) * RES, south=s - RES / 2, north=s + (ny - 0.5) * RES)
     for k in ("scale", "offset", "units"):
@@ -107,7 +107,7 @@ def run():
     out_dir = layer_dir(LAYER) / init
     for k, arr in data.items():
         _atomic_write(out_dir / f"{k}.bin.gz", gzip.compress(quantize(arr, vars_[k]).tobytes(), 6))
-    update_index(LAYER, init, grid=grid, vars=vars_, steps=steps, etag=etag, name="氣象署海浪模式",
+    update_index(LAYER, init, grid=grid, grids=legacy_grids(LAYER, grid), vars=vars_, steps=steps, etag=etag, name="氣象署海浪模式",
                  source="中央氣象署 海浪模式(F-A0020-001,政府資料開放授權)")
     log.info("氣象署海浪 %s 完成:%d 步,下載 %.0f MB,%.0f 秒", init, len(steps), len(r.content) / 1e6, time.time() - t0)
     cleanup()
