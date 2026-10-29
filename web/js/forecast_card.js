@@ -191,12 +191,12 @@ export class ForecastCard {
 export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
   const x = ec.idx(m), init = x?.latest;
   if (!init || !HAS(m, v)) return null;
-  const g = x.grid;
+  const { grid: g, tile } = ec.pointView(m, init, lon, lat);     // IFS:那一點所在的 0.1° 分塊
   let ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
   if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
   const steps = ec.stepsOf(m, init), n = g.nx * g.ny;
   const raw = async (name) => {
-    const { raw: r, spec } = await ec.data(init, name, m);
+    const { raw: r, spec } = await ec.data(init, name, m, tile);
     return (k, i) => { const q = r[k * n + i]; return q === spec.nodata || q === undefined ? NaN : q * spec.scale + spec.offset; };
   };
   let coast = false;

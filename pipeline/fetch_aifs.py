@@ -4,7 +4,7 @@
 路徑:{host}/{YYYYMMDD}/{HH}z/aifs-single/0p25/{oper|wave}/{YYYYMMDDHH}0000-{step}h-{oper|wave}-fc.{index|grib2},和 IFS 同站。
   tp 是起報後累積,單位已是 mm(kg m-2;IFS 的 tp 是 m)。
   海浪(stream wave):swh 浪高、mwd 平均波向(來向)、mwp 平均週期(沒有尖峰週期;陸地 = 無資料)。開放資料沒有陣風。
-下載:依 .index 用 HTTP Range 只抓 8 欄(每欄全球約 0.3–0.6 MB),一報約 105 MB;只留台灣附近(config.ECMWF_AREA)。
+下載:依 .index 用 HTTP Range 只抓 8 欄(每欄全球約 0.3–0.6 MB),一報約 105 MB;只留 config.ECMWF_AREA(90–180°E、0–50°N,361×201 格,每報存約 13 MB)。
 排程每 10 分鐘檢查:168 小時檔上架了就抓(新的優先);起報 24 小時內漏掉的報重啟後會補。
 手動:python -m pipeline.fetch_aifs [--init 2026102712]"""
 import argparse
@@ -18,8 +18,8 @@ import numpy as np
 import requests
 
 from . import config, r2
-from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_index, update_index
-from .fetch_ecmwf import HOSTS, _crop_slices, cleanup as _cleanup, run_steps, stamp_of
+from .common import _atomic_write, layer_dir, log, quantize, read_index, update_index
+from .fetch_ecmwf import HOSTS, _crop_slices, area_grid, cleanup as _cleanup, legacy_grids, run_steps, stamp_of
 
 LAYER = "aifs"
 RES = 0.25
@@ -86,7 +86,7 @@ def _field(init, step, entry):
     h = eccodes.codes_new_from_message(r.content)
     try:
         ni, nj, rs, cs = _crop_slices(h)
-        v = eccodes.codes_get_values(h).reshape(nj, ni)[rs, cs].astype(np.float32)
+        v = eccodes.codes_get_values(h).reshape(nj, ni)[rs][:, cs].astype(np.float32)
         if eccodes.codes_get(h, "bitmapPresent"):
             v[v == eccodes.codes_get(h, "missingValue")] = np.nan
     finally:
@@ -133,18 +133,16 @@ def process(init):
     missing = [k for k, arrs in data.items() if any(a is None for a in arrs)]
     if missing:
         raise RuntimeError(f"AIFS {stamp} 缺欄位:{'、'.join(missing)}")
-    w, s, _e, _n = config.ECMWF_AREA
-    ny, nx = shape
-    grid = grid_spec(w, s, RES, nx, ny, np.uint16, 1, 0, "")
-    grid.update(west=w - RES / 2, east=w + (nx - 0.5) * RES, south=s - RES / 2, north=s + (ny - 0.5) * RES)
-    for k in ("scale", "offset", "units"):
-        grid.pop(k)
+    grid = area_grid(RES)
+    if shape != (grid["ny"], grid["nx"]):
+        raise RuntimeError(f"AIFS {stamp} 格點 {shape} ≠ {(grid['ny'], grid['nx'])}")
     vars_ = {k: dict(scale=sc, offset=off, units=u, name=name, dtype="uint16", nodata=65535)
              for k, (_p, _c, sc, off, u, name) in VARS.items()}
     out_dir = layer_dir(LAYER) / stamp
     for k, arrs in data.items():
         _atomic_write(out_dir / f"{k}.bin.gz", gzip.compress(quantize(np.stack(arrs), vars_[k]).tobytes(), 6))
-    update_index(LAYER, stamp, grid=grid, vars=vars_, steps=STEPS, nsteps=run_steps(LAYER, stamp, len(STEPS), grid),
+    update_index(LAYER, stamp, grid=grid, grids=legacy_grids(LAYER, grid), vars=vars_, steps=STEPS,
+                 nsteps=run_steps(LAYER, stamp, len(STEPS), grid),
                  name="ECMWF AIFS 預報",
                  source="ECMWF open data AIFS single 0.25°(CC BY 4.0)")
     log.info("AIFS %s 完成:%d 步,%.0f 秒", stamp, len(STEPS), time.time() - t0)

@@ -43,7 +43,8 @@ export class WindLayer {
   density = 1;
   f = null;                  // 目前顯示的場(已內插):風 { u, v };浪 { x, y, t, h }(x、y = 浪前進方向單位向量)
   shown = null;              // { key, init, hours, exact }
-  slices = new Map();        // `${模式}/${init}/${k}` → Promise<場>
+  slices = new Map();        // `${模式}/${init}/${格點範圍}/${k}` → Promise<場>
+  g = null;                  // 目前場的格點(IFS 放大時是畫面上的 0.1° 分塊)
   particles = [];
 
   constructor(map, ecmwf, kind = 'wind') {
@@ -109,11 +110,11 @@ export class WindLayer {
   }
 
   /** 第 k 步的場;浪的方向先轉成單位向量,內插才不會在 0° / 360° 出錯 */
-  slice(m, init, k) {
-    const key = `${m}/${init}/${k}`;
+  slice(m, init, k, view) {
+    const key = `${m}/${init}/${view.key}/${k}`;
     if (!this.slices.has(key)) {
       const vars = this.K.vars.map((v) => (v === 'pp1d' && !this.ec.idx(m)?.vars?.pp1d ? 'mwp' : v));   // 氣象署海浪只有平均週期
-      const p = Promise.all(vars.map((v) => this.ec.slice(init, v, k, m))).then(([a, b, c]) => {
+      const p = Promise.all(vars.map((v) => this.ec.slice(init, v, k, m, view))).then(([a, b, c]) => {
         if (this.kind === 'wind') return { u: a, v: b };
         const rad = b.map((d) => ((d + 180) * Math.PI) / 180);
         return { x: rad.map(Math.sin), y: rad.map(Math.cos), t: c, h: a };
@@ -129,7 +130,7 @@ export class WindLayer {
     if (!this.visible) return;
     const t = this.target(T);
     if (!t) { this.f = null; this.shown = null; return; }
-    const m = this.model, key = `${m}|${t.init}|${t.hours}`;
+    const m = this.model, view = this.ec.view(m, t.init), key = `${m}|${t.init}|${t.hours}|${view.key}`;
     if (this.shown?.key === key) return;
     this.wanted = key;
     const steps = this.ec.stepsOf(m, t.init);
@@ -139,7 +140,7 @@ export class WindLayer {
     const w = k0 === k1 ? 0 : (t.hours - steps[k0]) / (steps[k1] - steps[k0]);
     let a, b;
     try {
-      [a, b] = await Promise.all([this.slice(m, t.init, k0), this.slice(m, t.init, k1)]);
+      [a, b] = await Promise.all([this.slice(m, t.init, k0, view), this.slice(m, t.init, k1, view)]);
     } catch (e) {
       if (this.wanted === key) { this.f = null; this.shown = null; }   // 舊報沒有這個變數(例如海浪加入前)
       throw e;
@@ -151,9 +152,11 @@ export class WindLayer {
       for (let i = 0; i < x0.length; i++) out[i] = x0[i] * (1 - w) + x1[i] * w;
       f[name] = out;
     }
+    const regrid = this.g !== view.grid && JSON.stringify(this.g) !== JSON.stringify(view.grid);
     this.f = f;
+    this.g = view.grid;
     this.shown = { key, model: m, init: t.init, hours: t.hours, exact: w === 0 };
-    if (!this.particles.length) this.reseed();
+    if (regrid || !this.particles.length) this.reseed();
   }
 
   timeLabel() {
@@ -165,7 +168,7 @@ export class WindLayer {
   // ── 取值 ──
   /** 經緯度上各欄的值(雙線性內插);格外或任一角無資料(浪的陸地)→ null */
   sample(lon, lat) {
-    const g = this.index?.grid, f = this.f;
+    const g = this.g, f = this.f;
     if (!f || !g) return null;
     const fx = (lon - g.lon0) / g.dx, fy = (lat - g.lat0) / g.dy;
     if (fx < 0 || fy < 0 || fx > g.nx - 1 || fy > g.ny - 1) return null;
@@ -200,7 +203,7 @@ export class WindLayer {
   // ── 粒子 ──
   /** 畫面與 ECMWF 範圍交集(螢幕座標);沒有交集 → null */
   box() {
-    const g = this.index?.grid;
+    const g = this.g;
     if (!g) return null;
     const m = this.map, a = m.project([g.lon0, g.lat0 + (g.ny - 1) * g.dy]), b = m.project([g.lon0 + (g.nx - 1) * g.dx, g.lat0]);
     const x0 = Math.max(Math.min(a.x, b.x), 0), x1 = Math.min(Math.max(a.x, b.x), this.W);

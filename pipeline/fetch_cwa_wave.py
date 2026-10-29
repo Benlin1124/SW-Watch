@@ -7,7 +7,7 @@
 檔案說明(DatasetDescription、ElementDescription)是亂碼,欄位意義用和 ECMWF 同時刻比對確認:
   WaveDirection 和 ECMWF mwd 中位差 2°(來向);WavePeriod 平均比 ECMWF 尖峰週期短約 1.6 s → 當平均週期;
   Measures 寫 0.01m / 0.01s,但數值已是 m / s。
-範圍:原始 109.9–126.1°E、9.4–36.1°N;只留和 ECMWF 範圍(config.ECMWF_AREA)重疊的 115–126°E、17–28°N。
+範圍:原始 109.9–126.1°E、9.4–36.1°N;只留和 ECMWF 範圍(config.TW_AREA)重疊的 115–126°E、17–28°N。
 手動:python -m pipeline.fetch_cwa_wave"""
 import gzip
 import io
@@ -53,7 +53,7 @@ def parse(zf, grid_shape):
     if not steps or any(sorted(files.get(code, {})) != steps for code, *_ in VARS.values()):
         raise RuntimeError("F-A0020-001 zip 內各變數時刻不一致")
     ny, nx = grid_shape
-    w, s, _e, _n = config.ECMWF_AREA
+    w, s, _e, _n = config.TW_AREA
     init, out = None, {}
     for var, (code, *_r) in VARS.items():
         arr = np.full((len(steps), ny, nx), np.nan, np.float32)
@@ -73,7 +73,7 @@ def parse(zf, grid_shape):
 
 
 def grid_and_vars():
-    w, s, _e, n = config.ECMWF_AREA
+    w, s, _e, n = config.TW_AREA
     nx, ny = round((EAST - w) / RES) + 1, round((n - s) / RES) + 1
     g = grid_spec(w, s, RES, nx, ny, np.uint16, 1, 0, "")
     g.update(west=w - RES / 2, east=w + (nx - 0.5) * RES, south=s - RES / 2, north=s + (ny - 0.5) * RES)

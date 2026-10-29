@@ -82,13 +82,17 @@ SAT_WAIT_MIN = 60            # 掃描開始後幾分鐘內等資料上架,超過
 SAT_B03_EVERY_MIN = 10       # 白天可見光(真實色 + B03)每次約下載 220 MB;改 30 或 60 可大幅省流量(夜間真實色照樣每 10 分)
 SAT_KEEP_DAYS = int(os.environ.get("SAT_KEEP_DAYS", 5))   # 本機與 R2 衛星保留天數(一天約 1.1 GB);.env 可改
 
-# ── ECMWF IFS 開放資料(台灣附近,pipeline/fetch_ecmwf.py)──
+# ── ECMWF IFS 開放資料(西北太平洋,pipeline/fetch_ecmwf.py)──
 ECMWF_RESOL = "0p1"                       # 0.1°;"0p25" = 0.25°
-ECMWF_AREA = (115.0, 17.0, 130.0, 28.0)   # lon_min, lat_min, lon_max, lat_max(151×111 格)
+ECMWF_AREA = (90.0, 0.0, 180.0, 50.0)     # lon_min, lat_min, lon_max, lat_max(IFS 0.1° 901×501 格、AIFS 0.25° 361×201 格)
+ECMWF_TILE = 10                           # IFS 0.1° 切成 10°×10° 的塊(101×101 格,相鄰塊共用邊),網頁放大時只下載看得到的塊
+ECMWF_COARSE = 0.25                       # IFS 另存一份 0.25° 全範圍(網頁拉遠時用)
+# 台灣附近:氣象署 WRF、氣象署海浪、日本 AMeDAS 測站的範圍(原本和 ECMWF 同區)
+TW_AREA = (115.0, 17.0, 130.0, 28.0)
 ECMWF_RUNS = (0, 12)                      # 只抓 00、12Z(06/18Z 只到 90 小時,也可加)
 ECMWF_MAX_STEP = 168                      # 預報到幾小時(IFS 144 小時前每 3 小時、之後每 6 小時;AIFS 每 6 小時)
 ECMWF_WAIT_H = 6                          # 起報後幾小時才開始檢查(通常 7–8 小時上架)
 ECMWF_KEEP_DAYS = int(os.environ.get("ECMWF_KEEP_DAYS", 3))
 
-# 日本氣象廳 AMeDAS 測站範圍(宮古、八重山、與那國),和 ECMWF 同區
-JMA_AREA = ECMWF_AREA
+# 日本氣象廳 AMeDAS 測站範圍(宮古、八重山、與那國)
+JMA_AREA = TW_AREA

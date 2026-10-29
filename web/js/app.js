@@ -800,6 +800,8 @@ function autoAnim() {
 
 function bindEcmwfUI() {
   const apply = () => { updateLegend(); render(); };
+  // IFS 放大 / 拖到別的 0.1° 分塊:重畫(圖層、風場 / 海浪動畫都跟著換格點)
+  ecmwf.onView = () => { if (!state.playing && (ecmwf.visible || wind.visible || waves.visible)) render(); };
   $('chk-ecmwf').onchange = (e) => { ecmwf.setVisible(e.target.checked); autoAnim(); apply(); };
   $('op-ecmwf').oninput = (e) => ecmwf.setOpacity(e.target.value / 100);
   $('ec-arrows').onchange = (e) => ecmwf.setArrows(e.target.checked);

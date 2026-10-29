@@ -4,7 +4,7 @@
 來源:cwaopendata S3 公開網址 Model/M-A0064-{step:03d}.grb2(fileapi 只是轉址到這裡,不計會員次數)。
   每個時刻一個檔約 180 MB(11 層高空 + 地面共 78 欄),S3 只留最新一報、逐檔覆蓋(起報後約 5–6 小時上完)。
   用 HTTP Range 讀每欄開頭幾百 byte 認欄位,只下載需要的 5 欄(每欄約 2.3 MB)→ 一報約 175 MB 下載。
-網格:原始是 Lambert 投影 1158×673(3 km),雙線性內插到 0.03° 經緯度、範圍同 ECMWF(config.ECMWF_AREA),
+網格:原始是 Lambert 投影 1158×673(3 km),雙線性內插到 0.03° 經緯度、範圍 config.TW_AREA(台灣附近),
   本機和 R2 每報約 10 MB。風是地理方向(uvRelativeToGrid = 0),不用轉。
   tp:每個檔已是起報後累積(stepRange 0-6、0-84…),和 ECMWF 一樣由網頁相減得到各時段雨量。
 排程每 10 分鐘檢查:15 個檔的 json(各 1 KB)起報時間都相同、而且比已抓的新 → 抓。
@@ -117,13 +117,13 @@ class Regrid:
         p = Proj(proj="lcc", lat_1=g("Latin1InDegrees"), lat_2=g("Latin2InDegrees"), lat_0=g("LaDInDegrees"),
                  lon_0=g("LoVInDegrees"), R=r)
         x0, y0 = p(g("longitudeOfFirstGridPointInDegrees"), g("latitudeOfFirstGridPointInDegrees"))
-        w, s, e, n = config.ECMWF_AREA
+        w, s, e, n = config.TW_AREA
         self.nx, self.ny = round((e - w) / RES) + 1, round((n - s) / RES) + 1
         lon, lat = np.meshgrid(w + np.arange(self.nx) * RES, s + np.arange(self.ny) * RES)
         x, y = p(lon, lat)
         fi, fj = (x - x0) / g("DxInMetres"), (y - y0) / g("DyInMetres")
         if fi.min() < 0 or fj.min() < 0 or fi.max() > self.ni - 1 or fj.max() > self.nj - 1:
-            raise RuntimeError("WRF 網格沒有涵蓋 ECMWF_AREA")
+            raise RuntimeError("WRF 網格沒有涵蓋 TW_AREA")
         self.i0 = np.minimum(fi.astype(int), self.ni - 2)
         self.j0 = np.minimum(fj.astype(int), self.nj - 2)
         self.ti, self.tj = (fi - self.i0).astype(np.float32), (fj - self.j0).astype(np.float32)
@@ -183,7 +183,7 @@ def process(init):
                 data[k].append(conv(v) if conv and v is not None else v)
     shape = data["msl"][0].shape
     data["tp"][0] = np.zeros(shape, np.float32)
-    w, s, _e, _n = config.ECMWF_AREA
+    w, s, _e, _n = config.TW_AREA
     ny, nx = shape
     grid = grid_spec(w, s, RES, nx, ny, np.uint16, 1, 0, "")
     grid.update(west=w - RES / 2, east=w + (nx - 0.5) * RES, south=s - RES / 2, north=s + (ny - 0.5) * RES)
