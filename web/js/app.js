@@ -423,7 +423,7 @@ function fillIssueSelect() {
 }
 
 // ── 系集面板 ──
-// 下拉選單只顯示時間(10/22 00Z);沒手動選時,選單停在實際用到的時間(依時間軸)
+// 初始時間預設「各模式最新」(各自最新、有這個颱風的一報);也可選「依時間軸」或指定時間
 const optInit = (i) => `<option value="${i}">${fmtInit(i)}</option>`;
 const optValid = (t) => `<option value="${t}">${t.slice(4, 6)}/${t.slice(6, 8)} ${t.slice(8, 10)}Z</option>`;
 
@@ -435,7 +435,7 @@ function fillEnsPanel() {
 
   const allInits = [...new Set(Object.values(ens.index.models).flat())].sort().reverse();
   const initSel = $('ens-init');
-  initSel.innerHTML = allInits.map(optInit).join('');
+  initSel.innerHTML = '<option value="">各模式最新</option><option value="T">依時間軸</option>' + allInits.map(optInit).join('');
 
   buildModelRows();
 
@@ -498,7 +498,7 @@ function buildModelRows() {
     row.innerHTML = `<div class="model-head">
         <label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" data-on ${c.on ? 'checked' : ''}>
           <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#888'}"></span>${m}</label>
-        <select>${[...ens.index.models[m]].reverse().map(optInit).join('')}</select>
+        <select><option value="">自動</option>${[...ens.index.models[m]].reverse().map(optInit).join('')}</select>
         <button class="expand">▸</button>
       </div>
       <div class="model-body" hidden>${body(c)}</div>`;
@@ -551,13 +551,14 @@ function syncRowsFromCfg() {
   }
 }
 
-/** 系集下拉選單停在實際用到的時間:手動選過的用選的,沒選過的用依時間軸算出來的 */
+/** 系集下拉選單:共用的停在選的項目;各模式沒指定時停在「自動」,並標出實際用到的時間(這個颱風沒有 → 無) */
 function syncEnsSelects() {
-  const inits = Object.values(ens.resolved);
-  $('ens-init').value = ens.baseInit || (inits.length ? inits.reduce((a, b) => (a > b ? a : b)) : '');
+  $('ens-init').value = ens.baseInit;
   for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
     const m = row.dataset.model, sel = row.querySelector('select');
-    if (sel) sel.value = ens.cfg[m].init || ens.resolved[m] || '';
+    if (!sel) continue;
+    sel.options[0].textContent = `自動（${ens.resolved[m] ? fmtInit(ens.resolved[m]) : '無'}）`;
+    sel.value = ens.cfg[m].init;
   }
   $('ens-valid-start').value = ens.validStart || ens.windowStart() || '';
 }
@@ -574,7 +575,7 @@ async function loadBestTrack() {
 
 function bindEnsUI() {
   $('chk-ens').onchange = (e) => ens.setVisible(e.target.checked);
-  $('ens-tc').onchange = async (e) => { ens.tc = e.target.value; await loadBestTrack(); ens.draw(); };
+  $('ens-tc').onchange = async (e) => { ens.tc = e.target.value; ens.tcAuto = false; await loadBestTrack(); render(); };
   $('ens-init').onchange = (e) => { ens.baseInit = e.target.value; render(); };
   for (const r of document.querySelectorAll('input[name=ens-mode]')) {
     r.onchange = () => {

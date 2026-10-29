@@ -30,7 +30,8 @@ export class EnsembleLayer {
   cache = new Map();
   files = {};              // init → 已載入的 JSON
   tc = '';                 // 颱風 id
-  baseInit = '';           // '' = 依時間軸;否則 'YYYYMMDDHH'
+  tcAuto = true;           // 沒手動選颱風:每次更新都改選最近還有預報的那個
+  baseInit = '';           // '' = 各模式最新;'T' = 依時間軸;否則 'YYYYMMDDHH'
   cfg = {};                // 模式 → defaultCfg()
   mode = 'tau';            // 'tau' | 'valid'
   validStart = '';         // '' = 自動(最晚的初始時間);否則 stamp
@@ -48,8 +49,18 @@ export class EnsembleLayer {
   async load() {
     this.index = await getIndex(this.path);
     for (const m of this.models) this.cfg[m] ??= defaultCfg();
-    const tcs = Object.keys(this.index.tcs ?? {});
-    if (!tcs.includes(this.tc)) this.tc = tcs[tcs.length - 1] ?? '';
+    const tcs = Object.entries(this.index.tcs ?? {});
+    if (this.tcAuto || !tcs.some(([id]) => id === this.tc)) {
+      // 最後一報最新的颱風(同時有兩個就取後出現的)
+      const last = ([, t]) => t.inits?.[t.inits.length - 1] ?? '';
+      this.tc = tcs.reduce((a, b) => (last(b) >= last(a) ? b : a), tcs[0] ?? [''])[0];
+    }
+  }
+
+  /** 這個模式有這個颱風的初始時間(index 只記颱風出現在哪些初始時間,模式缺漏在 show() 裡再往前找) */
+  initsOf(model) {
+    const has = new Set(this.index.tcs?.[this.tc]?.inits ?? []);
+    return (this.index.models[model] ?? []).filter((i) => has.has(i));
   }
 
   addTo(beforeId) {
@@ -94,22 +105,26 @@ export class EnsembleLayer {
     }
   }
 
-  /** 依時間軸:同步取 ≤ T 的最新初始時間,不同步取最新 */
+  /** 共用的初始時間上限:預設 = 各模式最新(不受時間軸影響);依時間軸 = 同步時 ≤ T 的最新一筆 */
   pick(T, sync) {
+    if (this.baseInit === 'T') return sync ? latestLE(this.times, T) : this.latest;
     if (this.baseInit) return initStamp(this.baseInit);
-    return sync ? latestLE(this.times, T) : this.latest;
+    return this.latest;
   }
 
-  /** 每個模式實際要用的初始時間:模式指定 > 共用;該模式沒有這個時間就取 ≤ 它的最新一筆 */
-  resolve(baseStamp) {
+  /** 每個模式實際要用的初始時間:模式指定 > 共用上限;只在有這個颱風的初始時間裡挑 ≤ 上限的最新一筆
+   *  skip:模式 → 往前跳過幾筆(檔案裡這個模式沒有這個颱風時) */
+  resolve(baseStamp, skip = {}) {
     const base = baseStamp ? baseStamp.slice(0, 10) : null;
     const res = {};
     for (const m of this.models) {
       const c = this.cfg[m];
       if (!c.on) continue;
+      const list = this.initsOf(m);
       const want = c.init || base;
-      const got = want ? latestLE(this.index.models[m], want) : null;
-      if (got) res[m] = got;
+      const got = want ? latestLE(list, want) : null;
+      const k = got ? list.indexOf(got) - (skip[m] ?? 0) : -1;
+      if (k >= 0) res[m] = list[k];
     }
     return res;
   }
@@ -128,11 +143,21 @@ export class EnsembleLayer {
   }
 
   async show(stamp) {
-    this.wanted = stamp;
-    const res = this.resolve(stamp);
-    const inits = [...new Set(Object.values(res))];
-    const loaded = await Promise.all(inits.map((i) => this.loadInit(i)));
-    if (this.wanted !== stamp) return;
+    const want = `${this.tc}|${stamp}`;
+    this.wanted = want;
+    // 檔案裡這個模式沒有這個颱風(颱風剛生成 / 某模式漏報)→ 改用它前一筆,最多往前 4 筆
+    const skip = {};
+    let res, inits, loaded;
+    for (let tries = 0; tries < 5; tries++) {
+      res = this.resolve(stamp, skip);
+      inits = [...new Set(Object.values(res))];
+      loaded = await Promise.all(inits.map((i) => this.loadInit(i).catch(() => null)));
+      const files = Object.fromEntries(inits.map((i, k) => [i, loaded[k]]));
+      const miss = Object.entries(res).filter(([m, i]) => !files[i]?.tcs?.find((t) => t.id === this.tc)?.models[m]?.length);
+      if (!miss.length) break;
+      for (const [m] of miss) skip[m] = (skip[m] ?? 0) + 1;
+    }
+    if (this.wanted !== want) return;
     this.files = Object.fromEntries(inits.map((i, k) => [i, loaded[k]]));
     this.resolved = res;
     this.draw();
