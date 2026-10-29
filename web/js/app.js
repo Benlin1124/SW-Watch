@@ -498,17 +498,19 @@ function buildModelRows() {
     row.innerHTML = `<div class="model-head">
         <label title="${MODEL_NAMES[m] ?? m}"><input type="checkbox" data-on ${c.on ? 'checked' : ''}>
           <span class="swatch" style="background:${MODEL_COLORS[m] ?? '#888'}"></span>${m}</label>
-        <select><option value="">自動</option>${[...ens.index.models[m]].reverse().map(optInit).join('')}</select>
+        <select></select>
         <button class="expand">▸</button>
       </div>
       <div class="model-body" hidden>${body(c)}</div>`;
     const sel = row.querySelector('select');
     row.querySelector('[data-on]').onchange = (e) => { c.on = e.target.checked; render(); };
-    sel.onchange = () => { c.init = sel.value; render(); };
+    // 選最新一報 = 不指定(之後有新的一報會自動跟上)
+    sel.onchange = () => { c.init = sel.value === sel.options[0]?.value ? '' : sel.value; render(); };
     bindBody(row, [m], false);
     box.appendChild(row);
   }
   pairNumbers(box);
+  fillModelInits();
   for (const btn of box.querySelectorAll('.expand')) {
     btn.onclick = () => {
       const b = btn.closest('.model').querySelector('.model-body');
@@ -551,14 +553,21 @@ function syncRowsFromCfg() {
   }
 }
 
-/** 系集下拉選單:共用的停在選的項目;各模式沒指定時停在「自動」,並標出實際用到的時間(這個颱風沒有 → 無) */
+/** 各模式的初始時間選單:只列有這個颱風的初始時間(最上面 = 這個模式最新一報) */
+function fillModelInits() {
+  for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
+    const m = row.dataset.model, list = ens.initsOf(m);
+    if (ens.cfg[m].init && !list.includes(ens.cfg[m].init)) ens.cfg[m].init = '';
+    row.querySelector('select').innerHTML = list.length ? [...list].reverse().map(optInit).join('') : '<option value="">無</option>';
+  }
+}
+
+/** 系集下拉選單停在實際用到的時間 */
 function syncEnsSelects() {
   $('ens-init').value = ens.baseInit;
   for (const row of document.querySelectorAll('#ens-models .model[data-model]')) {
     const m = row.dataset.model, sel = row.querySelector('select');
-    if (!sel) continue;
-    sel.options[0].textContent = `自動（${ens.resolved[m] ? fmtInit(ens.resolved[m]) : '無'}）`;
-    sel.value = ens.cfg[m].init;
+    if (sel && sel.options.length) sel.value = ens.cfg[m].init || ens.resolved[m] || sel.options[0].value;
   }
   $('ens-valid-start').value = ens.validStart || ens.windowStart() || '';
 }
@@ -575,7 +584,7 @@ async function loadBestTrack() {
 
 function bindEnsUI() {
   $('chk-ens').onchange = (e) => ens.setVisible(e.target.checked);
-  $('ens-tc').onchange = async (e) => { ens.tc = e.target.value; ens.tcAuto = false; await loadBestTrack(); render(); };
+  $('ens-tc').onchange = async (e) => { ens.tc = e.target.value; ens.tcAuto = false; fillModelInits(); await loadBestTrack(); render(); };
   $('ens-init').onchange = (e) => { ens.baseInit = e.target.value; render(); };
   for (const r of document.querySelectorAll('input[name=ens-mode]')) {
     r.onchange = () => {
