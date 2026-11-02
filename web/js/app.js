@@ -24,14 +24,37 @@ const $ = (id) => document.getElementById(id);
 const BASE = new URL('../assets/basemap/', import.meta.url).href;
 // casing = 線條外圍的襯邊(和線條反差的顏色),疊在雷達、雲圖上也看得清楚
 const THEMES = {
-  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#222222', county: '#1a1a1a', town: 'rgba(0,0,0,0.45)', km100: '#1565c0', casing: 'rgba(255,255,255,0.85)', grid: 'rgba(0,0,0,0.18)', imagery: false },
-  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#d5dbe3', border: '#f2f5f8', county: '#ffffff', town: 'rgba(255,255,255,0.45)', km100: '#64b5f6', casing: 'rgba(0,0,0,0.6)', grid: 'rgba(255,255,255,0.12)', imagery: false },
-  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#ffffff', county: '#ffffff', town: 'rgba(255,255,255,0.6)', km100: '#90caf9', casing: 'rgba(0,0,0,0.65)', grid: 'rgba(255,255,255,0.25)', imagery: true },
+  light: { bg: '#ffffff', land: '#f5f5f5', coast: '#000000', border: '#222222', county: '#1a1a1a', town: 'rgba(0,0,0,0.45)', km100: '#1565c0', casing: 'rgba(255,255,255,0.85)', grid: 'rgba(0,0,0,0.18)', imagery: false,
+    label: '#333333', labelMinor: '#555555', water: '#3d6d99', halo: 'rgba(255,255,255,0.9)' },
+  dark: { bg: '#1b1f26', land: '#2e333c', coast: '#d5dbe3', border: '#f2f5f8', county: '#ffffff', town: 'rgba(255,255,255,0.45)', km100: '#64b5f6', casing: 'rgba(0,0,0,0.6)', grid: 'rgba(255,255,255,0.12)', imagery: false,
+    label: '#e8ecf1', labelMinor: '#c2c9d2', water: '#8fb8e0', halo: 'rgba(0,0,0,0.75)' },
+  imagery: { bg: '#000000', land: '#000000', coast: '#ffffff', border: '#ffffff', county: '#ffffff', town: 'rgba(255,255,255,0.6)', km100: '#90caf9', casing: 'rgba(0,0,0,0.65)', grid: 'rgba(255,255,255,0.25)', imagery: true,
+    label: '#ffffff', labelMinor: '#eeeeee', water: '#b3d9ff', halo: 'rgba(0,0,0,0.85)' },
 };
 // 線寬隨縮放加粗(全區看得到,放大不會太細)
 const LINE_W = { coast: [1, 1.6, 2.6], borders: [1.3, 2, 3], county: [0.8, 1.4, 2.4], km100: [1, 1.5, 2.2] };   // 縮放 4、7、11
 const TOWN_ZOOM = 8.5;          // 鄉鎮界放大到這個縮放才顯示(也才下載 town.json)
 const zw = ([a, b, c], plus = 0) => ['interpolate', ['linear'], ['zoom'], 4, a + plus, 7, b + plus, 11, c + plus];
+
+// ── 地名(仿 Google 地圖:拉遠只有國家、大城市,放大逐級加鄉鎮、村里、山峰)──
+// OpenFreeMap 向量圖磚(OpenStreetMap,免金鑰)只取地名;繁中 → 中文 → 原文。中日韓字由瀏覽器字型畫,只下載拉丁字的字型檔
+const NAME = ['coalesce', ['get', 'name:zh-Hant'], ['get', 'name:zh'], ['get', 'name']];
+const zs = (...stops) => ['interpolate', ['linear'], ['zoom'], ...stops];
+const LABELS = [   // [id, source-layer, filter, minzoom, maxzoom, 字級, 顏色鍵, 字型, 其他 layout];後面的在上面、優先佔位
+  ['label-water', 'water_name', ['match', ['get', 'class'], ['ocean', 'sea', 'bay', 'strait', 'lake'], true, false], 3, 24,
+    ['match', ['get', 'class'], 'ocean', 15, 'sea', 13, 11], 'water', 'Noto Sans Italic', { 'text-letter-spacing': 0.15, 'text-max-width': 6 }],
+  ['label-peak', 'mountain_peak', ['has', 'ele'], 9.5, 24, 11, 'labelMinor', 'Noto Sans Regular',
+    { 'text-field': ['format', '▲ ', {}, NAME, {}, ['concat', '\n', ['to-string', ['get', 'ele']], ' m'], { 'font-scale': 0.85 }], 'text-anchor': 'top' }],
+  ['label-village', 'place', ['match', ['get', 'class'], ['village', 'suburb', 'quarter', 'hamlet'], true, false], 10, 24, zs(10, 10, 14, 13), 'labelMinor', 'Noto Sans Regular', {}],
+  ['label-island', 'place', ['==', ['get', 'class'], 'island'], 7, 24, zs(7, 10, 12, 13), 'labelMinor', 'Noto Sans Italic', {}],
+  ['label-town', 'place', ['==', ['get', 'class'], 'town'], 6.5, 24, zs(6.5, 11, 12, 14), 'label', 'Noto Sans Regular', { 'symbol-sort-key': ['get', 'rank'] }],
+  ['label-city', 'place', ['==', ['get', 'class'], 'city'], 3, 24, zs(3, 10, 6, 13, 10, 16), 'label', 'Noto Sans Bold',
+    { 'symbol-sort-key': ['get', 'rank'] }],
+  ['label-state', 'place', ['match', ['get', 'class'], ['state', 'province'], true, false], 4.5, 7.5, 11, 'labelMinor', 'Noto Sans Regular',
+    { 'text-letter-spacing': 0.2 }],
+  ['label-country', 'place', ['==', ['get', 'class'], 'country'], 2, 7, zs(2, 12, 6, 16), 'label', 'Noto Sans Bold', { 'text-letter-spacing': 0.1 }],
+];
+const LABEL_IDS = LABELS.map(([id]) => id);
 
 /** 經緯網格:每 5° 一條(全部縮放),放大後加 1° 細線 */
 function graticule() {
@@ -50,7 +73,10 @@ const map = new maplibregl.Map({
   container: 'map',
   style: {
     version: 8,
+    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
     sources: {
+      places: { type: 'vector', url: 'https://tiles.openfreemap.org/planet',
+        attribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>' },
       land: { type: 'geojson', data: `${BASE}land.json`, attribution: 'Natural Earth' },
       imagery: { type: 'raster', tileSize: 256, maxzoom: 18, attribution: 'Imagery © Esri',
         tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'] },
@@ -61,6 +87,7 @@ const map = new maplibregl.Map({
       { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': th0.land } },
     ],
   },
+  localIdeographFontFamily: "'Microsoft JhengHei', 'PingFang TC', 'Noto Sans TC', sans-serif",
   center: prefs.get('view')?.center ?? [121, 23.7],
   zoom: prefs.get('view')?.zoom ?? 6.2,
   attributionControl: { compact: true, customAttribution: '資料：中央氣象署、NCDR、ECMWF (CC BY 4.0)、NOAA NCEP、Google DeepMind WeatherLab' },
@@ -97,6 +124,12 @@ function addOverlays(beforeId) {
   }
   map.setPaintProperty('borders', 'line-dasharray', [3, 1.5]);   // 國界虛線,和海岸線分得開
   map.setPaintProperty('km100', 'line-dasharray', [4, 2]);
+  // 地名在邊界線上面、颱風 / 測站下面
+  for (const [id, src, filter, minzoom, maxzoom, size, color, font, extra] of LABELS) {
+    map.addLayer({ id, type: 'symbol', source: 'places', 'source-layer': src, filter, minzoom, maxzoom,
+      layout: { 'text-field': NAME, 'text-font': [font], 'text-size': size, 'text-max-width': 8, 'text-padding': 4, ...extra },
+      paint: { 'text-color': th[color], 'text-halo-color': th.halo, 'text-halo-width': 1.4, 'text-halo-blur': 0.3 } }, beforeId);
+  }
 }
 
 function setTheme(name) {
@@ -113,6 +146,10 @@ function setTheme(name) {
   for (const id of ['coast', 'borders', 'county', 'km100']) map.setPaintProperty(`${id}-casing`, 'line-color', th.casing);
   map.setPaintProperty('grid-major', 'line-color', th.grid);
   map.setPaintProperty('grid-minor', 'line-color', th.grid);
+  for (const [id, , , , , , color] of LABELS) {
+    map.setPaintProperty(id, 'text-color', th[color]);
+    map.setPaintProperty(id, 'text-halo-color', th.halo);
+  }
   typhoon.setTheme(name === 'light' ? 'light' : 'dark');
 }
 
@@ -1070,6 +1107,9 @@ function bindUI() {
     for (const id of ['county', 'county-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };
   $('chk-town').onchange = (e) => map.setLayoutProperty('town', 'visibility', e.target.checked ? 'visible' : 'none');
+  $('chk-labels').onchange = (e) => {
+    for (const id of LABEL_IDS) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
+  };
   $('chk-km100').onchange = (e) => {
     for (const id of ['km100', 'km100-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
   };

@@ -1145,3 +1145,12 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 兩者 update_index 都記 grids=legacy_grids(...),舊報繼續用自己的台灣範圍格點,3 天後清掉。TW_AREA 只剩 JMA 測站用。
 - 實測(資料寫到 scratchpad、R2 停用,10/29 06Z):新檔切回舊範圍和 R2 上同一報舊檔逐格相同(WRF msl、海浪 swh 全部時刻);網頁 WRF 溫度、海浪浪高都顯示完整範圍(WRF 扇形邊、四角空白),風場 / 海浪動畫正常。
 
+
+## 2026-11-02 地圖地名(仿 Google 地圖)
+- 使用者:「地圖要有地名 跟 google map 類似」。
+- 來源:OpenFreeMap 向量圖磚(OpenStreetMap 資料,免金鑰、無用量限制;tiles.openfreemap.org/planet),只取 place、water_name、mountain_peak 三層畫文字,底圖仍是原本素色 / 衛星影像。字型檔(glyphs)也用 OpenFreeMap;中日韓字由瀏覽器字型畫(localIdeographFontFamily = 微軟正黑體 / 蘋方 / Noto Sans TC),只下載拉丁字。
+- 名稱:name:zh-Hant → name:zh → name(沒有中文名的用原文)。
+- 逐級顯示:國家 2–7、省 4.5–7.5、城市 3 起(依 rank 排優先)、鎮 6.5 起(花蓮市、台東市、宜蘭市在 OSM 是鎮級)、島 7 起、村里 10 起、山峰 9.5 起(▲ 名稱 + 標高)、海域(大洋、海、灣、海峽、湖)斜體藍字。重疊自動讓位。
+- 圖層順序:邊界線上面、颱風 / 測站下面。三種底圖各自的字色與白 / 黑描邊(THEMES.label、labelMinor、water、halo)。
+- 底圖區新增「地名」勾選(存在瀏覽器設定)。地圖右下資料來源加 OpenFreeMap、OpenStreetMap。
+- 實測(本機 + R2 資料):縮放 4 東亞國家、城市、海域;縮放 7.2 台灣各縣市與花東鎮名(淺、深底圖);縮放 11 台北村里、山峰標高。
