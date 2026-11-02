@@ -170,6 +170,8 @@ input.num { width: 48px; flex: 0 0 48px; padding: 1px 4px; font: inherit; font-s
 
 /* MapLibre 控制項避開上方標題列與下方時間軸 */
 .maplibregl-ctrl-top-right { top: 56px; }
+.maplibregl-ctrl-group button.label-toggle { width: auto; padding: 0 6px; font-size: 12px; color: #555 !important; text-decoration: line-through; }
+.maplibregl-ctrl-group button.label-toggle.on { color: #1565c0 !important; font-weight: 600; text-decoration: none; }
 .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left { bottom: 62px; }
 #legend { bottom: 100px; }
 

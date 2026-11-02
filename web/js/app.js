@@ -155,6 +155,21 @@ function setTheme(name) {
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+// 地名快速開關(縮放鈕下面;和底圖區的「地名」勾選同步)
+const labelBtn = document.createElement('button');
+labelBtn.type = 'button';
+labelBtn.className = 'label-toggle on';
+labelBtn.title = '顯示／隱藏地名';
+labelBtn.textContent = '地名';
+labelBtn.onclick = () => {
+  const c = $('chk-labels');
+  c.checked = !c.checked;
+  c.dispatchEvent(new Event('change', { bubbles: true }));
+};
+map.addControl({
+  onAdd() { const d = document.createElement('div'); d.className = 'maplibregl-ctrl maplibregl-ctrl-group'; d.append(labelBtn); return d; },
+  onRemove() {},
+}, 'top-right');
 
 window.swMap = map;     // 除錯 / 之後截圖功能用
 const radar = new RadarLayer(map);
@@ -1109,6 +1124,7 @@ function bindUI() {
   $('chk-town').onchange = (e) => map.setLayoutProperty('town', 'visibility', e.target.checked ? 'visible' : 'none');
   $('chk-labels').onchange = (e) => {
     for (const id of LABEL_IDS) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
+    labelBtn.classList.toggle('on', e.target.checked);
   };
   $('chk-km100').onchange = (e) => {
     for (const id of ['km100', 'km100-casing']) map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none');
