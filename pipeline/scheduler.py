@@ -15,7 +15,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from . import (cleanup, config, fetch_aifs, fetch_cwa_wave, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_satellite,
+from . import (cleanup, config, fetch_aifs, fetch_cwa_wave, fetch_ecmwf, fetch_ensemble, fetch_marine, fetch_radar, fetch_rain_grid, fetch_rainradar, fetch_satellite,
                fetch_stations, fetch_typhoon, fetch_wrf, r2)
 from .common import read_status, record_status, stamp_dt
 
@@ -32,6 +32,8 @@ def window(cycle, first, last):
 JOBS = [
     ("radar", fetch_radar.run, dict(minute=window(10, 1, 9)), 10, 9),
     ("stations", fetch_stations.run, dict(minute=window(10, 1, 9)), 10, 9),
+    # 降雨雷達三站約每 2 分鐘一張(S3 公開網址,json 1 KB):每分鐘檢查
+    ("rainradar", fetch_rainradar.run, dict(minute="*"), None, None),
     ("qpe1h", fetch_rain_grid.run_qpe1h, dict(minute=window(10, 1, 9)), 10, 9),
     ("rain_today", fetch_rain_grid.run_daily, dict(minute=window(30, 1, 15)), 30, 15),
     # 海象(每小時一筆,約整點後 20–40 分上架):REST 沒有條件式請求,每 5 分檢查一次,平常只抓最近 4 小時

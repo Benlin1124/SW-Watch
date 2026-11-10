@@ -67,6 +67,26 @@
         </div>
       </div>
 
+      <div class="layer" data-layer="rainradar">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-rainradar">
+          <span class="layer-name">降雨雷達</span>
+          <span class="layer-time" id="time-rainradar">--</span>
+        </label>
+        <div class="layer-opts">
+          <label title="氣象署降雨雷達單站合成回波（樹林、南屯、林園，各 150 公里），約每 2 分鐘一張；由回波圖依色標還原 dBZ">雷達站
+            <select id="rr-site">
+              <option value="all">三站</option>
+              <option value="shulin">樹林</option>
+              <option value="nantun">南屯</option>
+              <option value="linyuan">林園</option>
+            </select>
+          </label>
+          <label>透明度 <input type="range" id="op-rainradar" min="0" max="100" value="85"></label>
+          <div class="hint">約每 2 分鐘更新；時間軸每格留一張</div>
+        </div>
+      </div>
+
       <div class="layer" data-layer="stations">
         <label class="layer-head">
           <input type="checkbox" id="chk-stations" checked>
