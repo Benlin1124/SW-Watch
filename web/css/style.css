@@ -261,3 +261,10 @@ body[data-map-theme=dark] .st-label.mr-label { color: #81d4fa; }
 .legend-labels.abs { position: relative; height: 14px; display: block; }
 .legend-labels.abs span { position: absolute; top: 0; width: auto; transform: translateX(-50%); white-space: nowrap; }
 .legend-labels.abs span:first-child { transform: none; }
+
+/* 即時閃電圖例 */
+.lt-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); }
+.lt-legend + .lt-legend { margin-top: 3px; }
+.lt-age { display: inline-flex; align-items: center; gap: 3px; }
+.lt-age i { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #222; }
+.lt-age b { color: var(--fg); font-weight: normal; }

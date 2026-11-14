@@ -87,6 +87,25 @@
         </div>
       </div>
 
+      <div class="layer" data-layer="lightning">
+        <label class="layer-head">
+          <input type="checkbox" id="chk-lightning">
+          <span class="layer-name">即時閃電</span>
+          <span class="layer-time" id="time-lightning">--</span>
+        </label>
+        <div class="layer-opts">
+          <label title="顯示時間往前多久內的閃電；顏色 = 距顯示時間幾分鐘">範圍
+            <select id="lt-window">
+              <option value="10">10 分鐘</option>
+              <option value="30" selected>30 分鐘</option>
+              <option value="60">1 小時</option>
+            </select>
+          </label>
+          <label>透明度 <input type="range" id="op-lightning" min="0" max="100" value="100"></label>
+          <div class="hint">＋ 對地、● 雲間；氣象署閃電偵測網，約每 5 分鐘更新</div>
+        </div>
+      </div>
+
       <div class="layer" data-layer="stations">
         <label class="layer-head">
           <input type="checkbox" id="chk-stations" checked>
