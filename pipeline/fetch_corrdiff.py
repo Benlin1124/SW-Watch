@@ -93,10 +93,13 @@ def fetch_input(model, init, step, pool):
         e = json.loads(line)
         idx[(e["param"], int(e.get("levelist", 0)))] = e
 
-    def one(key):
+    def download(key):
         e = idx[key]
         a, n = e["_offset"], e["_length"]
-        h = eccodes.codes_new_from_message(_get(base + ".grib2", {"Range": f"bytes={a}-{a + n - 1}"}).content)
+        return _get(base + ".grib2", {"Range": f"bytes={a}-{a + n - 1}"}).content
+
+    def decode(msg):
+        h = eccodes.codes_new_from_message(msg)
         try:
             g = lambda k: eccodes.codes_get(h, k)
             ni, nj, d = g("Ni"), g("Nj"), g("iDirectionIncrementInDegrees")
@@ -110,7 +113,8 @@ def fetch_input(model, init, step, pool):
 
     water = ("tcwv", 0) if ("tcwv", 0) in idx else ("tcw", 0)
     keys = [water] + PL + [(p, 0) for p in SFC]
-    return np.stack(list(pool.map(one, keys)))
+    # 下載可以平行;ecCodes 解碼不是執行緒安全(第一次讀定義檔時會整個程式崩潰)→ 一個一個解
+    return np.stack([decode(m) for m in list(pool.map(download, keys))])
 
 
 # ── 模型 ─────────────────────────────────────────────

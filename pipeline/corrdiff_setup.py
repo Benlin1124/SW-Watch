@@ -39,7 +39,12 @@ def main():
     if not PY.exists():
         run(sys.executable, "-m", "venv", "--system-site-packages", VENV)
     pip = [PY, "-m", "pip", "install"]
-    run(*pip, "torch", "--index-url", f"https://download.pytorch.org/whl/{'cpu' if a.cpu else a.cuda}")
+    index = f"https://download.pytorch.org/whl/{'cpu' if a.cpu else a.cuda}"
+    run(*pip, "torch", "--index-url", index)
+    ver = run(PY, "-c", "import torch; print(torch.__version__)", capture_output=True, text=True).stdout.strip()
+    if not a.cpu and "+cu" not in ver:              # 系統已有 CPU 版時 pip 會直接沿用 → 在 venv 裡強制裝 CUDA 版
+        print(f"目前是 torch {ver},改裝 CUDA 版", flush=True)
+        run(*pip, "--force-reinstall", "--no-deps", "torch", "--index-url", index)
     run(*pip, "--no-deps", "earth2studio")
     deps = run(PY, "-c", LIST_DEPS, capture_output=True, text=True).stdout.split("\n")
     deps = [d.strip() for d in deps if d.strip() and not re.match(r"torch\b", d.strip())]
