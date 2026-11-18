@@ -4,7 +4,6 @@ import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp, toDate } from './t
 import { RadarLayer } from './layers/radar.js';
 import { RainRadarLayer } from './layers/rainradar.js';
 import { LightningLayer } from './layers/lightning.js';
-import { CorrDiffLayer } from './layers/corrdiff.js';
 import { SatelliteLayer } from './layers/satellite.js';
 import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
 import { WindLayer } from './layers/wind.js';
@@ -178,7 +177,6 @@ window.swMap = map;     // 除錯 / 之後截圖功能用
 const radar = new RadarLayer(map);
 const rainradar = new RainRadarLayer(map);
 const lightning = new LightningLayer(map);
-const corrdiff = new CorrDiffLayer(map);
 const satellite = new SatelliteLayer(map);
 const ecmwf = new EcmwfLayer(map);
 const wind = new WindLayer(map, ecmwf);
@@ -194,7 +192,7 @@ const marine = new MarineLayer(map);
 const mCard = new MarineCard(marine, { ec: ecmwf });
 marine.onSelect = (id) => { card.close(); fcCard.close(); mCard.open(id, state.T); };
 const fcCard = new ForecastCard(ecmwf, map, { onOpen: () => { card.close(); mCard.close(); } });   // onPick 在 bindEcmwfUI 設定
-const LAYERS = [satellite, ecmwf, corrdiff, radar, rainradar, lightning, stations, marine, typhoon, ens];
+const LAYERS = [satellite, ecmwf, radar, rainradar, lightning, stations, marine, typhoon, ens];
 // 衛星這一張還沒好:畫面維持上一張,時間欄先標要顯示的時間「載入中」(好了由 updateLayerTime 蓋掉)
 satellite.onLoading = (stamp) => {
   if (!stamp) return;
@@ -468,20 +466,8 @@ async function reload() {
   fillIssueSelect();
   fillEnsPanel();
   fillEcmwfPanel();
-  fillCorrDiffPanel();
   await loadBestTrack();
   if (!state.T || wasEnd || !state.slots.includes(state.T) || !ok(state.T)) state.T = latestSlot();
-}
-
-/** CorrDiff 面板:起報、時刻選單跟著模式與已完成的時刻 */
-function fillCorrDiffPanel() {
-  const ini = $('cd-init'), st = $('cd-step');
-  const inits = corrdiff.inits, cur = corrdiff.init;
-  ini.innerHTML = '<option value="">最新</option>' + [...inits].reverse().map((t) => `<option value="${t}">${fmtTW(t)}</option>`).join('');
-  ini.value = inits.includes(cur) ? cur : '';
-  const init = corrdiff.activeInit, keep = corrdiff.step;
-  st.innerHTML = '<option value="">最接近現在</option>' + corrdiff.steps.map((s) => `<option value="${s}">+${s}h　${fmtTW(addMin(init, s * 60))}</option>`).join('');
-  st.value = corrdiff.steps.includes(keep) ? String(keep) : '';
 }
 
 function fillIssueSelect() {
@@ -674,7 +660,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [satellite, ecmwf, corrdiff, wind, waves, radar, rainradar, lightning, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, ecmwf, wind, waves, radar, rainradar, lightning, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
   syncInfo();
@@ -1110,14 +1096,6 @@ function bindUI() {
   $('chk-rainradar').onchange = async (e) => { rainradar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); await render(); };
   $('rr-site').onchange = async (e) => { rainradar.setSite(e.target.value); refreshTimeline(); await render(); };
   $('op-rainradar').oninput = (e) => rainradar.setOpacity(e.target.value / 100);
-  const cdApply = async () => { fillCorrDiffPanel(); updateLegend(); await render(); };
-  $('chk-corrdiff').onchange = async (e) => { corrdiff.setVisible(e.target.checked); await cdApply(); };
-  $('cd-model').onchange = async (e) => { corrdiff.model = e.target.value; await cdApply(); };
-  $('cd-var').onchange = async (e) => { corrdiff.variable = e.target.value; await cdApply(); };
-  $('cd-init').onchange = async (e) => { corrdiff.init = e.target.value; await cdApply(); };
-  $('cd-step').onchange = async (e) => { corrdiff.step = e.target.value === '' ? null : +e.target.value; await cdApply(); };
-  $('cd-follow').onchange = async (e) => { corrdiff.follow = e.target.checked; await cdApply(); };
-  $('op-corrdiff').oninput = (e) => corrdiff.setOpacity(e.target.value / 100);
   $('chk-lightning').onchange = async (e) => { lightning.setVisible(e.target.checked); updateLegend(); refreshTimeline(); await render(); };
   $('lt-window').onchange = async (e) => { lightning.setWindow(+e.target.value); updateLegend(); await render(); };
   $('op-lightning').oninput = (e) => lightning.setOpacity(e.target.value / 100);
@@ -1174,7 +1152,7 @@ function bindUI() {
   document.addEventListener('input', saveEns);
 
   map.on('mousemove', (e) => {
-    const v = [radar, rainradar, lightning, corrdiff, ecmwf, wind, waves, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
+    const v = [radar, rainradar, lightning, ecmwf, wind, waves, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
     const el = $('readout');
     el.style.display = 'block';
     const lng = ((e.lngLat.lng + 180) % 360 + 360) % 360 - 180;   // 地圖往東捲過 180° 時 lng 會超過 180
@@ -1201,7 +1179,6 @@ map.on('load', async () => {
   rainradar.addTo();             // 在整合回波上面
   satellite.addTo('radar');
   ecmwf.addTo('radar');
-  corrdiff.addTo('radar');       // 在 ECMWF 上面、觀測雷達底下
   wind.addTo();
   waves.addTo();                // 後加的在下面:浪在風底下
   typhoon.addTo();

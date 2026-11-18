@@ -4,6 +4,8 @@
 //   aifs:ECMWF AIFS(AI 模式)0.25°(90–180°E、0–50°N)、每 6 小時(pipeline/fetch_aifs.py):降雨、溫度、海平面氣壓、平均風、浪高、平均週期
 //   wrf:氣象署 WRF 3 km(重新內插成 0.03°)、每 6 小時(pipeline/fetch_wrf.py):降雨、溫度、海平面氣壓、平均風
 //   cwawave:氣象署海浪模式 0.1°、逐時到 168 小時(pipeline/fetch_cwa_wave.py):浪高、平均週期(浪向畫箭頭)
+//   cdifs / cdaifs:CorrDiffTaiwan 降尺度 IFS / AIFS,0.02°、0–84 小時每 6 小時(pipeline/fetch_corrdiff.py):最大回波、溫度、風速;
+//     每個時刻一個 uint8 檔(perStep),沒有風向;不進資訊卡和風場動畫(那些用 MODELS)
 // 檔案格式相同:每個起報、每個變數一個檔(全部預報時刻;IFS 0.1° 是每塊一個檔);換時刻不用再下載。
 // 範圍改大(2026-10-29)前的舊報:index grids[起報] = 它自己的 grid(台灣附近),沒有分塊。
 // 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大(約 0.0125° 一像素)做雙線性內插再上色
@@ -11,7 +13,7 @@
 import { DATA_BASE_URL } from '../config.js';
 import { getIndex } from '../data.js';
 import { landMask } from '../land.js';
-import { beaufortLegendHTML, legendHTML, SCALES, withInfo } from '../colormaps.js';
+import { beaufortLegendHTML, DBZ_COLORS, DBZ_LEVELS, legendHTML, SCALES, withInfo } from '../colormaps.js';
 import { addMin, fmtTW } from '../time.js';
 import { EMPTY_PNG } from './radar.js';
 import { arrowImage } from './stations.js';
@@ -19,6 +21,7 @@ import { waveClass, WAVE_CLASSES } from './marine.js';
 
 export const EC_VARS = {
   rain: { name: '降雨', unit: 'mm' },
+  mrr: { name: '最大回波', unit: 'dBZ' },
   t2: { name: '溫度', unit: '°C' },
   msl: { name: '海平面氣壓', unit: 'hPa' },
   wind: { name: '平均風', unit: 'm/s' },
@@ -33,6 +36,13 @@ export const MODELS = {
   wrf: { name: '氣象署 3km', path: 'wrf', vars: ['rain', 't2', 'msl', 'wind'] },
   cwawave: { name: '氣象署海浪', path: 'cwawave', vars: ['swh', 'mwp'] },
 };
+const CD_VARS = ['mrr', 't2', 'wind'];
+const ALL_MODELS = { ...MODELS,
+  cdifs: { name: 'CorrDiff（IFS）', path: 'corrdiff/ifs', vars: CD_VARS, perStep: true },
+  cdaifs: { name: 'CorrDiff（AIFS）', path: 'corrdiff/aifs', vars: CD_VARS, perStep: true },
+};
+const MIN_DBZ = 5;                 // CorrDiff 訓練資料晴空約 0 dBZ,低於這個當無回波(不畫)
+const CD_NOTE = 'CorrDiffTaiwan 以 ERA5 → WRF（2018–2021）訓練，這裡餵 IFS／AIFS 預報場，超出訓練條件，屬實驗產品；每個時刻只取樣一次，是一種可能結果，不是機率。';
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
 
 const PX_DEG = 0.0125;              // 畫圖每像素約幾度(ECMWF 放大 8 倍、3 km 放大 2 倍;色塊邊界才不會有鋸齒)
@@ -98,7 +108,7 @@ export class EcmwfLayer {
 
   constructor(map) { this.map = map; }
 
-  get name() { return `${MODELS[this.model].name} 預報`; }
+  get name() { return `${ALL_MODELS[this.model].name} 預報`; }
   get times() { return []; }                 // 不參與時間軸(預報時間在未來)
   get index() { return this.indexes[this.model] ?? null; }
   idx(m = this.model) { return this.indexes[m] ?? null; }
@@ -112,7 +122,7 @@ export class EcmwfLayer {
   get inits() { return this.initsOf(); }
   get activeInit() { return this.inits.includes(this.init) ? this.init : this.latest; }
   get steps() { return this.stepsOf(this.model, this.activeInit); }
-  get vars() { return MODELS[this.model].vars; }
+  get vars() { return ALL_MODELS[this.model].vars; }
   /** 這一報的格點(舊報有自己的 grid) */
   gridOf(m, init) { const x = this.idx(m); return x?.grids?.[init] ?? x?.grid; }
   /** 這一報有 0.1° 分塊 → 分塊規格 */
@@ -155,8 +165,16 @@ export class EcmwfLayer {
   }
 
   async load() {
-    const got = await Promise.allSettled(Object.entries(MODELS).map(async ([m, d]) => [m, await getIndex(d.path)]));
-    for (const r of got) if (r.status === 'fulfilled') this.indexes[r.value[0]] = r.value[1];
+    const got = await Promise.allSettled(Object.entries(ALL_MODELS).map(async ([m, d]) => [m, await getIndex(d.path)]));
+    for (const r of got) {
+      if (r.status !== 'fulfilled') continue;
+      const [m, x] = r.value;
+      if (ALL_MODELS[m].perStep) {             // 各變數同一組格點,補成和其他模式一樣的 grid
+        const { lon0, lat0, dx, dy, nx, ny } = Object.values(x.vars)[0];
+        x.grid = { lon0, lat0, dx, dy, nx, ny, west: lon0 - dx / 2, east: lon0 + (nx - 0.5) * dx, south: lat0 - dy / 2, north: lat0 + (ny - 0.5) * dy };
+      }
+      this.indexes[m] = x;
+    }
     if (!Object.keys(this.indexes).length) throw got[0].reason;
     // 陸地遮罩涵蓋所有模式的範圍(IFS / AIFS 西北太平洋,其他在台灣附近)
     const gs = Object.values(this.indexes).map((x) => x.grid);
@@ -168,7 +186,7 @@ export class EcmwfLayer {
 
   /** 換模式:起報、時刻回到自動;這個模式沒有的變數改成降雨 */
   setModel(m) {
-    if (!MODELS[m] || m === this.model) return;
+    if (!ALL_MODELS[m] || m === this.model) return;
     this.model = m;
     this.init = '';
     this.step = null;
@@ -230,7 +248,7 @@ export class EcmwfLayer {
     const key = `${m}/${init}/${tile ?? ''}/${v}`;
     if (!this.cache.has(key)) {
       const spec = this.idx(m).vars[v];
-      const p = fetch(new URL(`${MODELS[m].path}/${init}/${tile ? `t${tile}/` : ''}${v}.bin.gz`, DATA_BASE_URL).href)
+      const p = fetch(new URL(`${ALL_MODELS[m].path}/${init}/${tile ? `t${tile}/` : ''}${v}.bin.gz`, DATA_BASE_URL).href)
         .then((r) => { if (!r.ok) throw new Error(`${key} ${r.status}`); return r.arrayBuffer(); })
         .then(gunzip)
         .then((buf) => ({ raw: new Uint16Array(buf), spec }));
@@ -241,11 +259,28 @@ export class EcmwfLayer {
     return this.cache.get(key);
   }
 
+  /** perStep 模式:一個變數、一個時刻的檔 */
+  stepData(init, v, step, m) {
+    const key = `${m}/${init}/${v}/${step}`;
+    if (!this.cache.has(key)) {
+      const spec = this.idx(m).vars[v], name = `${v}_${String(step).padStart(3, '0')}`;
+      const p = fetch(new URL(`${ALL_MODELS[m].path}/${init}/${name}.bin.gz`, DATA_BASE_URL).href)
+        .then((r) => { if (!r.ok) throw new Error(`${key} ${r.status}`); return r.arrayBuffer(); })
+        .then(gunzip)
+        .then((buf) => ({ raw: new Uint8Array(buf), spec }));
+      p.catch(() => this.cache.delete(key));
+      this.cache.set(key, p);
+      while (this.cache.size > CACHE_MAX) this.cache.delete(this.cache.keys().next().value);
+    }
+    return this.cache.get(key);
+  }
+
   /** 第 k 步在 view 格點上的實際值(Float32,NaN = 無資料);分塊的各塊同時下載、拼起來 */
   async slice(init, v, k, m = this.model, view = this.view(m, init)) {
     const g = view.grid, out = new Float32Array(g.nx * g.ny);
+    const perStep = ALL_MODELS[m].perStep;
     const put = ({ raw, spec }, ox, oy, w, h) => {
-      const base = k * w * h;
+      const base = perStep ? 0 : k * w * h;
       for (let y = 0; y < h; y++) {
         for (let x = 0, row = (oy + y) * g.nx + ox, src = base + y * w; x < w; x++) {
           const q = raw[src + x];
@@ -253,7 +288,8 @@ export class EcmwfLayer {
         }
       }
     };
-    if (!view.fine) put(await this.data(init, v, m), 0, 0, g.nx, g.ny);
+    if (perStep) put(await this.stepData(init, v, this.stepsOf(m, init)[k], m), 0, 0, g.nx, g.ny);
+    else if (!view.fine) put(await this.data(init, v, m), 0, 0, g.nx, g.ny);
     else {
       const { fine, r } = view, s = fine.n - 1, tiles = [];
       for (let j = r.j0; j <= r.j1; j++) for (let i = r.i0; i <= r.i1; i++) tiles.push([i, j]);
@@ -307,6 +343,7 @@ export class EcmwfLayer {
   async field(m, init, step, variable, rainHours, view = this.view(m, init)) {
     const steps = this.stepsOf(m, init), k = steps.indexOf(step);
     const slice = (v, kk) => this.slice(init, v, kk, m, view);
+    if (ALL_MODELS[m].perStep) return { field: await slice(variable, k), label: variable === 'wind' ? '10 m 風速' : variable === 't2' ? '2 m 溫度' : EC_VARS[variable].name };
     if (variable === 'rain') {
       const w = rainHours || step;                  // 0 = 起報後累積
       // 時段起點取 step - w 之前(含)最近的時刻(3 km 每 6 小時:選 3 小時會變成 6 小時)
@@ -335,6 +372,7 @@ export class EcmwfLayer {
 
   scale(variable) {
     if (variable === 'rain') return SCALES[this.rainScale];  // 氣象署色階,面板「間距」切換小 / 大
+    if (variable === 'mrr') return { levels: DBZ_LEVELS, colors: DBZ_COLORS, min: MIN_DBZ };
     if (variable === 't2') return SCALES.temp;
     if (variable === 'msl') return SCALES.pres;
     if (variable === 'swh') return SCALES.wave;
@@ -476,16 +514,22 @@ export class EcmwfLayer {
     if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
     const x = this.shown.field[iy * g.nx + ix], v = this.shown.variable, wave = WAVE_VARS.has(v);
     if (Number.isNaN(x) || (wave && this.land?.isLand(lng, lat))) return null;
+    if (v === 'mrr' && x < MIN_DBZ) return `${ALL_MODELS[this.shown.model].name} 無回波`;
     const unit = EC_VARS[v].unit;
     const cls = v === 'swh' && waveClass(x) ? `（${waveClass(x)}）` : '';
     const ext = wave && this.coastAt(lng, lat, this.shown.model) ? '（近岸外推）' : '';
-    return `${MODELS[this.shown.model].name} ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}${ext}`;
+    return `${ALL_MODELS[this.shown.model].name} ${EC_VARS[v].name} ${x.toFixed(1)} ${unit}${cls}${ext}`;
   }
 
   legend() {
     if (!this.shown) return `<div class="legend-title">${this.name}（無資料）</div>`;
     const { model, variable, sc, label, init, step } = this.shown;
-    const title = `${MODELS[model].name} ${label}（${fmtEcInit(init)} +${step}h）`;
+    const title = `${ALL_MODELS[model].name} ${label}（${fmtEcInit(init)} +${step}h）`;
+    if (ALL_MODELS[model].perStep) {
+      if (variable === 'mrr') return withInfo(legendHTML(`${title} (dBZ)`, DBZ_LEVELS, DBZ_COLORS), CD_NOTE);
+      if (variable === 'wind') return withInfo(beaufortLegendHTML(`${title}（蒲福風級）`, sc.colors), CD_NOTE);
+      return withInfo(legendHTML(`${title} (°C)`, sc.levels, sc.colors, 0, 22, sc.ticks), CD_NOTE);
+    }
     if (variable === 'wind' || variable === 'gust') return beaufortLegendHTML(`${title}（蒲福風級）`, sc.colors);
     const html = legendHTML(`${title} (${EC_VARS[variable].unit})`, sc.levels, sc.colors, 0, 22, sc.ticks, sc.openTop);
     if (variable === 'swh') {

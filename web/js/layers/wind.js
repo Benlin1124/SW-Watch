@@ -56,7 +56,7 @@ export class WindLayer {
   }
 
   get model() {
-    const m = this.ec.model, has = (v) => MODELS[m].vars.includes(v);
+    const m = this.ec.model, has = (v) => MODELS[m]?.vars.includes(v);   // CorrDiff 沒有風向 → 用 IFS
     return (this.kind === 'wave' ? has('swh') : has('wind')) ? m : 'ecmwf';
   }
   get index() { return this.ec.idx(this.model); }
