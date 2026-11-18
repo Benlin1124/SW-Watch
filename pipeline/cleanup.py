@@ -12,7 +12,7 @@ from .fetch_satellite import cleanup as cleanup_satellite
 from .fetch_wrf import cleanup as cleanup_wrf
 from .station_series import compress_old_months
 
-SKIP = ("typhoon", "ecmwf", "wrf", "cwawave", "aifs")
+SKIP = ("typhoon", "ecmwf", "wrf", "cwawave", "aifs", "corrdiff")   # corrdiff 由 fetch_corrdiff 自己清
 
 
 def run():

@@ -2,6 +2,7 @@
 data/
 logs/
 pipeline/.cache/
+.venv-corrdiff/
 __pycache__/
 *.pyc
 # notebook 內含寫死的金鑰,清掉之前不納入版控

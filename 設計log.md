@@ -1174,3 +1174,12 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 網頁 layers/lightning.js:GeoJSON;對地 = SDF 十字(icon-color 依時間、深色描邊),雲間 = 圓點;顏色依距結尾 0–5 / 5–10 / 10–20 / 20–30 / 30–60 分。範圍 10 / 30 / 60 分可選、透明度;同步時結尾 = T(來源要涵蓋到 T),不同步 = 來源最新一分鐘;最新那格檔名加 index.updated 避免快取;播放預載 framesFor;讀值 5 km 內次數;時間軸色帶黃色。圖層在海岸線上面、測站底下。
 - 實測(資料寫到 scratchpad、R2 停用):16:00–17:00 共 582 筆(對地 430)存 6 格;再跑一次 md5 相同 → same。網頁澎湖西南外海的雷暴依時間分色顯示,圖例、時間欄正常。
 
+## 2026-11-18 CorrDiffTaiwan 降尺度(IFS、AIFS)
+- 使用者:加入 earth2studio CorrDiffTaiwan,餵 IFS 和 AIFS;0–84 小時每 6 小時;樣本數實測後再定。樹莓派評估後放棄(粗估每報 7–15 小時),決定在有 GPU 的電腦跑。
+- 做成獨立程式 pipeline/fetch_corrdiff.py,不進排程:直接抓 ECMWF 0.25° 開放資料(tcwv、500/850 hPa z t u v、2t、10u、10v),算完自己 flush 到 R2,不寫 status.json。新報優先,每完成一個時刻就更新 index(nsteps),中斷可續跑。保留 ECMWF_KEEP_DAYS;cleanup.py 略過 corrdiff。低優先權執行。
+- 輸入驗證:z 是重力位(訓練平均 z500 約 57384,和 IFS/AIFS 同量級)。AIFS 沒有 tcwv:比濕積分對 IFS 偏差 −2.30、RMSE 2.77,改用 tcw(對 IFS tcwv 偏差 0.13、RMSE 0.29)。
+- 輸出 448×448 曲線網格 → 最近鄰到 0.02°(474×424),離網格 > 0.025° = 範圍外;uint8:mrr 0.5 dBZ、t2 0.25°C、wind(10 m 風速)0.25 m/s。種子 = crc32(起報 + 時效),兩模式相同。
+- Windows 問題:pygrib 編不了 → earth2studio 用 --no-deps,其餘相依另裝,匯入時放空模組;NGC 下載路徑含反斜線會 404 → 自己下載 zip,用本機 Package。corrdiff_setup.py 建 .venv-corrdiff。
+- 網頁 layers/corrdiff.js:輸入、變數、初始、時刻、對齊時間軸、透明度、讀值;回波 < 5 dBZ 不畫(訓練資料晴空約 0 dBZ,否則整片淺藍)。
+- CPU 實測(i7-10510U,4 核):224×224 每次 11.4 秒、288×288 19.4 秒;推算 448×448 約 47 秒,一個時刻 9 次約 7 分鐘。這台可配置記憶體只剩約 2.2 GB,448×448 跑不起來。
+- 測試(R2 停用):推論換成模型包裡的 WRF 樣本,跑通下載、轉格點、存檔、續跑(不重算)、網頁;2 m 溫度的地形和海岸線對齊。**真正的 CorrDiff 推論還沒跑成功過**,要在 GPU 電腦用 --bench 驗證。

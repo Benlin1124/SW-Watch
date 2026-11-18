@@ -112,6 +112,16 @@ python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" 
 - 依 10 分鐘格存 `data/lightning/{格}.json`，每筆 `[經度, 緯度, 格內第幾分, 0 雲間／1 對地]`；沒有閃電的格也存（分得出「沒打雷」和「沒資料」）。每次把來源涵蓋的整格重寫（晚到的閃電會補上），內容沒變的格不重寫。`index.json` 的 `end` = 來源涵蓋到的時間。保留天數同雷達。
 - 網頁「即時閃電」圖層：顯示時間往前 10／30／60 分鐘內的閃電，對地 = 十字、雲間 = 圓點，顏色依距顯示時間幾分鐘（紅 → 橙 → 黃 → 綠 → 藍）；同步時結尾 = 時間軸時間，不同步時 = 來源最新一分鐘。滑鼠讀值顯示 5 公里內次數。預設不開。
 
+## CorrDiff 降尺度（`pipeline.fetch_corrdiff`，實驗產品）
+
+用 NVIDIA earth2studio 的 CorrDiffTaiwan，把 ECMWF IFS、AIFS 的 0.25° 預報降尺度到台灣約 2 公里：最大回波、2 m 溫度、10 m 風速。00／12Z 兩報，0–84 小時每 6 小時，每個時刻 1 個樣本。
+- **獨立程式，不在排程裡**，在有 NVIDIA GPU 的電腦跑；直接向 ECMWF 抓輸入，算完自己上傳 R2。停了不影響其他功能。
+- 安裝：`python -m pipeline.corrdiff_setup`（建 `.venv-corrdiff`；驅動較舊可加 `--cuda cu130`）。
+- 量速度：`.venv-corrdiff\Scripts\python -m pipeline.fetch_corrdiff --bench`（第一次會下載約 0.72 GB 模型，不存檔）。
+- 持續跑：`.venv-corrdiff\Scripts\python -m pipeline.fetch_corrdiff --loop`。中斷後重跑會從沒做完的時刻接著做；保留 3 天。
+- AIFS 沒有 tcwv，用 tcw 代替。模型以 ERA5 → WRF（2018–2021）訓練，餵預報場超出訓練條件；每個時刻只是一種可能結果。沒有降雨量輸出。
+- 網頁「CorrDiff 降尺度」圖層在「預報」區：可選 IFS／AIFS、變數、初始、時刻或對齊時間軸。預設不開。
+
 ## ECMWF IFS（模式預報）
 
 `pipeline/fetch_ecmwf.py`（排程每 10 分檢查）抓 ECMWF IFS 開放資料 0.1°：降雨、2 m 溫度、10 m 風、陣風、海平面氣壓、海浪（浪高、浪向、尖峰／平均週期），0–168 小時（144 小時前每 3 小時、之後每 6 小時），只抓 00/12Z。
