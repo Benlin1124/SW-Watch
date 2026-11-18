@@ -1186,3 +1186,4 @@ Phase 0 + Phase 1 完成，已實際跑通：
 - 排程電腦實測:--bench 真正推論成功(CPU 一個時刻 173 秒,mrr −7.9~22.9 dBZ、t2m 273.7~301.9 K),每報 30 個時刻約 1.4 小時。--loop 崩潰(ecCodes「fatal flex scanner」):多執行緒同時解 GRIB 不安全 → 平行下載、逐一解碼。顯示裝置 cpu:venv 沿用系統套件時 pip 會留用 CPU 版 torch → corrdiff_setup 檢查版本,不是 +cu 就在 venv 強制重裝。
 - 使用者要 CorrDiff 包含在預報內:拿掉獨立圖層,併進「模式預報」的模式選單(cdifs、cdaifs),共用初始、時刻、播放、對齊時間軸、透明度。ecmwf.js 用 ALL_MODELS;MODELS 維持原本四個,資訊卡與風場動畫不受影響(CorrDiff 每時刻一檔、沒有 u/v,風場動畫改用 IFS)。pipeline 和資料格式不變,正在跑的 --loop 不用重啟。
 - 單點預報卡加入 CorrDiff(IFS)、(AIFS):溫度、風分頁多兩條線,新增「回波」分頁,摘要表加最大回波欄;每個時刻一檔 → pointSeries 一次讀整報,另設 stepCache(300 檔)。低於 5 dBZ 畫成 0,範圍外不列。測站 / 海象卡的疊預報維持原本四個模式。
+- 測站資訊卡的疊預報也加入 CorrDiff(IFS)、(AIFS):溫度、平均風分頁(overlayLines 的 corrdiff 選項);氣壓、雨量 CorrDiff 沒有。海象卡維持原本四個模式。

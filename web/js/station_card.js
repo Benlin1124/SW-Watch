@@ -163,7 +163,7 @@ export class StationCard {
     const fcLines = end === latest && this.fcHours && this.ec ? FC_LINES[this.tab] ?? [] : [];
     const fcEnd = fcLines.length ? end + this.fcHours * 3600 : end;
     this.range = [end - H, fcEnd];
-    const fc = fcLines.length ? await overlayLines(this.ec, fcLines, info.lon, info.lat, info.alt ?? 0) : [];
+    const fc = fcLines.length ? await overlayLines(this.ec, fcLines, info.lon, info.lat, info.alt ?? 0, { corrdiff: true }) : [];
     if (this.id !== id || seq !== this.drawSeq) return;
     const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
     const xs = keep.map((i) => xsAll[i]);

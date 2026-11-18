@@ -120,7 +120,7 @@ python -m pipeline.event_archive --name 薔琵颱風 --start "2026-10-22 00:00" 
 - 量速度：`.venv-corrdiff\Scripts\python -m pipeline.fetch_corrdiff --bench`（第一次會下載約 0.72 GB 模型，不存檔）。
 - 持續跑：`.venv-corrdiff\Scripts\python -m pipeline.fetch_corrdiff --loop`。中斷後重跑會從沒做完的時刻接著做；保留 3 天。
 - AIFS 沒有 tcwv，用 tcw 代替。模型以 ERA5 → WRF（2018–2021）訓練，餵預報場超出訓練條件；每個時刻只是一種可能結果。沒有降雨量輸出。
-- 網頁在「模式預報」的模式選單選「CorrDiff 2 km（IFS／AIFS 降尺度）」，變數有最大回波、溫度、平均風（沒有風向箭頭）；初始、時刻、播放、對齊時間軸都和其他模式共用。點地圖的單點預報卡也有這兩個模式（多一個「回波」分頁）。
+- 網頁在「模式預報」的模式選單選「CorrDiff 2 km（IFS／AIFS 降尺度）」，變數有最大回波、溫度、平均風（沒有風向箭頭）；初始、時刻、播放、對齊時間軸都和其他模式共用。點地圖的單點預報卡也有這兩個模式（多一個「回波」分頁），測站資訊卡的疊預報也有（溫度、風）。
 
 ## ECMWF IFS（模式預報）
 

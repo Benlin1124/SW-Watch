@@ -261,9 +261,9 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
 // ── 測站 / 海象資訊卡疊加預報(虛線)──
 export const FC_HOURS = { 0: '不疊預報', 24: '預報 1 天', 72: '預報 3 天', 168: '預報 7 天' };
 
-/** lines [{ v, label, scale?, dash? }] × 各模式最新一報 → 有值的 [{ m, l, s }] */
-export async function overlayLines(ec, lines, lon, lat, alt = 0) {
-  const jobs = lines.flatMap((l) => Object.keys(MODELS).map((m) => ({ m, l, p: pointSeries(ec, m, l.v, lon, lat, alt).catch(() => null) })));
+/** lines [{ v, label, scale?, dash? }] × 各模式最新一報 → 有值的 [{ m, l, s }];corrdiff = 連 CorrDiff 一起(測站卡) */
+export async function overlayLines(ec, lines, lon, lat, alt = 0, { corrdiff = false } = {}) {
+  const jobs = lines.flatMap((l) => Object.keys(corrdiff ? ALL_MODELS : MODELS).map((m) => ({ m, l, p: pointSeries(ec, m, l.v, lon, lat, alt).catch(() => null) })));
   return (await Promise.all(jobs.map((j) => j.p))).map((s, k) => ({ ...jobs[k], s })).filter((j) => j.s?.ys.some((y) => y != null));
 }
 
@@ -285,7 +285,7 @@ export function mergeOverlay(data, series, fc, from, to, fmtValue) {
     s.xs.forEach((x, k) => { if (at.has(x)) col[at.get(x)] = s.ys[k]; });
     data.push(col);
     series.push({
-      label: `${MODELS[m].name}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
+      label: `${ALL_MODELS[m].name}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
       scale: l.scale ?? 'y', spanGaps: true, points: { show: false },
       paths: l.v === 'rain1' ? uPlot.paths.stepped({ align: -1 }) : undefined,
       value: (u, v) => (v == null ? '—' : fmtValue(v, l)),
