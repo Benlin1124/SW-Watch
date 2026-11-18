@@ -1,27 +1,28 @@
 // 預報資訊卡:模式預報圖層開著時,點地圖(測站、浮標、颱風、系集以外的地方)打開
-// 該點各模式最新一報的時序,同一張圖比較 ECMWF IFS / AIFS / 氣象署 3 km / 氣象署海浪(uPlot)
+// 該點各模式最新一報的時序,同一張圖比較 ECMWF IFS / AIFS / 氣象署 3 km / 氣象署海浪 / CorrDiff(IFS、AIFS)(uPlot)
 // 點圖 → 模式預報圖層跳到那個時刻(onPick);白色虛線 = 地圖目前顯示的預報時刻
 // 取最近的格點(和滑鼠讀值相同);海浪近岸沒有值 → 取 FILL_ITERS 格內最近有值的格,標「近岸外推」
-import { MODELS, fmtEcInit } from './layers/ecmwf.js';
+import { ALL_MODELS, MODELS, MIN_DBZ, fmtEcInit } from './layers/ecmwf.js';
 import { bfLabel } from './colormaps.js';
 import { toDate, toStamp, fmtTW } from './time.js';
 import { townAt } from './town.js';
 
-export const COLORS = { ecmwf: '#ffb74d', aifs: '#ce93d8', wrf: '#4fc3f7', cwawave: '#81c784' };
+export const COLORS = { ecmwf: '#ffb74d', aifs: '#ce93d8', wrf: '#4fc3f7', cwawave: '#81c784', cdifs: '#ff5252', cdaifs: '#f8f06a' };
 const WAVE = new Set(['swh', 'pp1d', 'mwp']);
 const FILL_ITERS = 3;
 // 分頁:每條線 = 一個模式的一個量(dash = 虛線);rain6 = 前 6 小時雨量(階梯線,值畫在那 6 小時)
 const TABS = {
   rain: { name: '雨量', unit: 'mm', lines: [{ v: 'rain6', label: '6 小時雨量' }] },
+  mrr: { name: '回波', unit: 'dBZ', lines: [{ v: 'mrr', label: '最大回波' }] },
   t2: { name: '溫度', unit: '°C', lines: [{ v: 't2', label: '溫度' }] },
   msl: { name: '氣壓', unit: 'hPa', lines: [{ v: 'msl', label: '氣壓' }] },
   wind: { name: '風', unit: 'm/s', lines: [{ v: 'wind', label: '平均風' }, { v: 'gust', label: '陣風', dash: true }] },
   swh: { name: '浪高', unit: 'm', lines: [{ v: 'swh', label: '浪高' }] },
   per: { name: '週期', unit: 's', lines: [{ v: 'mwp', label: '平均週期' }, { v: 'pp1d', label: '尖峰週期', dash: true }] },
 };
-const VAR_TAB = { rain: 'rain', t2: 't2', msl: 'msl', wind: 'wind', gust: 'wind', swh: 'swh', pp1d: 'per', mwp: 'per' };
+const VAR_TAB = { rain: 'rain', mrr: 'mrr', t2: 't2', msl: 'msl', wind: 'wind', gust: 'wind', swh: 'swh', pp1d: 'per', mwp: 'per' };
 const HAS = (m, v) => {
-  const vars = MODELS[m].vars;
+  const vars = ALL_MODELS[m].vars;
   return v === 'rain6' || v === 'rain1' ? vars.includes('rain') : v === 'pstn' ? vars.includes('msl') : vars.includes(v);
 };
 const toSec = (s) => toDate(s).getTime() / 1000;
@@ -50,7 +51,7 @@ export class ForecastCard {
     for (const b of tabs.querySelectorAll('[data-tab]')) b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
   }
 
-  get models() { return Object.keys(MODELS).filter((m) => this.ec.idx(m)?.latest); }
+  get models() { return Object.keys(ALL_MODELS).filter((m) => this.ec.idx(m)?.latest); }
 
   async open(lon, lat, T) {
     this.pt = { lon, lat };
@@ -90,24 +91,25 @@ export class ForecastCard {
   async summary(seq) {
     const rows = await Promise.all(this.models.map(async (m) => {
       const get = (v) => this.series(m, v).catch(() => null);
-      const [rain, t2, wind, gust, swh] = await Promise.all(['rain6', 't2', 'wind', 'gust', 'swh'].map(get));
+      const [rain, mrr, t2, wind, gust, swh] = await Promise.all(['rain6', 'mrr', 't2', 'wind', 'gust', 'swh'].map(get));
       const init = this.ec.idx(m).latest, steps = this.ec.stepsOf(m, init), days = steps[steps.length - 1] / 24;
       const total = rain && rain.ys.reduce((a, y) => a + (y ?? 0), 0);
       const cells = [
         `${fmtEcInit(init)}<small>${+days.toFixed(1)} 天</small>`,
         rain ? fmt(total, 0) : '—',
+        mrr ? (max(mrr.ys) < MIN_DBZ ? '無' : fmt(max(mrr.ys), 0)) : '—',
         t2 ? `${fmt(min(t2.ys))}–${fmt(max(t2.ys))}` : '—',
         wind ? `${fmt(max(wind.ys))}<small>${bfLabel(max(wind.ys))} 級</small>` : '—',
         gust ? fmt(max(gust.ys)) : '—',
         swh ? `${fmt(max(swh.ys))}${swh.coast ? '<small>外推</small>' : ''}` : '—',
       ];
-      return `<tr><th><i style="background:${COLORS[m]}"></i>${MODELS[m].name}</th>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
+      return `<tr><th><i style="background:${COLORS[m]}"></i>${ALL_MODELS[m].name}</th>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
     }));
     if (seq !== this.seq) return;
-    this.el.querySelector('#fc-now').innerHTML = '<table><thead><tr><th>模式</th><th>起報</th><th>雨量 mm</th>'
+    this.el.querySelector('#fc-now').innerHTML = '<table><thead><tr><th>模式</th><th>起報</th><th>雨量 mm</th><th>最大回波 dBZ</th>'
       + '<th>溫度 °C</th><th>最大風 m/s</th><th>陣風</th><th>最大浪 m</th></tr></thead>'
       + `<tbody>${rows.join('')}</tbody></table>`
-      + '<div class="sc-obs">各模式最新一報、整段預報期間：雨量 = 累積，溫度 = 最低–最高；「外推」= 近岸取最近的外海格點</div>';
+      + '<div class="sc-obs">各模式最新一報、整段預報期間：雨量 = 累積，溫度 = 最低–最高；「外推」= 近岸取最近的外海格點；CorrDiff 只有台灣附近，是實驗產品</div>';
   }
 
   async drawChart() {
@@ -133,7 +135,7 @@ export class ForecastCard {
       const ys = new Array(xs.length).fill(null);
       s.xs.forEach((x, k) => { ys[pos.get(x)] = s.ys[k]; });
       data.push(ys);
-      const label = `${MODELS[m].name}${tab.lines.length > 1 ? ` ${l.label}` : ''}`;
+      const label = `${ALL_MODELS[m].name}${tab.lines.length > 1 ? ` ${l.label}` : ''}`;
       series.push({
         label, stroke: COLORS[m], width: 1.6, dash: l.dash ? [4, 3] : undefined, spanGaps: true,
         paths: l.v === 'rain6' ? uPlot.paths.stepped({ align: -1 }) : undefined,
@@ -144,12 +146,14 @@ export class ForecastCard {
     const coast = got.some((j) => j.s.coast);
     note.textContent = (this.tab === 'rain' ? '每 6 小時累積雨量（階梯線畫在那 6 小時）；' : '')
       + (this.tab === 'wind' ? '陣風只有 IFS（90 小時內前 1 小時最大、之後前 3 / 6 小時最大）；' : '')
+      + (this.tab === 'mrr' ? `最大回波只有 CorrDiff，低於 ${MIN_DBZ} dBZ 畫成 0；` : '')
+      + (got.some((j) => ALL_MODELS[j.m].perStep) ? 'CorrDiff 每個時刻只取樣一次，是一種可能結果；' : '')
       + (coast ? '近岸沒有值，取最近的外海格點（近岸外推）；' : '')
       + '青線 = 時間軸目前時間，白虛線 = 地圖顯示的預報時刻；點圖跳到那個時刻';
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const tick = (t) => { const s = fmtTW(stampOf(t), 'dh'); return s.endsWith('00時') ? s.replace('00時', '') : s.replace(/^\d+日/, ''); };
-    const zero = this.tab === 'rain' || this.tab === 'swh';
+    const zero = this.tab === 'rain' || this.tab === 'swh' || this.tab === 'mrr';
     const cardT = () => this.T, ec = this.ec;
     this.plot = new uPlot({
       width: box.clientWidth || 400, height: 220, series,
@@ -195,6 +199,18 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
   let ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
   if (ix < 0 || iy < 0 || ix >= g.nx || iy >= g.ny) return null;
   const steps = ec.stepsOf(m, init), n = g.nx * g.ny;
+  const perStep = ALL_MODELS[m].perStep;
+  if (perStep) {                           // CorrDiff:每個時刻一個檔,風速直接存
+    const files = await Promise.all(steps.map((s) => ec.stepData(init, v, s, m)));
+    const i = iy * g.nx + ix, t0 = toSec(init);
+    const ys = files.map(({ raw: r, spec }) => {
+      const q = r[i];
+      if (q === spec.nodata || q === undefined) return null;
+      const y = q * spec.scale + spec.offset;
+      return v === 'mrr' && y < MIN_DBZ ? 0 : y;
+    });
+    return ys.some((y) => y != null) ? { init, xs: steps.map((s) => t0 + s * 3600), ys, coast: false } : null;   // 全空 = 範圍外
+  }
   const raw = async (name) => {
     const { raw: r, spec } = await ec.data(init, name, m, tile);
     return (k, i) => { const q = r[k * n + i]; return q === spec.nodata || q === undefined ? NaN : q * spec.scale + spec.offset; };

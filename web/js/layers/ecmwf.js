@@ -5,7 +5,7 @@
 //   wrf:氣象署 WRF 3 km(重新內插成 0.03°)、每 6 小時(pipeline/fetch_wrf.py):降雨、溫度、海平面氣壓、平均風
 //   cwawave:氣象署海浪模式 0.1°、逐時到 168 小時(pipeline/fetch_cwa_wave.py):浪高、平均週期(浪向畫箭頭)
 //   cdifs / cdaifs:CorrDiffTaiwan 降尺度 IFS / AIFS,0.02°、0–84 小時每 6 小時(pipeline/fetch_corrdiff.py):最大回波、溫度、風速;
-//     每個時刻一個 uint8 檔(perStep),沒有風向;不進資訊卡和風場動畫(那些用 MODELS)
+//     每個時刻一個 uint8 檔(perStep),沒有風向;單點預報卡有,測站 / 海象卡疊預報和風場動畫沒有(那些用 MODELS)
 // 檔案格式相同:每個起報、每個變數一個檔(全部預報時刻;IFS 0.1° 是每塊一個檔);換時刻不用再下載。
 // 範圍改大(2026-10-29)前的舊報:index grids[起報] = 它自己的 grid(台灣附近),沒有分塊。
 // 格點是經緯度等間距,畫到 canvas 時每列換算成 Web Mercator 位置,並放大(約 0.0125° 一像素)做雙線性內插再上色
@@ -37,11 +37,11 @@ export const MODELS = {
   cwawave: { name: '氣象署海浪', path: 'cwawave', vars: ['swh', 'mwp'] },
 };
 const CD_VARS = ['mrr', 't2', 'wind'];
-const ALL_MODELS = { ...MODELS,
+export const ALL_MODELS = { ...MODELS,
   cdifs: { name: 'CorrDiff（IFS）', path: 'corrdiff/ifs', vars: CD_VARS, perStep: true },
   cdaifs: { name: 'CorrDiff（AIFS）', path: 'corrdiff/aifs', vars: CD_VARS, perStep: true },
 };
-const MIN_DBZ = 5;                 // CorrDiff 訓練資料晴空約 0 dBZ,低於這個當無回波(不畫)
+export const MIN_DBZ = 5;                 // CorrDiff 訓練資料晴空約 0 dBZ,低於這個當無回波(不畫)
 const CD_NOTE = 'CorrDiffTaiwan 以 ERA5 → WRF（2018–2021）訓練，這裡餵 IFS／AIFS 預報場，超出訓練條件，屬實驗產品；每個時刻只取樣一次，是一種可能結果，不是機率。';
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
 
@@ -51,6 +51,7 @@ const ARROW_DEG = 0.1;             // 箭頭間距約 0.1°,重疊的由地圖�
 const ARROWS_MAX = 6000;           // 箭頭最多幾個(大範圍時間距跟著放大)
 const FINE_ZOOM = 5.5;             // 縮放到這以上改用 0.1° 分塊
 const FINE_MAX_TILES = 12;         // 畫面內超過這麼多塊就還是用 0.25°
+const STEP_CACHE_MAX = 300;        // perStep 的檔(一個約 200 KB 解開後;單點預報一次要整報)
 const CACHE_MAX = 96;              // 下載的檔(分塊一個約 1 MB 解開後)
 const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(ECMWF 一報 29 個時刻,夠播兩個變數)
 const EMPTY = { type: 'FeatureCollection', features: [] };
@@ -100,6 +101,7 @@ export class EcmwfLayer {
   showArrows = true;         // 風 / 浪的方向箭頭
   shown = null;              // { key, init, step, field, label }
   cache = new Map();         // `${模式}/${init}/${分塊}/${var}` → Promise<Uint16Array>
+  stepCache = new Map();     // `${模式}/${init}/${var}/${時效}` → Promise<Uint8Array>
   frames = new Map();        // key → Promise<畫好的圖>
   land = null;               // 陸地遮罩(land.js);載入失敗 → null,海浪照原本方塊邊緣畫
   coasts = {};               // 模式 → { g, filled }:最近一次外推出來的格(Uint8Array,1 = 近岸外推)
@@ -262,17 +264,17 @@ export class EcmwfLayer {
   /** perStep 模式:一個變數、一個時刻的檔 */
   stepData(init, v, step, m) {
     const key = `${m}/${init}/${v}/${step}`;
-    if (!this.cache.has(key)) {
+    if (!this.stepCache.has(key)) {
       const spec = this.idx(m).vars[v], name = `${v}_${String(step).padStart(3, '0')}`;
       const p = fetch(new URL(`${ALL_MODELS[m].path}/${init}/${name}.bin.gz`, DATA_BASE_URL).href)
         .then((r) => { if (!r.ok) throw new Error(`${key} ${r.status}`); return r.arrayBuffer(); })
         .then(gunzip)
         .then((buf) => ({ raw: new Uint8Array(buf), spec }));
-      p.catch(() => this.cache.delete(key));
-      this.cache.set(key, p);
-      while (this.cache.size > CACHE_MAX) this.cache.delete(this.cache.keys().next().value);
+      p.catch(() => this.stepCache.delete(key));
+      this.stepCache.set(key, p);
+      while (this.stepCache.size > STEP_CACHE_MAX) this.stepCache.delete(this.stepCache.keys().next().value);
     }
-    return this.cache.get(key);
+    return this.stepCache.get(key);
   }
 
   /** 第 k 步在 view 格點上的實際值(Float32,NaN = 無資料);分塊的各塊同時下載、拼起來 */
