@@ -41,9 +41,9 @@ export const ALL_MODELS = { ...MODELS,
   cdifs: { name: 'CorrDiff（IFS）', path: 'corrdiff/ifs', vars: CD_VARS, perStep: true },
   cdaifs: { name: 'CorrDiff（AIFS）', path: 'corrdiff/aifs', vars: CD_VARS, perStep: true },
 };
-// CorrDiff 輸出比網格座標偏東北:和 WRF 真值(模型包)的地形比對,全島平均東 3.05 格、北 2.05 格(0.02° 一格,IFS、AIFS 相同)→ 顯示時移回。
-// 原因未定(IFS 內插後的輸入相對訓練用 ERA5 也偏東北約 1.5–2 格);南北方向各區有差(北部 +2.3、南部 +0.3 格)
-const CD_SHIFT = { lon: -0.061, lat: -0.041 };
+// CorrDiff 輸出比網格座標偏東北,是模型本身的偏移:pipeline/corrdiff_check 用訓練用 ERA5 跑模型、和同時間 WRF 比,
+// 四區平均東 2.35、北 2.03 格(模型網格每格約 0.0203°、0.0186°);改動 IFS 輸入的取樣位置,溫度的偏移不變 → 顯示時移回。
+const CD_SHIFT = { lon: -0.048, lat: -0.038 };
 export const MIN_DBZ = 5;                 // CorrDiff 訓練資料晴空約 0 dBZ,低於這個當無回波(不畫)
 const CD_NOTE = 'CorrDiffTaiwan 以 ERA5 → WRF（2018–2021）訓練，這裡餵 IFS／AIFS 預報場，超出訓練條件，屬實驗產品；每個時刻只取樣一次，是一種可能結果，不是機率。';
 export const RAIN_WINDOWS = { 3: '3 小時', 6: '6 小時', 12: '12 小時', 24: '24 小時', 0: '起報後累積' };
