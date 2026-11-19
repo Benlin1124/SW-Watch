@@ -27,6 +27,15 @@ const HAS = (m, v) => {
 };
 const toSec = (s) => toDate(s).getTime() / 1000;
 const stampOf = (sec) => toStamp(new Date(sec * 1000));
+/** 系集範圍(最大、最小)的兩條細線 + 中間的色帶;回傳 uPlot bands 用的項目 */
+function pushRange(data, series, ys, name, m, value, scale) {
+  const hi = series.length;
+  for (const [k, label] of [['hi', '最大'], ['lo', '最小']]) {
+    data.push(ys[k]);
+    series.push({ label: `${name} 系集${label}`, stroke: `${COLORS[m]}80`, width: 0.8, spanGaps: true, scale, points: { show: false }, value });
+  }
+  return { series: [hi, hi + 1], fill: `${COLORS[m]}26` };
+}
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
 const max = (a) => a.reduce((m, x) => (x != null && !Number.isNaN(x) && x > m ? x : m), -Infinity);
 const min = (a) => a.reduce((m, x) => (x != null && !Number.isNaN(x) && x < m ? x : m), Infinity);
@@ -91,15 +100,16 @@ export class ForecastCard {
   async summary(seq) {
     const rows = await Promise.all(this.models.map(async (m) => {
       const get = (v) => this.series(m, v).catch(() => null);
+      const top = (s) => s.hi ?? s.ys, low = (s) => s.lo ?? s.ys;             // 有系集就看系集範圍
       const [rain, mrr, t2, wind, gust, swh] = await Promise.all(['rain6', 'mrr', 't2', 'wind', 'gust', 'swh'].map(get));
       const init = this.ec.idx(m).latest, steps = this.ec.stepsOf(m, init), days = steps[steps.length - 1] / 24;
       const total = rain && rain.ys.reduce((a, y) => a + (y ?? 0), 0);
       const cells = [
         `${fmtEcInit(init)}<small>${+days.toFixed(1)} 天</small>`,
         rain ? fmt(total, 0) : '—',
-        mrr ? (max(mrr.ys) < MIN_DBZ ? '無' : fmt(max(mrr.ys), 0)) : '—',
-        t2 ? `${fmt(min(t2.ys))}–${fmt(max(t2.ys))}` : '—',
-        wind ? `${fmt(max(wind.ys))}<small>${bfLabel(max(wind.ys))} 級</small>` : '—',
+        mrr ? (max(top(mrr)) < MIN_DBZ ? '無' : fmt(max(top(mrr)), 0)) : '—',
+        t2 ? `${fmt(min(low(t2)))}–${fmt(max(top(t2)))}` : '—',
+        wind ? `${fmt(max(top(wind)))}<small>${bfLabel(max(top(wind)))} 級</small>` : '—',
         gust ? fmt(max(gust.ys)) : '—',
         swh ? `${fmt(max(swh.ys))}${swh.coast ? '<small>外推</small>' : ''}` : '—',
       ];
@@ -109,7 +119,7 @@ export class ForecastCard {
     this.el.querySelector('#fc-now').innerHTML = '<table><thead><tr><th>模式</th><th>起報</th><th>雨量 mm</th><th>最大回波 dBZ</th>'
       + '<th>溫度 °C</th><th>最大風 m/s</th><th>陣風</th><th>最大浪 m</th></tr></thead>'
       + `<tbody>${rows.join('')}</tbody></table>`
-      + '<div class="sc-obs">各模式最新一報、整段預報期間：雨量 = 累積，溫度 = 最低–最高；「外推」= 近岸取最近的外海格點；CorrDiff 只有台灣附近，是實驗產品</div>';
+      + '<div class="sc-obs">各模式最新一報、整段預報期間：雨量 = 累積，溫度 = 最低–最高；「外推」= 近岸取最近的外海格點；CorrDiff 只有台灣附近，是實驗產品，數值含 16 個樣本的範圍</div>';
   }
 
   async drawChart() {
@@ -131,23 +141,24 @@ export class ForecastCard {
     // 各模式時刻不同(3 / 6 / 1 小時):x 取聯集,沒有的填 null,線跨過空缺
     const xs = [...new Set(got.flatMap((j) => j.s.xs))].sort((a, b) => a - b), pos = new Map(xs.map((x, i) => [x, i]));
     const data = [xs], series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }];
+    const bands = [], at = (arr, s) => { const y = new Array(xs.length).fill(null); s.xs.forEach((x, k) => { y[pos.get(x)] = arr[k]; }); return y; };
+    const value = (u, v) => (v == null ? '—' : this.tab === 'wind' ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v.toFixed(1)} ${tab.unit}`);
     for (const { m, l, s } of got) {
-      const ys = new Array(xs.length).fill(null);
-      s.xs.forEach((x, k) => { ys[pos.get(x)] = s.ys[k]; });
-      data.push(ys);
-      const label = `${ALL_MODELS[m].name}${tab.lines.length > 1 ? ` ${l.label}` : ''}`;
+      data.push(at(s.ys, s));
+      const name = ALL_MODELS[m].name;
+      const label = `${name}${s.hi ? ' 系集平均' : tab.lines.length > 1 ? ` ${l.label}` : ''}`;
       series.push({
         label, stroke: COLORS[m], width: 1.6, dash: l.dash ? [4, 3] : undefined, spanGaps: true,
         paths: l.v === 'rain6' ? uPlot.paths.stepped({ align: -1 }) : undefined,
-        points: { show: false },
-        value: (u, v) => (v == null ? '—' : this.tab === 'wind' ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v.toFixed(1)} ${tab.unit}`),
+        points: { show: false }, value,
       });
+      if (s.hi) bands.push(pushRange(data, series, { hi: at(s.hi, s), lo: at(s.lo, s) }, name, m, value));
     }
     const coast = got.some((j) => j.s.coast);
     note.textContent = (this.tab === 'rain' ? '每 6 小時累積雨量（階梯線畫在那 6 小時）；' : '')
       + (this.tab === 'wind' ? '陣風只有 IFS（90 小時內前 1 小時最大、之後前 3 / 6 小時最大）；' : '')
       + (this.tab === 'mrr' ? `最大回波只有 CorrDiff，低於 ${MIN_DBZ} dBZ 畫成 0；` : '')
-      + (got.some((j) => ALL_MODELS[j.m].perStep) ? 'CorrDiff 每個時刻只取樣一次，是一種可能結果；' : '')
+      + (got.some((j) => j.s.hi) ? 'CorrDiff 粗線 = 16 個樣本平均，色帶 = 最小到最大（只反映降尺度的不確定性）；' : got.some((j) => ALL_MODELS[j.m].perStep) ? 'CorrDiff 只取樣一次，是一種可能結果；' : '')
       + (coast ? '近岸沒有值，取最近的外海格點（近岸外推）；' : '')
       + '青線 = 時間軸目前時間，白虛線 = 地圖顯示的預報時刻；點圖跳到那個時刻';
 
@@ -156,7 +167,7 @@ export class ForecastCard {
     const zero = this.tab === 'rain' || this.tab === 'swh' || this.tab === 'mrr';
     const cardT = () => this.T, ec = this.ec;
     this.plot = new uPlot({
-      width: box.clientWidth || 400, height: 220, series,
+      width: box.clientWidth || 400, height: 220, series, bands,
       scales: { x: { time: true }, y: { auto: true, range: zero ? (u, lo, hi) => [0, Math.max(hi * 1.05, 1)] : undefined } },
       axes: [{ ...axisStyle, space: 45, values: (u, ticks) => ticks.map(tick) }, { ...axisStyle, label: tab.unit, size: 50 }],
       tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), 'Asia/Taipei'),
@@ -201,15 +212,20 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
   const steps = ec.stepsOf(m, init), n = g.nx * g.ny;
   const perStep = ALL_MODELS[m].perStep;
   if (perStep) {                           // CorrDiff:每個時刻一個檔,風速直接存
-    const files = await Promise.all(steps.map((s) => ec.stepData(init, v, s, m)));
-    const i = iy * g.nx + ix, t0 = toSec(init);
-    const ys = files.map(({ raw: r, spec }) => {
+    const i = iy * g.nx + ix, t0 = toSec(init), nEns = x.ens_nsteps?.[init] ?? 0;   // 系集完成的時刻用系集統計,其餘用單一樣本
+    const read = (kind) => Promise.all(steps.map(async (s, k) => {
+      if (k >= nEns && kind !== 'mean') return null;
+      const { raw: r, spec } = await ec.stepData(init, v, s, m, k < nEns ? kind : '');
       const q = r[i];
       if (q === spec.nodata || q === undefined) return null;
       const y = q * spec.scale + spec.offset;
       return v === 'mrr' && y < MIN_DBZ ? 0 : y;
-    });
-    return ys.some((y) => y != null) ? { init, xs: steps.map((s) => t0 + s * 3600), ys, coast: false } : null;   // 全空 = 範圍外
+    }));
+    const ys = await read('mean');
+    if (!ys.some((y) => y != null)) return null;   // 全空 = 範圍外
+    const out = { init, xs: steps.map((s) => t0 + s * 3600), ys, coast: false };
+    if (nEns) [out.lo, out.hi] = await Promise.all([read('min'), read('max')]);
+    return out;
   }
   const raw = async (name) => {
     const { raw: r, spec } = await ec.data(init, name, m, tile);
@@ -270,7 +286,7 @@ export async function overlayLines(ec, lines, lon, lat, alt = 0, { corrdiff = fa
 /** 預報線併進 uPlot 的 data / series:x 和觀測取聯集(只留 from < x ≤ to;預報都在整點,觀測不會斷開)
  *  fmtValue(v, l) → 圖例的數值文字 */
 export function mergeOverlay(data, series, fc, from, to, fmtValue) {
-  if (!fc.length) return;
+  if (!fc.length) return [];
   const xs = data[0];
   const all = [...new Set([...xs, ...fc.flatMap((j) => j.s.xs.filter((x) => x > from && x <= to))])].sort((a, b) => a - b);
   const at = new Map(all.map((x, i) => [x, i]));
@@ -280,15 +296,18 @@ export function mergeOverlay(data, series, fc, from, to, fmtValue) {
     data[c] = col;
   }
   data[0] = all;
+  const bands = [];
   for (const { m, l, s } of fc) {
-    const col = new Array(all.length).fill(null);
-    s.xs.forEach((x, k) => { if (at.has(x)) col[at.get(x)] = s.ys[k]; });
-    data.push(col);
+    const line = (arr) => { const col = new Array(all.length).fill(null); s.xs.forEach((x, k) => { if (at.has(x)) col[at.get(x)] = arr[k]; }); return col; };
+    const value = (u, v) => (v == null ? '—' : fmtValue(v, l)), name = ALL_MODELS[m].name;
+    data.push(line(s.ys));
     series.push({
-      label: `${ALL_MODELS[m].name}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
+      label: `${name}${l.label}${s.hi ? ' 系集平均' : ''}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
       scale: l.scale ?? 'y', spanGaps: true, points: { show: false },
       paths: l.v === 'rain1' ? uPlot.paths.stepped({ align: -1 }) : undefined,
-      value: (u, v) => (v == null ? '—' : fmtValue(v, l)),
+      value,
     });
+    if (s.hi) bands.push(pushRange(data, series, { hi: line(s.hi), lo: line(s.lo) }, name, m, value, l.scale ?? 'y'));
   }
+  return bands;
 }

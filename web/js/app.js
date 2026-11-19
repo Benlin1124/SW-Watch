@@ -4,6 +4,7 @@ import { addMin, diffMin, floorStep, fmtTW, fmtUTC, nowStamp, toDate } from './t
 import { RadarLayer } from './layers/radar.js';
 import { RainRadarLayer } from './layers/rainradar.js';
 import { LightningLayer } from './layers/lightning.js';
+import { EF_THR, EnsForecastLayer } from './layers/ens_forecast.js';
 import { SatelliteLayer } from './layers/satellite.js';
 import { EcmwfLayer, fmtEcInit } from './layers/ecmwf.js';
 import { WindLayer } from './layers/wind.js';
@@ -179,6 +180,7 @@ const rainradar = new RainRadarLayer(map);
 const lightning = new LightningLayer(map);
 const satellite = new SatelliteLayer(map);
 const ecmwf = new EcmwfLayer(map);
+const ensfc = new EnsForecastLayer(map, ecmwf);
 const wind = new WindLayer(map, ecmwf);
 const waves = new WindLayer(map, ecmwf, 'wave');
 const typhoon = new TyphoonLayer(map);
@@ -192,7 +194,7 @@ const marine = new MarineLayer(map);
 const mCard = new MarineCard(marine, { ec: ecmwf });
 marine.onSelect = (id) => { card.close(); fcCard.close(); mCard.open(id, state.T); };
 const fcCard = new ForecastCard(ecmwf, map, { onOpen: () => { card.close(); mCard.close(); } });   // onPick 在 bindEcmwfUI 設定
-const LAYERS = [satellite, ecmwf, radar, rainradar, lightning, stations, marine, typhoon, ens];
+const LAYERS = [satellite, ecmwf, ensfc, radar, rainradar, lightning, stations, marine, typhoon, ens];
 // 衛星這一張還沒好:畫面維持上一張,時間欄先標要顯示的時間「載入中」(好了由 updateLayerTime 蓋掉)
 satellite.onLoading = (stamp) => {
   if (!stamp) return;
@@ -466,8 +468,27 @@ async function reload() {
   fillIssueSelect();
   fillEnsPanel();
   fillEcmwfPanel();
+  fillEnsFcPanel();
   await loadBestTrack();
   if (!state.T || wasEnd || !state.slots.includes(state.T) || !ok(state.T)) state.T = latestSlot();
+}
+
+/** 系集預報面板:起報、時刻、門檻跟著模式、變數 */
+function fillEnsFcPanel() {
+  for (const o of $('ef-model').options) { const x = ecmwf.idx(o.value); o.disabled = !x || !x.times.some((t) => x.ens_nsteps?.[t] > 0); }
+  const curI = ensfc.init, inits = ensfc.inits;
+  $('ef-init').innerHTML = '<option value="">最新</option>' + [...inits].reverse().map((t) => `<option value="${t}">${fmtEcInit(t)}</option>`).join('');
+  $('ef-init').value = inits.includes(curI) ? curI : '';
+  const init = ensfc.activeInit, st = ensfc.steps;
+  $('ef-step').innerHTML = '<option value="">最接近現在</option>' + st.map((s) => `<option value="${s}">${fmtTW(addMin(init, s * 60))}（+${s}h）</option>`).join('');
+  $('ef-step').value = st.includes(ensfc.step) ? String(ensfc.step) : '';
+  $('ef-thr').innerHTML = EF_THR[ensfc.variable].map((t, i) => `<option value="${i}">${t[2]}</option>`).join('');
+  ensfc.thr = Math.min(ensfc.thr, EF_THR[ensfc.variable].length - 1);
+  $('ef-thr').value = ensfc.thr;
+  $('ef-mem').innerHTML = Array.from({ length: ensfc.members }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('');
+  $('ef-mem').value = Math.min(ensfc.member, ensfc.members);
+  $('ef-thr-row').hidden = ensfc.stat !== 'prob';
+  $('ef-mem-row').hidden = ensfc.stat !== 'member';
 }
 
 function fillIssueSelect() {
@@ -660,7 +681,7 @@ function bindEnsUI() {
 
 // ── 測站面板 ──
 function updateLegend() {
-  const parts = [satellite, ecmwf, wind, waves, radar, rainradar, lightning, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
+  const parts = [satellite, ecmwf, ensfc, wind, waves, radar, rainradar, lightning, stations, marine, typhoon].filter((l) => l.visible && l.index).map((l) => `<div class="legend-block">${l.legend()}</div>`);
   $('legend-body').innerHTML = parts.join('');
   $('legend').style.display = parts.length ? '' : 'none';
   syncInfo();
@@ -1096,6 +1117,25 @@ function bindUI() {
   $('chk-rainradar').onchange = async (e) => { rainradar.setVisible(e.target.checked); updateLegend(); refreshTimeline(); await render(); };
   $('rr-site').onchange = async (e) => { rainradar.setSite(e.target.value); refreshTimeline(); await render(); };
   $('op-rainradar').oninput = (e) => rainradar.setOpacity(e.target.value / 100);
+  const efApply = async () => { fillEnsFcPanel(); await render(); updateLegend(); };
+  $('chk-ensfc').onchange = async (e) => { ensfc.setVisible(e.target.checked); await efApply(); };
+  $('ef-model').onchange = async (e) => { ensfc.model = e.target.value; ensfc.init = ''; ensfc.step = null; await efApply(); };
+  $('ef-var').onchange = async (e) => { ensfc.variable = e.target.value; await efApply(); };
+  $('ef-stat').onchange = async (e) => { ensfc.stat = e.target.value; await efApply(); };
+  $('ef-thr').onchange = async (e) => { ensfc.thr = +e.target.value; await efApply(); };
+  $('ef-mem').onchange = async (e) => { ensfc.member = +e.target.value; await efApply(); };
+  $('ef-init').onchange = async (e) => { ensfc.init = e.target.value; ensfc.step = null; await efApply(); };
+  $('ef-step').onchange = async (e) => { ensfc.step = e.target.value === '' ? null : +e.target.value; await efApply(); };
+  const efMove = async (d) => {
+    const st = ensfc.steps, i = st.indexOf(ensfc.pickedStep) + d;
+    if (i < 0 || i >= st.length) return;
+    ensfc.step = st[i]; ensfc.follow = false; $('ef-follow').checked = false;
+    await efApply();
+  };
+  $('ef-prev').onclick = () => efMove(-1);
+  $('ef-next').onclick = () => efMove(1);
+  $('ef-follow').onchange = async (e) => { ensfc.follow = e.target.checked; await efApply(); };
+  $('op-ensfc').oninput = (e) => ensfc.setOpacity(e.target.value / 100);
   $('chk-lightning').onchange = async (e) => { lightning.setVisible(e.target.checked); updateLegend(); refreshTimeline(); await render(); };
   $('lt-window').onchange = async (e) => { lightning.setWindow(+e.target.value); updateLegend(); await render(); };
   $('op-lightning').oninput = (e) => lightning.setOpacity(e.target.value / 100);
@@ -1152,7 +1192,7 @@ function bindUI() {
   document.addEventListener('input', saveEns);
 
   map.on('mousemove', (e) => {
-    const v = [radar, rainradar, lightning, ecmwf, wind, waves, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
+    const v = [radar, rainradar, lightning, ecmwf, ensfc, wind, waves, satellite].map((l) => l.valueAt(e.lngLat.lng, e.lngLat.lat)).filter(Boolean).join('　');
     const el = $('readout');
     el.style.display = 'block';
     const lng = ((e.lngLat.lng + 180) % 360 + 360) % 360 - 180;   // 地圖往東捲過 180° 時 lng 會超過 180
@@ -1179,6 +1219,7 @@ map.on('load', async () => {
   rainradar.addTo();             // 在整合回波上面
   satellite.addTo('radar');
   ecmwf.addTo('radar');
+  ensfc.addTo('radar');          // 在模式預報上面、觀測雷達底下
   wind.addTo();
   waves.addTo();                // 後加的在下面:浪在風底下
   typhoon.addTo();

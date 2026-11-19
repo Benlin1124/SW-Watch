@@ -197,14 +197,14 @@ export class StationCard {
       if (!scales[s.scale ?? 'y']) scales[s.scale ?? 'y'] = { auto: true, range: s.bars || s.scale === 'r1h' ? (u, lo, hi) => [0, Math.max(hi, 1)] : undefined };
     }
     const unit = tab.series[0].unit, wind = this.tab === 'wind';
-    mergeOverlay(data, series, fc, end - H, fcEnd,
+    const bands = mergeOverlay(data, series, fc, end - H, fcEnd,
       (v, l) => (wind ? `${v.toFixed(1)}（${bfLabel(v)}級）` : `${v.toFixed(1)} ${l.scale ? 'mm/h' : unit}`));
     axes.push({ ...axisStyle, scale: 'y', label: `${tab.series[0].unit}`, size: 50 });
     if (scales.r1h) axes.push({ ...axisStyle, scale: 'r1h', side: 1, label: '1 小時 mm', grid: { show: false }, size: 50 });
 
     const cardT = () => this.T;
     this.plot = new uPlot({
-      width: box.clientWidth || 400, height: 220, series, scales, axes,
+      width: box.clientWidth || 400, height: 220, series, scales, axes, bands,
       tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), 'Asia/Taipei'),   // 刻度對齊台灣整點
       cursor: { drag: { x: false, y: false } },
       legend: { live: true },

@@ -1,7 +1,9 @@
 """CorrDiffTaiwan(NVIDIA earth2studio)降尺度:IFS、AIFS 0.25° 預報 → 台灣約 2 公里的最大回波、2 m 溫度、10 m 風。
 獨立程式,不在排程裡(排程電腦可以沒有 GPU、也可以是樹莓派):誰有 GPU 誰跑,算完自己上傳 R2;停了不影響其他功能。
   data/corrdiff/{ifs|aifs}/index.json                  times = 起報;vars = 各變數格點規格;steps;nsteps[起報] = 已完成幾個時刻
-  data/corrdiff/{ifs|aifs}/{起報}/{變數}_{時效:03d}.bin.gz   uint8,第 0 列最南;255 = 範圍外
+  data/corrdiff/{ifs|aifs}/{起報}/{變數}_{時效:03d}.bin.gz   第 1 個樣本(模式預報用),uint8,第 0 列最南;255 = 範圍外
+  .../{起報}/ens/{變數}_mem_{時效:03d}.bin.gz              全部樣本 (MEMBERS, ny, nx)
+  .../{起報}/ens/{變數}_{mean|min|max}_{時效:03d}.bin.gz   系集統計(回波的平均把負值當 0);index 的 ens_nsteps[起報] = 系集完成幾個時刻
 輸入(0.25°,116–125.75°E、19.25–28°N):tcwv,500 / 850 hPa 的 z、t、u、v,2 m 溫度,10 m 風,直接向 ECMWF 開放資料抓。
   AIFS 沒有 tcwv → 用 tcw(以 IFS 驗證兩者 RMSE 0.29 kg/m2,平均約 36)。
 輸出是 448×448 的曲線網格 → 最近鄰轉成 0.02° 經緯度格點。亂數種子由起報 + 時效決定,IFS、AIFS 用同一個。
@@ -25,12 +27,13 @@ import numpy as np
 import requests
 
 from . import config, r2
-from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_index, update_index
+from .common import _atomic_write, grid_spec, layer_dir, log, quantize, read_index, save_json, update_index
 from .fetch_ecmwf import HOSTS, cleanup as _cleanup, stamp_of
 
 LAYER = "corrdiff"
 MODELS = {"ifs": "ifs", "aifs": "aifs-single"}     # 網頁代號 → 開放資料路徑
 STEPS = list(range(0, 85, 6))
+MEMBERS = int(os.environ.get("CORRDIFF_MEMBERS", 16))   # 每個時刻取樣幾次(一次一個,GPU 記憶體不會變多)
 RUNS = (0, 12)
 LOOKBACK = 3                                        # 往回看幾報(新的優先)
 WAIT_H = 5                                          # 起報後幾小時才開始檢查
@@ -191,30 +194,58 @@ def step_path(model, stamp, var, step):
     return layer_dir(f"{LAYER}/{model}") / stamp / f"{var}_{step:03d}.bin.gz"
 
 
+def ens_path(model, stamp, var, kind, step):
+    return layer_dir(f"{LAYER}/{model}") / stamp / "ens" / f"{var}_{kind}_{step:03d}.bin.gz"
+
+
 def done_steps(model, stamp):
-    """從頭連續完成了幾個時刻(wind 最後寫,有它就代表這個時刻完整)。"""
+    """從頭連續完成了幾個時刻(系集的 wind 成員檔最後寫,有它就代表這個時刻完整)。"""
     n = 0
     for s in STEPS:
-        if not step_path(model, stamp, "wind", s).exists():
+        if not ens_path(model, stamp, "wind", "mem", s).exists():
             break
         n += 1
     return n
 
 
+def sample_all(net, x, stamp, step):
+    """同一份輸入取樣 MEMBERS 次 → 變數 → (MEMBERS, ny, nx);第 1 個的種子和單一樣本時相同。"""
+    out = []
+    for k in range(MEMBERS):
+        key = f"{stamp}{step}" if k == 0 else f"{stamp}{step}m{k}"
+        out.append(to_fields(net(x, zlib.crc32(key.encode())), net.lat, net.lon))
+    return {v: np.stack([m[v] for m in out]) for v in SPECS}
+
+
+def ens_stats(var, a):
+    b = np.maximum(a, 0) if var == "mrr" else a             # 回波:無回波(−32)當 0 再平均
+    return {"mean": b.mean(0), "min": a.min(0), "max": a.max(0)}
+
+
+def _write(path, arr, spec):
+    _atomic_write(path, gzip.compress(quantize(arr, spec).tobytes(), 6))
+
+
 def process(net, model, init, pool):
     stamp, layer = stamp_of(init), f"{LAYER}/{model}"
     first = done_steps(model, stamp)
-    log.info("CorrDiff %s %s 開始:時刻 %d/%d,裝置 %s", model, stamp, first, len(STEPS), net.device)
+    log.info("CorrDiff %s %s 開始:時刻 %d/%d,%d 個樣本,裝置 %s", model, stamp, first, len(STEPS), MEMBERS, net.device)
     for n, step in enumerate(STEPS[first:], first + 1):
         t0 = time.time()
         x = fetch_input(model, init, step, pool)
         t1 = time.time()
-        res = to_fields(net(x, zlib.crc32(f"{stamp}{step}".encode())), net.lat, net.lon)
-        for var, spec in SPECS.items():                   # 順序:wind 最後
-            _atomic_write(step_path(model, stamp, var, step), gzip.compress(quantize(res[var], spec).tobytes(), 6))
-        nsteps = read_index(layer).get("nsteps", {})
-        nsteps[stamp] = n
-        update_index(layer, stamp, source=f"CorrDiffTaiwan + {model.upper()}", vars=SPECS, steps=STEPS, nsteps=nsteps)
+        res = sample_all(net, x, stamp, step)
+        for var, spec in SPECS.items():                   # 順序:wind 最後,成員檔最後
+            _write(step_path(model, stamp, var, step), res[var][0], spec)
+            for kind, a in ens_stats(var, res[var]).items():
+                _write(ens_path(model, stamp, var, kind, step), a, spec)
+            _write(ens_path(model, stamp, var, "mem", step), res[var], spec)
+        idx = read_index(layer)
+        nsteps, ens_nsteps = idx.get("nsteps", {}), idx.get("ens_nsteps", {})
+        nsteps[stamp] = max(n, nsteps.get(stamp, 0))      # 舊報補做系集時,單一樣本的時刻數不能變少
+        ens_nsteps[stamp] = n
+        update_index(layer, stamp, source=f"CorrDiffTaiwan + {model.upper()}", vars=SPECS, steps=STEPS,
+                     nsteps=nsteps, ens_nsteps=ens_nsteps, members=MEMBERS)
         r2.flush()
         log.info("CorrDiff %s %s +%dh 完成:下載 %.0f 秒、推論 %.0f 秒", model, stamp, step, t1 - t0, time.time() - t1)
 
@@ -238,7 +269,13 @@ def run_once(net_factory, models=tuple(MODELS)):
 
 def cleanup():
     for m in MODELS:
-        _cleanup(f"{LAYER}/{m}", f"CorrDiff {m}")
+        layer = f"{LAYER}/{m}"
+        _cleanup(layer, f"CorrDiff {m}")
+        idx = read_index(layer)
+        ens = {t: v for t, v in idx.get("ens_nsteps", {}).items() if t in idx["times"]}
+        if ens != idx.get("ens_nsteps", {}):
+            idx["ens_nsteps"] = ens
+            save_json(layer_dir(layer) / "index.json", idx)
     r2.flush()
 
 
@@ -252,7 +289,8 @@ def bench(net, pool):
     y = net(x, 1)
     sec = time.time() - t0
     n = len(STEPS) * len(MODELS)
-    print(f"裝置 {net.device}:一個時刻 {sec:.0f} 秒;每報 {n} 個時刻約 {sec * n / 3600:.1f} 小時,一天兩報約 {sec * n * 2 / 3600:.1f} 小時")
+    total = sec * MEMBERS * n
+    print(f"裝置 {net.device}:一個樣本 {sec:.1f} 秒;{MEMBERS} 個樣本 × {n} 個時刻,每報推論約 {total / 3600:.1f} 小時,一天兩報約 {total * 2 / 3600:.1f} 小時")
     if net.device == "cuda":
         print(f"GPU 記憶體峰值 {net.torch.cuda.max_memory_allocated() / 1e9:.1f} GB")
     for k, v in y.items():

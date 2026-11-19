@@ -54,7 +54,8 @@ const ARROW_DEG = 0.1;             // 箭頭間距約 0.1°,重疊的由地圖�
 const ARROWS_MAX = 6000;           // 箭頭最多幾個(大範圍時間距跟著放大)
 const FINE_ZOOM = 5.5;             // 縮放到這以上改用 0.1° 分塊
 const FINE_MAX_TILES = 12;         // 畫面內超過這麼多塊就還是用 0.25°
-const STEP_CACHE_MAX = 300;        // perStep 的檔(一個約 200 KB 解開後;單點預報一次要整報)
+const MEMBER_CACHE_MAX = 10;        // 系集全部成員的檔(一個約 3 MB 解開後)
+const STEP_CACHE_MAX = 500;        // perStep 的檔(一個約 200 KB 解開後;單點預報一次要整報)
 const CACHE_MAX = 96;              // 下載的檔(分塊一個約 1 MB 解開後)
 const FRAMES_MAX = 60;             // 畫好的圖最多留幾張(ECMWF 一報 29 個時刻,夠播兩個變數)
 const EMPTY = { type: 'FeatureCollection', features: [] };
@@ -105,6 +106,7 @@ export class EcmwfLayer {
   shown = null;              // { key, init, step, field, label }
   cache = new Map();         // `${模式}/${init}/${分塊}/${var}` → Promise<Uint16Array>
   stepCache = new Map();     // `${模式}/${init}/${var}/${時效}` → Promise<Uint8Array>
+  memberCache = new Map();   // 系集全部成員
   frames = new Map();        // key → Promise<畫好的圖>
   land = null;               // 陸地遮罩(land.js);載入失敗 → null,海浪照原本方塊邊緣畫
   coasts = {};               // 模式 → { g, filled }:最近一次外推出來的格(Uint8Array,1 = 近岸外推)
@@ -264,11 +266,27 @@ export class EcmwfLayer {
     return this.cache.get(key);
   }
 
-  /** perStep 模式:一個變數、一個時刻的檔 */
-  stepData(init, v, step, m) {
+  /** 系集全部成員:(成員數, ny, nx) */
+  ensMembers(init, v, step, m) {
     const key = `${m}/${init}/${v}/${step}`;
+    if (!this.memberCache.has(key)) {
+      const spec = this.idx(m).vars[v], name = `ens/${v}_mem_${String(step).padStart(3, '0')}`;
+      const p = fetch(new URL(`${ALL_MODELS[m].path}/${init}/${name}.bin.gz`, DATA_BASE_URL).href)
+        .then((r) => { if (!r.ok) throw new Error(`${key} ${r.status}`); return r.arrayBuffer(); })
+        .then(gunzip)
+        .then((buf) => ({ raw: new Uint8Array(buf), spec }));
+      p.catch(() => this.memberCache.delete(key));
+      this.memberCache.set(key, p);
+      while (this.memberCache.size > MEMBER_CACHE_MAX) this.memberCache.delete(this.memberCache.keys().next().value);
+    }
+    return this.memberCache.get(key);
+  }
+
+  /** perStep 模式:一個變數、一個時刻的檔;kind = mean / min / max → 系集統計 */
+  stepData(init, v, step, m, kind = '') {
+    const key = `${m}/${init}/${v}/${step}/${kind}`;
     if (!this.stepCache.has(key)) {
-      const spec = this.idx(m).vars[v], name = `${v}_${String(step).padStart(3, '0')}`;
+      const n = String(step).padStart(3, '0'), spec = this.idx(m).vars[v], name = kind ? `ens/${v}_${kind}_${n}` : `${v}_${n}`;
       const p = fetch(new URL(`${ALL_MODELS[m].path}/${init}/${name}.bin.gz`, DATA_BASE_URL).href)
         .then((r) => { if (!r.ok) throw new Error(`${key} ${r.status}`); return r.arrayBuffer(); })
         .then(gunzip)
