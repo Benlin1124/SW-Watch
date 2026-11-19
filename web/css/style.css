@@ -230,6 +230,7 @@ body[data-map-theme=dark] .st-label.mr-label { color: #81d4fa; }
 #sc-note, #mc-note, #fc-note { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 /* 預報資訊卡:每個模式一列摘要 */
+#st-card, #mr-card, #fc-card { background: rgb(18, 22, 30); }   /* 不透明:卡片蓋到圖例時字不重疊 */
 #fc-card { width: 545px; }   /* 摘要表 6 個模式、7 欄 */
 #fc-now { margin: 8px 0; font-size: 12px; }
 #fc-now table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }

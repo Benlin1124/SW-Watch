@@ -27,14 +27,25 @@ const HAS = (m, v) => {
 };
 const toSec = (s) => toDate(s).getTime() / 1000;
 const stampOf = (sec) => toStamp(new Date(sec * 1000));
-/** 系集範圍(最大、最小)的兩條細線 + 中間的色帶;回傳 uPlot bands 用的項目 */
+/** 系集範圍(最大、最小):只畫色帶,圖例不另列,數值併在平均那一列(rangeValue);回傳 uPlot bands 用的項目 */
 function pushRange(data, series, ys, name, m, value, scale) {
   const hi = series.length;
   for (const [k, label] of [['hi', '最大'], ['lo', '最小']]) {
     data.push(ys[k]);
-    series.push({ label: `${name} 系集${label}`, stroke: `${COLORS[m]}80`, width: 0.8, spanGaps: true, scale, points: { show: false }, value });
+    series.push({ label: `${name} 系集${label}`, stroke: 'transparent', width: 0, spanGaps: true, scale, points: { show: false }, value });
   }
-  return { series: [hi, hi + 1], fill: `${COLORS[m]}26` };
+  return { series: [hi, hi + 1], fill: `${COLORS[m]}38` };
+}
+/** 系集平均的圖例數值:平均(最小–最大);最大、最小緊接在平均後面兩個 series */
+const rangeValue = (base) => (u, v, si, i) => (v == null ? '—' : `${base(u, v)}（${fmt(u.data[si + 2][i])}–${fmt(u.data[si + 1][i])}）`);
+/** 圖例和游標圓點不顯示系集最大、最小(色帶本身留著) */
+export function hideRange(u) {
+  const rows = u.root.querySelectorAll('.u-legend .u-series'), pts = u.root.querySelectorAll('.u-cursor-pt');
+  u.series.forEach((s, i) => {
+    if (!/系集(最大|最小)$/.test(s.label ?? '')) return;
+    if (rows[i]) rows[i].style.display = 'none';
+    if (pts[i - 1]) pts[i - 1].style.display = 'none';
+  });
 }
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
 const max = (a) => a.reduce((m, x) => (x != null && !Number.isNaN(x) && x > m ? x : m), -Infinity);
@@ -146,11 +157,11 @@ export class ForecastCard {
     for (const { m, l, s } of got) {
       data.push(at(s.ys, s));
       const name = ALL_MODELS[m].name;
-      const label = `${name}${s.hi ? ' 系集平均' : tab.lines.length > 1 ? ` ${l.label}` : ''}`;
+      const label = `${name}${s.hi ? ' 系集' : tab.lines.length > 1 ? ` ${l.label}` : ''}`;
       series.push({
         label, stroke: COLORS[m], width: 1.6, dash: l.dash ? [4, 3] : undefined, spanGaps: true,
         paths: l.v === 'rain6' ? uPlot.paths.stepped({ align: -1 }) : undefined,
-        points: { show: false }, value,
+        points: { show: false }, value: s.hi ? rangeValue(value) : value,
       });
       if (s.hi) bands.push(pushRange(data, series, { hi: at(s.hi, s), lo: at(s.lo, s) }, name, m, value));
     }
@@ -158,7 +169,7 @@ export class ForecastCard {
     note.textContent = (this.tab === 'rain' ? '每 6 小時累積雨量（階梯線畫在那 6 小時）；' : '')
       + (this.tab === 'wind' ? '陣風只有 IFS（90 小時內前 1 小時最大、之後前 3 / 6 小時最大）；' : '')
       + (this.tab === 'mrr' ? `最大回波只有 CorrDiff，低於 ${MIN_DBZ} dBZ 畫成 0；` : '')
-      + (got.some((j) => j.s.hi) ? 'CorrDiff 粗線 = 16 個樣本平均，色帶 = 最小到最大（只反映降尺度的不確定性）；' : got.some((j) => ALL_MODELS[j.m].perStep) ? 'CorrDiff 只取樣一次，是一種可能結果；' : '')
+      + (got.some((j) => j.s.hi) ? 'CorrDiff 系集：線 = 16 個樣本平均，色帶與括號 = 最小到最大（只反映降尺度的不確定性）；' : got.some((j) => ALL_MODELS[j.m].perStep) ? 'CorrDiff 只取樣一次，是一種可能結果；' : '')
       + (coast ? '近岸沒有值，取最近的外海格點（近岸外推）；' : '')
       + '青線 = 時間軸目前時間，白虛線 = 地圖顯示的預報時刻；點圖跳到那個時刻';
 
@@ -193,6 +204,7 @@ export class ForecastCard {
         }],
       },
     }, data, box);
+    hideRange(this.plot);
     this.plot.over.style.cursor = 'pointer';
     this.plot.over.addEventListener('click', () => {
       const u = this.plot, i = u?.cursor.idx;
@@ -212,10 +224,10 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
   const steps = ec.stepsOf(m, init), n = g.nx * g.ny;
   const perStep = ALL_MODELS[m].perStep;
   if (perStep) {                           // CorrDiff:每個時刻一個檔,風速直接存
-    const i = iy * g.nx + ix, t0 = toSec(init), nEns = x.ens_nsteps?.[init] ?? 0;   // 系集完成的時刻用系集統計,其餘用單一樣本
-    const read = (kind) => Promise.all(steps.map(async (s, k) => {
-      if (k >= nEns && kind !== 'mean') return null;
-      const { raw: r, spec } = await ec.stepData(init, v, s, m, k < nEns ? kind : '');
+    // 這一報有系集 → 只畫系集完成的時刻(不和單一樣本接在一起);還沒有 → 第 1 個樣本
+    const i = iy * g.nx + ix, t0 = toSec(init), nEns = x.ens_nsteps?.[init] ?? 0, use = nEns ? steps.slice(0, nEns) : steps;
+    const read = (kind) => Promise.all(use.map(async (s) => {
+      const { raw: r, spec } = await ec.stepData(init, v, s, m, nEns ? kind : '');
       const q = r[i];
       if (q === spec.nodata || q === undefined) return null;
       const y = q * spec.scale + spec.offset;
@@ -223,7 +235,7 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
     }));
     const ys = await read('mean');
     if (!ys.some((y) => y != null)) return null;   // 全空 = 範圍外
-    const out = { init, xs: steps.map((s) => t0 + s * 3600), ys, coast: false };
+    const out = { init, xs: use.map((s) => t0 + s * 3600), ys, coast: false };
     if (nEns) [out.lo, out.hi] = await Promise.all([read('min'), read('max')]);
     return out;
   }
@@ -302,10 +314,10 @@ export function mergeOverlay(data, series, fc, from, to, fmtValue) {
     const value = (u, v) => (v == null ? '—' : fmtValue(v, l)), name = ALL_MODELS[m].name;
     data.push(line(s.ys));
     series.push({
-      label: `${name}${l.label}${s.hi ? ' 系集平均' : ''}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
+      label: `${name}${s.hi ? ' 系集' : ''}${l.label}`, stroke: COLORS[m], width: 1.4, dash: l.dash ?? [5, 3],
       scale: l.scale ?? 'y', spanGaps: true, points: { show: false },
       paths: l.v === 'rain1' ? uPlot.paths.stepped({ align: -1 }) : undefined,
-      value,
+      value: s.hi ? rangeValue(value) : value,
     });
     if (s.hi) bands.push(pushRange(data, series, { hi: line(s.hi), lo: line(s.lo) }, name, m, value, l.scale ?? 'y'));
   }

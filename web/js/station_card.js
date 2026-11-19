@@ -6,7 +6,7 @@ import { bfLabel } from './colormaps.js';
 import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
-import { FC_HOURS, mergeOverlay, overlayLines } from './forecast_card.js';
+import { FC_HOURS, hideRange, mergeOverlay, overlayLines } from './forecast_card.js';
 
 const REFETCH_MS = 5 * 60e3;
 const HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 240];
@@ -174,7 +174,8 @@ export class StationCard {
       : !fc.length ? '；這裡沒有模式預報'
         : `；虛線 = 模式預報（各模式最新一報、最近格點${this.tab === 'pres' ? '，海平面氣壓換算到測站海拔' : ''}${this.tab === 'rain' ? '，平均每小時雨量' : ''}${this.tab === 'temp' ? '，未做高度修正' : ''}）`;
     note.textContent = `${hoursLabel(this.hours)}（${endTxt}）`
-      + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '') + fcNote;
+      + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '') + fcNote
+      + (fc.some((j) => j.s.hi) ? '；CorrDiff 系集：線 = 16 個樣本平均，色帶與括號 = 最小到最大' : '');
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };
@@ -223,6 +224,7 @@ export class StationCard {
         }],
       },
     }, data, box);
+    hideRange(this.plot);
   }
 }
 
