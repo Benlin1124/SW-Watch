@@ -6,6 +6,7 @@ import { bfLabel } from './colormaps.js';
 import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
+import { enableZoom } from './chart_zoom.js';
 import { FC_HOURS, hideRange, mergeOverlay, overlayLines } from './forecast_card.js';
 
 const REFETCH_MS = 5 * 60e3;
@@ -45,6 +46,7 @@ export class StationCard {
   cache = new Map();         // 縣市 → { at, promise }
   plot = null;
   drawSeq = 0;
+  zoom = { xr: null };       // 時間軸縮放範圍(換分頁留著,換測站、時段還原)
   hours = HOURS.includes(prefs.get('cardHours')) ? prefs.get('cardHours') : 72;   // 圖表時段
   range = null;              // 圖上的時間範圍 [起, 迄](UTC 秒)
   fcHours = FC_HOURS[prefs.get('cardFc')] ? prefs.get('cardFc') : 72;   // 疊加預報幾小時(0 = 不疊)
@@ -57,11 +59,11 @@ export class StationCard {
     const hSel = this.el.querySelector('#sc-hours');
     hSel.innerHTML = HOURS.map((h) => `<option value="${h}">${hoursLabel(h)}</option>`).join('');
     hSel.value = this.hours;
-    hSel.onchange = () => { this.hours = +hSel.value; prefs.set('cardHours', this.hours); this.drawChart(); };
+    hSel.onchange = () => { this.zoom.xr = null; this.hours = +hSel.value; prefs.set('cardHours', this.hours); this.drawChart(); };
     const fSel = this.el.querySelector('#sc-fc');
     fSel.innerHTML = Object.entries(FC_HOURS).map(([h, name]) => `<option value="${h}">${name}</option>`).join('');
     fSel.value = this.fcHours;
-    fSel.onchange = () => { this.fcHours = +fSel.value; prefs.set('cardFc', this.fcHours); this.drawChart(); };
+    fSel.onchange = () => { this.zoom.xr = null; this.fcHours = +fSel.value; prefs.set('cardFc', this.fcHours); this.drawChart(); };
     for (const b of this.el.querySelectorAll('[data-tab]')) {
       b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
     }
@@ -81,6 +83,7 @@ export class StationCard {
     const info = this.layer.all.get(id);
     if (!info) return;
     this.id = id;
+    this.zoom.xr = null;
     this.T = T;
     this.tab = VAR_TAB[this.layer.variable] ?? (this.layer.v.rain ? 'rain' : this.tab);
     this.el.hidden = false;
@@ -175,7 +178,8 @@ export class StationCard {
         : `；虛線 = 模式預報（各模式最新一報、最近格點${this.tab === 'pres' ? '，海平面氣壓換算到測站海拔' : ''}${this.tab === 'rain' ? '，平均每小時雨量' : ''}${this.tab === 'temp' ? '，未做高度修正' : ''}）`;
     note.textContent = `${hoursLabel(this.hours)}（${endTxt}）`
       + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '') + fcNote
-      + (fc.some((j) => j.s.hi) ? '；CorrDiff 系集：線 = 16 個樣本平均，色帶與括號 = 最小到最大' : '');
+      + (fc.some((j) => j.s.hi) ? '；CorrDiff 系集：線 = 16 個樣本平均，色帶與括號 = 最小到最大' : '')
+      + '；拖曳或滾輪縮放，雙擊還原';
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const series = [{ label: '時間', value: (u, v) => (v == null ? '—' : fmtTW(stampOf(v))) }], data = [xs], scales = { x: { time: true } };
@@ -207,7 +211,7 @@ export class StationCard {
     this.plot = new uPlot({
       width: box.clientWidth || 400, height: 220, series, scales, axes, bands,
       tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), 'Asia/Taipei'),   // 刻度對齊台灣整點
-      cursor: { drag: { x: false, y: false } },
+      cursor: { drag: { x: true, y: false, setScale: true } },
       legend: { live: true },
       hooks: {
         draw: [(u) => {                                   // 時間軸目前時間 = 直線
@@ -225,6 +229,7 @@ export class StationCard {
       },
     }, data, box);
     hideRange(this.plot);
+    enableZoom(this.plot, this.zoom);
   }
 }
 

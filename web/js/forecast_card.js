@@ -4,6 +4,7 @@
 // 取最近的格點(和滑鼠讀值相同);海浪近岸沒有值 → 取 FILL_ITERS 格內最近有值的格,標「近岸外推」
 import { ALL_MODELS, MODELS, MIN_DBZ, fmtEcInit } from './layers/ecmwf.js';
 import { bfLabel } from './colormaps.js';
+import { enableZoom } from './chart_zoom.js';
 import { toDate, toStamp, fmtTW } from './time.js';
 import { townAt } from './town.js';
 
@@ -59,6 +60,7 @@ export class ForecastCard {
   plot = null;
   marker = null;
   seq = 0;
+  zoom = { xr: null };       // 時間軸縮放範圍(換分頁留著,換地點還原)
 
   constructor(ec, map, { onOpen, onPick } = {}) {
     this.ec = ec;
@@ -75,6 +77,7 @@ export class ForecastCard {
 
   async open(lon, lat, T) {
     this.pt = { lon, lat };
+    this.zoom.xr = null;
     this.T = T;
     this.tab = VAR_TAB[this.ec.variable] ?? this.tab;
     this.onOpen?.();
@@ -171,7 +174,7 @@ export class ForecastCard {
       + (this.tab === 'mrr' ? `最大回波只有 CorrDiff，低於 ${MIN_DBZ} dBZ 畫成 0；` : '')
       + (got.some((j) => j.s.hi) ? 'CorrDiff 系集：線 = 16 個樣本平均，色帶與括號 = 最小到最大（只反映降尺度的不確定性）；' : got.some((j) => ALL_MODELS[j.m].perStep) ? 'CorrDiff 只取樣一次，是一種可能結果；' : '')
       + (coast ? '近岸沒有值，取最近的外海格點（近岸外推）；' : '')
-      + '青線 = 時間軸目前時間，白虛線 = 地圖顯示的預報時刻；點圖跳到那個時刻';
+      + '青線 = 時間軸目前時間，白虛線 = 地圖顯示的預報時刻；點圖跳到那個時刻；拖曳或滾輪縮放，雙擊還原';
 
     const axisStyle = { stroke: '#9aa3b2', grid: { stroke: 'rgba(255,255,255,0.08)' }, ticks: { stroke: 'rgba(255,255,255,0.15)' } };
     const tick = (t) => { const s = fmtTW(stampOf(t), 'dh'); return s.endsWith('00時') ? s.replace('00時', '') : s.replace(/^\d+日/, ''); };
@@ -182,7 +185,7 @@ export class ForecastCard {
       scales: { x: { time: true }, y: { auto: true, range: zero ? (u, lo, hi) => [0, Math.max(hi * 1.05, 1)] : undefined } },
       axes: [{ ...axisStyle, space: 45, values: (u, ticks) => ticks.map(tick) }, { ...axisStyle, label: tab.unit, size: 50 }],
       tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), 'Asia/Taipei'),
-      cursor: { drag: { x: false, y: false } },
+      cursor: { drag: { x: true, y: false, setScale: true } },
       legend: { live: true },
       hooks: {
         draw: [(u) => {
@@ -205,10 +208,11 @@ export class ForecastCard {
       },
     }, data, box);
     hideRange(this.plot);
+    const wasDrag = enableZoom(this.plot, this.zoom);
     this.plot.over.style.cursor = 'pointer';
     this.plot.over.addEventListener('click', () => {
       const u = this.plot, i = u?.cursor.idx;
-      if (i != null) this.onPick?.(u.data[0][i]);
+      if (i != null && !wasDrag()) this.onPick?.(u.data[0][i]);
     });
   }
 }
