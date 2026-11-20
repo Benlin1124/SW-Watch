@@ -1,5 +1,5 @@
 // 預報資訊卡:模式預報圖層開著時,點地圖(測站、浮標、颱風、系集以外的地方)打開
-// 該點各模式最新一報的時序,同一張圖比較 ECMWF IFS / AIFS / 氣象署 3 km / 氣象署海浪 / CorrDiff(IFS、AIFS)(uPlot)
+// 該點各模式的時序(報別選單:最新一報,或指定起報時間 → 各模式在那之前最新的一報),同一張圖比較 ECMWF IFS / AIFS / 氣象署 3 km / 氣象署海浪 / CorrDiff(IFS、AIFS)(uPlot)
 // 點圖 → 模式預報圖層跳到那個時刻(onPick);白色虛線 = 地圖目前顯示的預報時刻
 // 取最近的格點(和滑鼠讀值相同);海浪近岸沒有值 → 取 FILL_ITERS 格內最近有值的格,標「近岸外推」
 import { ALL_MODELS, MODELS, MIN_DBZ, fmtEcInit } from './layers/ecmwf.js';
@@ -48,6 +48,23 @@ export function hideRange(u) {
     if (pts[i - 1]) pts[i - 1].style.display = 'none';
   });
 }
+const RUN_MAX = 16;          // 報別選單最多列幾報
+/** 報別:run = '' → 模式 m 最新一報;run = 起報時間 → m 在那之前(含)最新的一報(各模式起報時刻不同);沒有 → null */
+export function initFor(ec, m, run) {
+  const x = ec.idx(m);
+  if (!x?.latest) return null;
+  if (!run) return x.latest;
+  const t = toSec(run);
+  return ec.initsOf(m).find((s) => toSec(s) <= t) ?? null;
+}
+/** 報別選單:models 起報時間的聯集(新 → 舊);選過的報別已不在 → 改回最新;回傳目前的報別 */
+export function fillRuns(sel, ec, models, run) {
+  const all = [...new Set(models.flatMap((m) => ec.initsOf(m)))].sort((a, b) => toSec(b) - toSec(a)).slice(0, RUN_MAX);
+  if (run && !all.includes(run)) run = '';
+  sel.innerHTML = '<option value="">最新一報</option>' + all.map((t) => `<option value="${t}">${fmtEcInit(t)} 報</option>`).join('');
+  sel.value = run;
+  return run;
+}
 const fmt = (x, d = 1) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
 const max = (a) => a.reduce((m, x) => (x != null && !Number.isNaN(x) && x > m ? x : m), -Infinity);
 const min = (a) => a.reduce((m, x) => (x != null && !Number.isNaN(x) && x < m ? x : m), Infinity);
@@ -61,6 +78,7 @@ export class ForecastCard {
   marker = null;
   seq = 0;
   zoom = { xr: null };       // 時間軸縮放範圍(換分頁留著,換地點還原)
+  run = '';                  // 報別('' = 各模式最新一報)
 
   constructor(ec, map, { onOpen, onPick } = {}) {
     this.ec = ec;
@@ -71,9 +89,21 @@ export class ForecastCard {
     const tabs = this.el.querySelector('.sc-tabs');
     tabs.innerHTML = Object.entries(TABS).map(([k, t]) => `<button data-tab="${k}">${t.name}</button>`).join('');
     for (const b of tabs.querySelectorAll('[data-tab]')) b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
+    this.runSel = Object.assign(document.createElement('select'), { id: 'fc-run', title: '報別：最新一報，或指定起報時間（各模式取那之前最新的一報）' });
+    tabs.append(this.runSel);
+    this.runSel.onchange = () => { this.run = this.runSel.value; this.zoom.xr = null; this.refresh(); };
   }
 
-  get models() { return Object.keys(ALL_MODELS).filter((m) => this.ec.idx(m)?.latest); }
+  get models() { return Object.keys(ALL_MODELS).filter((m) => initFor(this.ec, m, this.run)); }
+
+  /** 換報別:表和圖重畫 */
+  async refresh() {
+    if (!this.pt) return;
+    const seq = ++this.seq;
+    this.el.querySelector('#fc-now').innerHTML = '<div class="sc-nodata">載入中…</div>';
+    await this.drawChart();
+    if (seq === this.seq) await this.summary(seq);
+  }
 
   async open(lon, lat, T) {
     this.pt = { lon, lat };
@@ -86,10 +116,8 @@ export class ForecastCard {
     this.el.querySelector('#fc-title').textContent = `預報　${lat.toFixed(2)}°N ${lon.toFixed(2)}°E`;
     const land = this.ec.land?.isLand(lon, lat);
     this.el.querySelector('#fc-sub').textContent = `${townAt(lon, lat) || (land ? '陸地' : '海上')}${land ? '（沒有海浪）' : ''}`;
-    const seq = ++this.seq;
-    this.el.querySelector('#fc-now').innerHTML = '<div class="sc-nodata">載入中…</div>';
-    await this.drawChart();
-    if (seq === this.seq) await this.summary(seq);
+    this.run = fillRuns(this.runSel, this.ec, Object.keys(ALL_MODELS).filter((m) => this.ec.idx(m)?.latest), this.run);
+    await this.refresh();
   }
 
   close() {
@@ -108,15 +136,15 @@ export class ForecastCard {
     this.plot?.redraw(false);
   }
 
-  series(m, v) { return pointSeries(this.ec, m, v, this.pt.lon, this.pt.lat); }
+  series(m, v) { return pointSeries(this.ec, m, v, this.pt.lon, this.pt.lat, 0, this.run); }
 
-  /** 上半部:各模式最新一報的摘要表(模式一列) */
+  /** 上半部:各模式(所選報別)的摘要表(模式一列) */
   async summary(seq) {
     const rows = await Promise.all(this.models.map(async (m) => {
       const get = (v) => this.series(m, v).catch(() => null);
       const top = (s) => s.hi ?? s.ys, low = (s) => s.lo ?? s.ys;             // 有系集就看系集範圍
       const [rain, mrr, t2, wind, gust, swh] = await Promise.all(['rain6', 'mrr', 't2', 'wind', 'gust', 'swh'].map(get));
-      const init = this.ec.idx(m).latest, steps = this.ec.stepsOf(m, init), days = steps[steps.length - 1] / 24;
+      const init = initFor(this.ec, m, this.run), steps = this.ec.stepsOf(m, init), days = steps[steps.length - 1] / 24;
       const total = rain && rain.ys.reduce((a, y) => a + (y ?? 0), 0);
       const cells = [
         `${fmtEcInit(init)}<small>${+days.toFixed(1)} 天</small>`,
@@ -133,7 +161,7 @@ export class ForecastCard {
     this.el.querySelector('#fc-now').innerHTML = '<table><thead><tr><th>模式</th><th>起報</th><th>雨量 mm</th><th>最大回波 dBZ</th>'
       + '<th>溫度 °C</th><th>最大風 m/s</th><th>陣風</th><th>最大浪 m</th></tr></thead>'
       + `<tbody>${rows.join('')}</tbody></table>`
-      + '<div class="sc-obs">各模式最新一報、整段預報期間：雨量 = 累積，溫度 = 最低–最高；「外推」= 近岸取最近的外海格點；CorrDiff 只有台灣附近，是實驗產品，數值含 16 個樣本的範圍</div>';
+      + `<div class="sc-obs">${this.run ? `各模式在 ${fmtEcInit(this.run)} 之前最新的一報` : '各模式最新一報'}、整段預報期間：雨量 = 累積，溫度 = 最低–最高；「外推」= 近岸取最近的外海格點；CorrDiff 只有台灣附近，是實驗產品，數值含 16 個樣本的範圍</div>`;
   }
 
   async drawChart() {
@@ -217,10 +245,10 @@ export class ForecastCard {
   }
 }
 
-/** 模式 m 最新一報、變數 v 在 (lon, lat) 的時序 → { init, xs(UTC 秒), ys, coast } 或 null(測站資訊卡也用)
+/** 模式 m 的報別 run(initFor;'' = 最新一報)、變數 v 在 (lon, lat) 的時序 → { init, xs(UTC 秒), ys, coast } 或 null(測站資訊卡也用)
  *  rain6 = 前 6 小時雨量;rain1 = 每個預報間隔的平均每小時雨量;pstn = 海平面氣壓換算到高度 alt(m)的氣壓 */
-export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
-  const x = ec.idx(m), init = x?.latest;
+export async function pointSeries(ec, m, v, lon, lat, alt = 0, run = '') {
+  const x = ec.idx(m), init = initFor(ec, m, run);
   if (!init || !HAS(m, v)) return null;
   const { grid: g, tile } = ec.pointView(m, init, lon, lat);     // IFS:那一點所在的 0.1° 分塊
   let ix = Math.round((lon - g.lon0) / g.dx), iy = Math.round((lat - g.lat0) / g.dy);
@@ -293,9 +321,9 @@ export async function pointSeries(ec, m, v, lon, lat, alt = 0) {
 // ── 測站 / 海象資訊卡疊加預報(虛線)──
 export const FC_HOURS = { 0: '不疊預報', 24: '預報 1 天', 72: '預報 3 天', 168: '預報 7 天' };
 
-/** lines [{ v, label, scale?, dash? }] × 各模式最新一報 → 有值的 [{ m, l, s }];corrdiff = 連 CorrDiff 一起(測站卡) */
-export async function overlayLines(ec, lines, lon, lat, alt = 0, { corrdiff = false } = {}) {
-  const jobs = lines.flatMap((l) => Object.keys(corrdiff ? ALL_MODELS : MODELS).map((m) => ({ m, l, p: pointSeries(ec, m, l.v, lon, lat, alt).catch(() => null) })));
+/** lines [{ v, label, scale?, dash? }] × 各模式(報別 run)→ 有值的 [{ m, l, s }];corrdiff = 連 CorrDiff 一起(測站卡) */
+export async function overlayLines(ec, lines, lon, lat, alt = 0, { corrdiff = false, run = '' } = {}) {
+  const jobs = lines.flatMap((l) => Object.keys(corrdiff ? ALL_MODELS : MODELS).map((m) => ({ m, l, p: pointSeries(ec, m, l.v, lon, lat, alt, run).catch(() => null) })));
   return (await Promise.all(jobs.map((j) => j.p))).map((s, k) => ({ ...jobs[k], s })).filter((j) => j.s?.ys.some((y) => y != null));
 }
 

@@ -1,5 +1,5 @@
 // 測站資訊卡:點測站(或搜尋、排行榜)打開;顯示時間軸當下各變數,與折線圖(uPlot;1 小時到 10 天)
-// 疊加預報:各模式最新一報在測站位置(最近格點)的預報線,虛線接在觀測後面(forecast_card.pointSeries)
+// 疊加預報:各模式(報別選單:最新一報或指定起報時間)在測站位置(最近格點)的預報線,虛線接在觀測後面(forecast_card.pointSeries)
 // 時序資料:stations/recent/{縣市名 UTF-8 hex}.json.gz(pipeline/station_recent.py),一個縣市一個檔
 import { getJSON } from './data.js';
 import { bfLabel } from './colormaps.js';
@@ -7,7 +7,8 @@ import { fmtTW } from './time.js';
 import { STATION_TYPES } from './layers/stations.js';
 import * as prefs from './prefs.js';
 import { enableZoom } from './chart_zoom.js';
-import { FC_HOURS, hideRange, mergeOverlay, overlayLines } from './forecast_card.js';
+import { ALL_MODELS, fmtEcInit } from './layers/ecmwf.js';
+import { FC_HOURS, fillRuns, hideRange, mergeOverlay, overlayLines } from './forecast_card.js';
 
 const REFETCH_MS = 5 * 60e3;
 const HOURS = [1, 3, 6, 12, 24, 48, 72, 168, 240];
@@ -50,6 +51,7 @@ export class StationCard {
   hours = HOURS.includes(prefs.get('cardHours')) ? prefs.get('cardHours') : 72;   // 圖表時段
   range = null;              // 圖上的時間範圍 [起, 迄](UTC 秒)
   fcHours = FC_HOURS[prefs.get('cardFc')] ? prefs.get('cardFc') : 72;   // 疊加預報幾小時(0 = 不疊)
+  run = '';                  // 疊加預報的報別('' = 各模式最新一報)
 
   constructor(layer, { onClose, ec } = {}) {
     this.layer = layer;
@@ -64,6 +66,8 @@ export class StationCard {
     fSel.innerHTML = Object.entries(FC_HOURS).map(([h, name]) => `<option value="${h}">${name}</option>`).join('');
     fSel.value = this.fcHours;
     fSel.onchange = () => { this.zoom.xr = null; this.fcHours = +fSel.value; prefs.set('cardFc', this.fcHours); this.drawChart(); };
+    this.runSel = this.el.querySelector('#sc-run');
+    this.runSel.onchange = () => { this.zoom.xr = null; this.run = this.runSel.value; this.drawChart(); };
     for (const b of this.el.querySelectorAll('[data-tab]')) {
       b.onclick = () => { this.tab = b.dataset.tab; this.drawChart(); };
     }
@@ -88,6 +92,8 @@ export class StationCard {
     this.tab = VAR_TAB[this.layer.variable] ?? (this.layer.v.rain ? 'rain' : this.tab);
     this.el.hidden = false;
     this.layer.select(id);
+    if (this.ec) this.run = fillRuns(this.runSel, this.ec, Object.keys(ALL_MODELS).filter((m) => this.ec.idx(m)?.latest), this.run);
+    this.runSel.hidden = !this.ec;
     this.update(T);
     await this.drawChart();
   }
@@ -166,7 +172,7 @@ export class StationCard {
     const fcLines = end === latest && this.fcHours && this.ec ? FC_LINES[this.tab] ?? [] : [];
     const fcEnd = fcLines.length ? end + this.fcHours * 3600 : end;
     this.range = [end - H, fcEnd];
-    const fc = fcLines.length ? await overlayLines(this.ec, fcLines, info.lon, info.lat, info.alt ?? 0, { corrdiff: true }) : [];
+    const fc = fcLines.length ? await overlayLines(this.ec, fcLines, info.lon, info.lat, info.alt ?? 0, { corrdiff: true, run: this.run }) : [];
     if (this.id !== id || seq !== this.drawSeq) return;
     const keep = xsAll.map((x, i) => (x > end - H && x <= end ? i : -1)).filter((i) => i >= 0);
     const xs = keep.map((i) => xsAll[i]);
@@ -175,7 +181,7 @@ export class StationCard {
     const endTxt = end === latest ? `至 ${fmtTW(d.time)}` : `${fmtTW(stampOf(end - H))}～${fmtTW(stampOf(end), 'hm')}`;
     const fcNote = !fcLines.length ? (end !== latest && this.fcHours ? '；看過去時段不疊預報' : this.fcHours && !FC_LINES[this.tab] ? '；模式沒有濕度' : '')
       : !fc.length ? '；這裡沒有模式預報'
-        : `；虛線 = 模式預報（各模式最新一報、最近格點${this.tab === 'pres' ? '，海平面氣壓換算到測站海拔' : ''}${this.tab === 'rain' ? '，平均每小時雨量' : ''}${this.tab === 'temp' ? '，未做高度修正' : ''}）`;
+        : `；虛線 = 模式預報（${this.run ? `各模式在 ${fmtEcInit(this.run)} 之前最新的一報` : '各模式最新一報'}、最近格點${this.tab === 'pres' ? '，海平面氣壓換算到測站海拔' : ''}${this.tab === 'rain' ? '，平均每小時雨量' : ''}${this.tab === 'temp' ? '，未做高度修正' : ''}）`;
     note.textContent = `${hoursLabel(this.hours)}（${endTxt}）`
       + (miss ? `；缺 ${miss} 筆 10 分鐘資料，圖上斷開處即缺漏` : '') + (hourly ? '；氣象要素為整點觀測' : '') + fcNote
       + (fc.some((j) => j.s.hi) ? '；CorrDiff 系集：線 = 16 個樣本平均，色帶與括號 = 最小到最大' : '')

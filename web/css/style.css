@@ -244,6 +244,7 @@ body[data-map-theme=dark] .st-label.mr-label { color: #81d4fa; }
 #fc-now .sc-obs { color: var(--muted); font-size: 11px; }
 .reset-prefs { margin-top: 8px; font-size: 12px; }
 .sc-tabs select { flex: 0 0 auto; padding: 2px 4px; }
+.sc-opts select { flex: 1 1 0; min-width: 0; }   /* 測站卡:時段、疊加預報、報別一列 */
 
 /* 收合:整個面板、各圖層選項 */
 #panel-toggle { float: right; padding: 0 8px; margin: 2px -4px 0 0; }

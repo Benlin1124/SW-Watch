@@ -455,8 +455,11 @@
     <div class="sc-tabs">
       <button data-tab="temp">溫度</button><button data-tab="rh">濕度</button><button data-tab="pres">氣壓</button>
       <button data-tab="wind">風</button><button data-tab="rain">雨量</button>
+    </div>
+    <div class="sc-tabs sc-opts">
       <select id="sc-hours" title="圖表時段"></select>
-      <select id="sc-fc" title="疊加模式預報（虛線）：各模式最新一報在測站位置的預報"></select>
+      <select id="sc-fc" title="疊加模式預報（虛線）：各模式在測站位置的預報"></select>
+      <select id="sc-run" title="疊加預報的報別：最新一報，或指定起報時間（各模式取那之前最新的一報）"></select>
     </div>
     <div id="sc-chart"></div>
     <div id="sc-note"></div>
